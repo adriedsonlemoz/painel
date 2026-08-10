@@ -1,0 +1,14 @@
+========== ERRO CAPTURADO PELO MANAGER ==========
+Data: 2026-08-10 16:00:29 -0300
+Versão: 1.0.67
+Código de saída: 1
+Arquivo: ~/scripts/manager/modules/ui.sh
+Linha: 160
+Função: log
+Comando: echo "[$ts] [$nivel] $msg" >> "$LOG_FILE"
+Shell: /data/data/com.termux/files/usr/bin/fish
+Diretório: /data/data/com.termux/files/home/Painel/frontend
+PID: 8421
+-----------------------------------------------
+ÚLTIMAS LINHAS DO LOG PRINCIPAL:
+==================== FIM ======================
