@@ -1,9 +1,0 @@
-DIR=/data/data/com.termux/files/home/Painel/backend
-PROJECT=/data/data/com.termux/files/home/Painel
-LABEL=Painel
-COMPONENT=backend
-CMD=npm run dev
-START=1786388708
-EXPECTED_PORT=3001
-PORT=3001
-STATE=healthy

@@ -1,9 +1,0 @@
-.al-sistemas/
-**/.env*
-!**/.env.example
-**/*.vault.json
-**/*.key
-**/*.pem
-**/backups/private/
-**/credentials/
-**/secrets/
