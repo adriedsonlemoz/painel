@@ -1,5 +1,126 @@
 # Changelog
 
+## 1.0.80
+- Fluxo de atualização contínuo: depois de enviar e validar o ZIP, o pré-check de instalação abre automaticamente.
+- `Instalar` foi promovido para a Central, ao lado de `Publicar`; a ação GitHub/Vercel duplicada foi removida dos cards de versões preparadas.
+- Staging redesenhado como `Versões prontas`, com Release Brief e leitura imediata do que mudou.
+- Central passa a exibir versões de Backend, Frontend, Node.js, npm, React, Vite, Express e Mongoose.
+- Ambiente passa a mostrar React Router, Termux e estado do MongoDB.
+- `Monitor externo` foi renomeado conceitualmente para `Canal independente`; se ainda estiver iniciando, o painel acompanha o job e tenta transferir automaticamente quando ele responder.
+- Vite usa `node_modules/.vite-<versão>`. Em Termux, o atualizador preserva o cache da versão ativa em vez de apagá-lo durante a execução.
+- Não foi adicionado nenhum comando global para matar processos Node; timeouts continuam encerrando somente subprocessos criados pelo próprio atualizador.
+- Base preparada para instalação limpa da versão 1.0.80.
+
+# Changelog
+
+## 1.0.79
+- Pacotes preparados agora possuem ação `Excluir versão`, com confirmação antes de remover o staging.
+- Snapshots agora possuem ação `Excluir`, separada de `Rollback`.
+- Modais móveis da Central de Atualizações, Integrações e Categorias deixaram o padrão bottom-sheet e permanecem centralizados.
+- Pré-check de pacote completo agora explica a aplicação diferencial e mostra arquivos iguais, gravações reais, remoções e artefatos locais preservados.
+- `.import_tmp`, `.logs`, `.pids`, `.manager.lock` e `.manager.conf` ficam fora da árvore gerenciada pelo atualizador.
+- Adicionado manifesto de propriedade em `~/.al-sistemas/updates/managed-files.json`; futuras remoções de pacote completo ficam limitadas aos arquivos realmente gerenciados pelo AL Sistemas.
+- Snapshots futuros preservam o manifesto de propriedade para rollback/recovery coerentes.
+
+# Changelog
+
+## 1.0.78
+- Corrigido `Cannot read properties of null (reading 'useContext')` observado após atualização com Vite ainda ativo no Termux.
+- Atualizações que modificam `frontend/package.json` passam a invalidar o cache `frontend/node_modules/.vite`.
+- A 1.0.78 força uma limpeza inicial do cache ao ser aplicada sobre a 1.0.77.
+- RouterErrorScreen identifica inconsistência de React/React Router e tenta uma única recuperação automática com recarga completa.
+- O parâmetro técnico de recuperação é removido da URL após o boot.
+- O redesign em popups da Central de Atualizações foi preservado sem alterações nas regras de instalação.
+
+# Changelog
+
+## 1.0.77
+- Módulo Atualizações redesenhado como uma central compacta de comandos.
+- Progresso/porcentagem de atualização agora abre em popup próprio, como a publicação GitHub/Vercel.
+- Ambiente e diagnóstico foram movidos para popup.
+- Autoteste pós-instalação e seus resultados foram movidos para popup.
+- Pacotes preparados, snapshots, histórico e recuperação de emergência foram movidos para painéis próprios.
+- Página principal agora exibe apenas versão, status, atalhos e resumo do runtime.
+- Nenhuma rota, endpoint ou regra de instalação/rollback/publicação foi alterada; mudança focada em interface e organização.
+- Layout móvel mantém grade compacta em duas colunas para reduzir rolagem.
+
+## 1.0.76
+- Corrigido `EBADENGINE` no Termux com Node 26 / npm 11.
+- Backend e frontend agora exigem apenas Node >=20 e npm >=10, sem teto artificial.
+- Removido `packageManager: npm@10`, evitando fixação desnecessária do gerenciador.
+- Alteração de `engines` não é mais tratada como mudança de dependências; portanto, não força `npm install` sozinha.
+- Diagnóstico do atualizador reconhece `termux` como estratégia válida.
+- Recuperação do backend no Termux permanece habilitada quando o Manager continua em execução.
+
+## 1.0.74
+- Central GitHub: listagem redesenhada com cards mais informativos e responsivos.
+- Cards exibem público/privado, branch principal, tamanho, último push, licença, permissões e métricas.
+- Repositórios sem descrição recebem um resumo técnico automático.
+- Identificação leve reconhece AL Sistemas e sua versão, projetos full-stack, Node.js, frontend, backend, web e CLI.
+- Reconhecimento de configurações Vercel, Render, Railway e Docker.
+- Cabeçalho da conta mostra visão geral dos repositórios e atividade.
+- Filtros reorganizados e filtro de repositórios arquivados corrigido.
+- Orientação de credencial GitHub centralizada em Integrações e APIs.
+
+## 1.0.73
+- GitHub redesenhado como Central GitHub, com ponte de comando organizada por Projeto, Código, Automação e Manutenção.
+- Gerenciador de arquivos recebeu visual novo, navegação responsiva e hierarquia mais clara.
+- Nova ação “Analisar resíduos” identifica conteúdo local publicado por engano sem apagar nada automaticamente.
+- Limpeza segura exige confirmação LIMPAR e remove todos os resíduos detectados em um único commit.
+- Detecção cobre .import_tmp, .logs, .pids, .manager.lock/.manager.conf, node_modules, .env, caches e arquivos temporários.
+- Código-fonte, documentação, .github/workflows e demais itens legítimos ficam protegidos da limpeza automática.
+
+## 1.0.72
+- Nova tela de inicialização do portal, com identidade visual tecnológica e minimalista.
+- Splash nativo aparece antes do React, evitando tela branca durante o boot.
+- Anel de inicialização, progresso discreto e sequência CONFIGURAÇÃO → SERVIÇOS → CONTEÚDO → ONLINE.
+- Nome configurado do portal passa a substituir o nome padrão também durante a inicialização.
+- Respeita prefers-reduced-motion e foi ajustado para telas pequenas.
+- Mantida a proteção nativa contra falhas de inicialização.
+
+## 1.0.71
+- Removidos lockfiles antigos de frontend e backend para impedir falhas por tarballs removidos no npm.
+- Vercel e Render passam a instalar pela faixa estável compatível declarada em cada package.json.
+- Registry público do npm definido explicitamente nos dois módulos.
+- Compatibilidade declarada: Node 20–22 e npm 10–11.
+- Pré-check de publicação rejeita dependências alpha, beta, RC, canary, nightly, experimental e next.
+- Sincronização GitHub remove lockfiles antigos que já tenham sido publicados.
+
+# Changelog
+
+## 1.0.70
+- Removido o `frontend/package-lock.json` obsoleto que prendia o deploy da Vercel a `typed-array-byte-offset@1.0.5` indisponível.
+- O frontend passa a instalar dependências compatíveis diretamente do `package.json` (`npm install`) quando não houver lockfile.
+- Publicação GitHub/Vercel ganhou pré-validação de lockfiles antes do upload.
+- Bloqueia lockfiles com tarball conhecido como inválido, registry local/interno ou referências não portáveis.
+- O pré-check informa quando o frontend será publicado sem lockfile.
+- Node mínimo do frontend documentado como 20+ e gerenciador indicado como npm 10.
+
+## 1.0.69
+- Publicação GitHub/Vercel tratada como módulo próprio dentro de Atualizações.
+- Filtro de publicação ampliado para ignorar node_modules, .env, .import_tmp, .logs, .pids, arquivos locais do Manager, caches, logs e cofres.
+- Próxima publicação remove automaticamente do repositório resíduos locais enviados por versões anteriores.
+- Progresso informa quantos arquivos serão publicados e quantos itens locais foram ignorados.
+- Módulo GitHub ganhou aba Arquivos com navegação por pastas e listagem da branch.
+- Arquivos e pastas podem ser apagados do GitHub com confirmação; exclusão de pasta é consolidada em um único commit.
+- .gitignore raiz reforçado com regras de runtime/local para proteger publicações feitas também fora do painel.
+
+## 1.0.68
+- Corrigido crash em Atualizações ao acessar `repositories.length` quando a lista ainda não existe.
+- Publicação GitHub/Vercel agora acompanha o progresso em popup dedicado, sem inserir caixas de progresso no fluxo da página.
+- Popup de publicação mostra progresso, etapas recentes, commit final e só permite fechamento normal após conclusão/erro.
+- Melhorado o comportamento responsivo do acompanhamento de publicação em celulares.
+- Reduzida a repetição visual da timeline de upload para deixar a operação mais legível.
+
+## 1.0.67
+- Central de Integrações passa a incluir Render e Vercel com instruções, teste, salvar/remover e identidade da conta.
+- Render e Vercel consumidos pelos módulos de Infraestrutura/Plataformas a partir do mesmo cofre central.
+- Removida a edição duplicada de credenciais Vercel na página Plataformas; ela agora aponta para Integrações e APIs.
+- Admin Setup deixa de manter um segundo cofre de APIs e redireciona para a Central de Integrações.
+- Exportação/importação inclui Render API Key, Vercel Token e Team ID para migração entre celular, VPS, Render e Vercel.
+- Diagnóstico central passa a considerar Render e Vercel.
+- Estrutura preparada para adicionar futuras integrações Google (Search Console, Analytics e AdSense) sem duplicar credenciais em outros módulos.
+
 ## 1.0.66
 - Setup ganhou fluxo de migração por backup de Integrações e APIs.
 - O backup pode preencher a URI/banco MongoDB automaticamente quando contém segredos.

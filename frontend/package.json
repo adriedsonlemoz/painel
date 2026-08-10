@@ -1,7 +1,7 @@
 {
   "name": "al-sistemas",
   "private": true,
-  "version": "1.0.66",
+  "version": "1.0.80",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -39,5 +39,9 @@
   },
   "overrides": {
     "tar": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
   }
 }

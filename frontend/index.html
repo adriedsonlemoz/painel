@@ -31,10 +31,40 @@
     <title>Portal de notícias</title>
   </head>
   <body>
-    <div id="als-native-guard" style="position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:#f8faf9;color:#18221d;font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:20px">
-      <div style="max-width:560px;width:100%;background:#fff;border:1px solid #e4ebe6;border-radius:16px;padding:20px;box-shadow:0 14px 38px rgba(27,94,59,.10)">
-        <strong style="display:block;font-size:16px">Portal de notícias</strong>
-        <span id="als-native-guard-message" style="display:block;margin-top:5px;color:#66756c;font-size:13px;line-height:1.5">Inicializando interface…</span>
+    <style>
+      #als-native-guard{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;overflow:hidden;background:linear-gradient(145deg,#f8fbfa 0%,#eef5f1 54%,#f9fbfa 100%);color:#14231b;font-family:Geist,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:22px}
+      #als-native-guard:before,#als-native-guard:after{content:"";position:absolute;pointer-events:none}
+      #als-native-guard:before{width:min(82vw,520px);aspect-ratio:1;border-radius:50%;border:1px solid rgba(22,163,74,.10);box-shadow:0 0 0 38px rgba(22,163,74,.025),0 0 0 78px rgba(22,163,74,.018);animation:al-orbit 8s linear infinite}
+      #als-native-guard:after{inset:0;background:linear-gradient(90deg,transparent 49.8%,rgba(22,163,74,.035) 50%,transparent 50.2%),linear-gradient(0deg,transparent 49.8%,rgba(22,163,74,.025) 50%,transparent 50.2%);mask-image:radial-gradient(circle at center,#000 0,transparent 68%)}
+      .al-boot-console{position:relative;width:min(100%,430px);display:grid;justify-items:center;text-align:center}
+      .al-boot-kicker{display:flex;align-items:center;gap:8px;margin-bottom:24px;font:700 10px/1 Geist Mono,monospace;letter-spacing:.22em;text-transform:uppercase;color:#65776d}
+      .al-boot-kicker:before{content:"";width:22px;height:1px;background:#16a34a}
+      .al-core{position:relative;width:116px;height:116px;display:grid;place-items:center;margin-bottom:25px}
+      .al-core-ring,.al-core-ring:before,.al-core-ring:after{position:absolute;inset:0;border-radius:50%;content:""}
+      .al-core-ring{border:1px solid rgba(22,163,74,.24);animation:al-spin 5s linear infinite}
+      .al-core-ring:before{inset:8px;border:2px solid transparent;border-top-color:#16a34a;border-right-color:rgba(22,163,74,.30)}
+      .al-core-ring:after{inset:20px;border:1px dashed rgba(22,163,74,.30);animation:al-spin-rev 8s linear infinite}
+      .al-core-mark{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:#fff;border:1px solid rgba(22,163,74,.18);box-shadow:0 14px 40px rgba(16,88,51,.10);font-weight:900;font-size:19px;letter-spacing:-.06em;color:#15803d}
+      .al-boot-title{font-size:clamp(23px,7vw,30px);font-weight:780;letter-spacing:-.045em;margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .al-boot-sub{margin-top:8px;font-size:13px;color:#66776e;min-height:20px}
+      .al-boot-track{width:min(100%,310px);height:3px;margin-top:27px;border-radius:999px;background:rgba(20,35,27,.08);overflow:hidden}
+      .al-boot-progress{height:100%;width:34%;border-radius:inherit;background:#16a34a;animation:al-scan 1.65s cubic-bezier(.4,0,.2,1) infinite}
+      .al-boot-sequence{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;font:650 9px/1.2 Geist Mono,monospace;letter-spacing:.10em;text-transform:uppercase;color:#8a9990}
+      .al-boot-sequence span.active{color:#16803d}.al-boot-sequence i{width:3px;height:3px;border-radius:50%;background:#cad4ce}
+      .al-boot-code{margin-top:25px;font:500 9px/1 Geist Mono,monospace;letter-spacing:.15em;color:#a0ada5}
+      @keyframes al-spin{to{transform:rotate(360deg)}}@keyframes al-spin-rev{to{transform:rotate(-360deg)}}@keyframes al-orbit{50%{transform:scale(1.035) rotate(180deg)}to{transform:rotate(360deg)}}@keyframes al-scan{0%{transform:translateX(-115%)}55%{transform:translateX(195%)}100%{transform:translateX(195%)}}
+      @media(prefers-reduced-motion:reduce){.al-core-ring,.al-core-ring:after,#als-native-guard:before,.al-boot-progress{animation:none}.al-boot-progress{width:58%}}
+      @media(max-width:430px){#als-native-guard{padding:18px}.al-core{width:104px;height:104px}.al-boot-sequence{gap:5px;font-size:8px}}
+    </style>
+    <div id="als-native-guard">
+      <div class="al-boot-console">
+        <div class="al-boot-kicker">AL Sistemas · núcleo</div>
+        <div class="al-core"><div class="al-core-ring"></div><div class="al-core-mark">AL</div></div>
+        <h1 id="als-native-guard-title" class="al-boot-title">Portal de notícias</h1>
+        <div id="als-native-guard-message" class="al-boot-sub">Inicializando núcleo do portal…</div>
+        <div class="al-boot-track"><div class="al-boot-progress"></div></div>
+        <div class="al-boot-sequence"><span class="active">Configuração</span><i></i><span>Serviços</span><i></i><span>Conteúdo</span><i></i><span>Online</span></div>
+        <div class="al-boot-code">SYSTEM BOOT · SECURE SESSION</div>
       </div>
     </div>
     <script>
@@ -83,6 +113,10 @@
           if (nome) {
             var el = document.getElementById('boot-portal-name')
             if (el) el.textContent = nome
+            var splashTitle = document.getElementById('als-native-guard-title')
+            if (splashTitle) splashTitle.textContent = nome
+            var splashMsg = document.getElementById('als-native-guard-message')
+            if (splashMsg) splashMsg.textContent = 'Sincronizando identidade e conteúdo…'
             document.title = cfg.site_titulo || nome
           }
           return cfg

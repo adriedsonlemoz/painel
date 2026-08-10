@@ -417,89 +417,16 @@ function ErroSection({ msg, onRetry }) {
 // Componente principal
 // ═══════════════════════════════════════════════════════════════
 
-function VercelConfigCard({ configuracao, onAtualizar }) {
-  const [aberto, setAberto] = useState(!configuracao?.configurado)
-  const [token, setToken] = useState('')
-  const [teamId, setTeamId] = useState(configuracao?.teamId || '')
-  const [ocupado, setOcupado] = useState(false)
-  const [mensagem, setMensagem] = useState(null)
-
-  useEffect(() => { setTeamId(configuracao?.teamId || '') }, [configuracao?.teamId])
-
-  async function executar(acao) {
-    setOcupado(true); setMensagem(null)
-    try {
-      const res = acao === 'salvar'
-        ? await infraestruturaService.salvarVercelConfiguracao(token, teamId)
-        : await infraestruturaService.testarVercel(token, teamId)
-      setMensagem({ ok: true, texto: res.mensagem || `Conexão válida: ${res.usuario}` })
-      if (acao === 'salvar') { setToken(''); setAberto(false); await onAtualizar() }
-    } catch (err) { setMensagem({ ok: false, texto: err.message }) }
-    finally { setOcupado(false) }
-  }
-
-  async function remover() {
-    setOcupado(true); setMensagem(null)
-    try {
-      const res = await infraestruturaService.removerVercelConfiguracao()
-      setMensagem({ ok: true, texto: res.mensagem })
-      setToken(''); await onAtualizar(); setAberto(true)
-    } catch (err) { setMensagem({ ok: false, texto: err.message }) }
-    finally { setOcupado(false) }
-  }
-
-  return (
-    <PageCard>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-        <div>
-          <SectionTitle icon={Ico.gear}>Conexão da API Vercel</SectionTitle>
-          <div style={{ color: C.muted, fontSize: 12, marginTop: 5 }}>
-            {configuracao?.configurado
-              ? <>Conectada via <b style={{ color: C.text }}>{configuracao.origem === 'painel' ? 'painel' : 'variável de ambiente'}</b>{configuracao.teamId ? ` · Team ID: ${configuracao.teamId}` : ''}</>
-              : 'Informe um token para carregar os projetos e deploys da sua conta.'}
-          </div>
-        </div>
-        <Btn variant="secondary" onClick={() => setAberto(v => !v)} style={{ width: 'auto', padding: '5px 12px' }}>
-          {aberto ? 'Fechar' : configuracao?.configurado ? 'Alterar conexão' : 'Configurar'}
-        </Btn>
+function VercelConfigCard({ configuracao }) {
+  return <PageCard>
+    <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+      <div>
+        <SectionTitle icon={Ico.gear}>Conexão da API Vercel</SectionTitle>
+        <div style={{color:C.muted,fontSize:12,marginTop:5}}>{configuracao?.configurado ? 'Credencial central disponível para projetos e deploys.' : 'Vercel ainda não configurada na Central de Integrações.'}</div>
       </div>
-
-      {aberto && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: 'grid', gap: 10 }}>
-          <label style={{ fontSize: 12, color: C.muted }}>
-            Token da Vercel
-            <input type="password" value={token} onChange={e => setToken(e.target.value)}
-              placeholder={configuracao?.configurado ? 'Digite somente para substituir ou testar outro token' : 'Cole o token criado na Vercel'}
-              autoComplete="new-password"
-              style={{ width: '100%', marginTop: 5, padding: '9px 10px', borderRadius: 7, border: `1px solid ${C.border}`, background: C.surface, color: C.text }} />
-          </label>
-          <label style={{ fontSize: 12, color: C.muted }}>
-            Team ID <span style={{ opacity: .7 }}>(opcional, para projetos de equipe)</span>
-            <input value={teamId} onChange={e => setTeamId(e.target.value)} placeholder="team_xxxxxxxxxxxx"
-              style={{ width: '100%', marginTop: 5, padding: '9px 10px', borderRadius: 7, border: `1px solid ${C.border}`, background: C.surface, color: C.text }} />
-          </label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Btn disabled={ocupado || !token.trim()} onClick={() => executar('salvar')} style={{ width: 'auto' }}>
-              {ocupado ? 'Aguarde…' : 'Salvar e conectar'}
-            </Btn>
-            <Btn disabled={ocupado || (!token.trim() && !configuracao?.configurado)} variant="secondary" onClick={() => executar('testar')} style={{ width: 'auto' }}>
-              Testar conexão
-            </Btn>
-            {configuracao?.origem === 'painel' && (
-              <Btn disabled={ocupado} variant="secondary" onClick={remover} style={{ width: 'auto' }}>Remover do painel</Btn>
-            )}
-            <a href="https://vercel.com/account/tokens" target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: 12, alignSelf: 'center' }}>
-              Criar token na Vercel ↗
-            </a>
-          </div>
-          <div style={{ color: C.muted, fontSize: 11 }}>
-            O token é criptografado no backend e nunca é devolvido ao navegador.
-          </div>
-        </div>
-      )}
-      {mensagem && <div style={{ marginTop: 10, fontSize: 12, color: mensagem.ok ? '#4ade80' : '#f87171' }}>{mensagem.texto}</div>}
-    </PageCard>
-  )
+      <a href="/admin/integracoes" style={{padding:'7px 11px',borderRadius:7,border:`1px solid ${C.border}`,color:C.text,textDecoration:'none',fontSize:12,fontWeight:700}}>Abrir Integrações e APIs</a>
+    </div>
+  </PageCard>
 }
 
 export default function AbaPlataformas() {

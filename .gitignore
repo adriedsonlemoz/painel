@@ -7,3 +7,19 @@
 **/backups/private/
 **/credentials/
 **/secrets/
+
+# AL Sistemas — arquivos locais/runtime (não publicar)
+**/node_modules/
+.import_tmp/
+.logs/
+.pids/
+.manager.lock
+.manager.conf
+**/tmp/
+**/temp/
+**/cache/
+**/coverage/
+**/.vite/
+**/.cache/
+**/*.log
+**/*.pid

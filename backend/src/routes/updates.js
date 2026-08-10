@@ -13,7 +13,7 @@ import { statusRssJob } from '../jobs/rssJob.js'
 import { runGithubPublish } from '../update/githubPublishWorker.js'
 import { runUpdateSelfTest } from '../update/updateSelfTest.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
-import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL } from '../services/systemUpdateService.js'
+import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, deleteStaged, deleteSnapshot, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL, IS_TERMUX } from '../services/systemUpdateService.js'
 
 const router=Router(); router.use(autenticar); router.use(verificarPermissao('atualizacoes.gerenciar'))
 const upload=multer({dest:path.join(os.tmpdir(),'alsistemas-uploads'),limits:{fileSize:250*1024*1024},fileFilter(_r,f,cb){cb(null,/\.zip$/i.test(f.originalname))}})
@@ -58,6 +58,40 @@ async function waitForMonitor(job){
   return false
 }
 
+async function readModuleVersion(area,name){
+  const modulePkg=path.join(ROOT_DIR,area,'node_modules',...name.split('/'),'package.json')
+  try{
+    const data=JSON.parse(await fs.readFile(modulePkg,'utf8'))
+    if(data?.version)return {version:data.version,source:'installed'}
+  }catch{}
+  try{
+    const pkg=JSON.parse(await fs.readFile(path.join(ROOT_DIR,area,'package.json'),'utf8'))
+    const spec=pkg.dependencies?.[name]||pkg.devDependencies?.[name]||pkg.optionalDependencies?.[name]||null
+    if(spec)return {version:String(spec),source:'declared'}
+  }catch{}
+  return {version:null,source:'unknown'}
+}
+
+function npmRuntimeVersion(){
+  const ua=String(process.env.npm_config_user_agent||'')
+  return ua.match(/(?:^|\s)npm\/([^\s]+)/)?.[1]||null
+}
+
+async function runtimeStack(){
+  const [react,reactRouter,vite,express]=await Promise.all([
+    readModuleVersion('frontend','react'),
+    readModuleVersion('frontend','react-router-dom'),
+    readModuleVersion('frontend','vite'),
+    readModuleVersion('backend','express'),
+  ])
+  const mongoStates=['desconectado','conectado','conectando','desconectando']
+  return {
+    react,reactRouter,vite,express,
+    mongoose:{version:mongoose.version||null,source:'installed'},
+    mongodb:{state:mongoose.connection.readyState,stateLabel:mongoStates[mongoose.connection.readyState]||'desconhecido',database:mongoose.connection.name||null},
+  }
+}
+
 async function githubToken(){
   const c=await getCredential('github','GITHUB_TOKEN')
   return c.value||''
@@ -82,13 +116,19 @@ async function runGithubPublishInline(job,token){
   return runGithubPublish(job,token,{jobFile:null,persistHistory:false})
 }
 router.get('/',async(_req,res,next)=>{try{
-  const isTermux=Boolean(process.env.TERMUX_VERSION||String(process.env.PREFIX||'').includes('com.termux'))
+  const isTermux=IS_TERMUX
   const processManager=IS_VERCEL?'Vercel Functions':process.env.pm_id!==undefined?'PM2':process.env.INVOCATION_ID?'systemd':isTermux?'Termux/manual':'manual'
   const activeOperation=IS_VERCEL?null:await readUpdateLock()
+  const stack=await runtimeStack()
   res.json({
     installed:await installedVersion(),staged:IS_VERCEL?[]:await listStaged(),history:IS_VERCEL?[]:await readHistory(),snapshots:IS_VERCEL?[]:await listSnapshots(),activeOperation,
-    runtime:{environment:IS_VERCEL?'Vercel':isTermux?'Termux':process.platform==='linux'?'Linux/VPS':process.platform,node:process.version,arch:process.arch,processManager},
-    restart:{strategy:process.env.AL_UPDATE_RESTART_STRATEGY||'none',pm2Name:process.env.AL_UPDATE_PM2_NAME||'al-sistemas',systemdService:process.env.AL_UPDATE_SYSTEMD_SERVICE||'al-sistemas.service'},
+    runtime:{
+      environment:IS_VERCEL?'Vercel':isTermux?'Termux':process.platform==='linux'?'Linux/VPS':process.platform,
+      node:process.version,npm:npmRuntimeVersion(),arch:process.arch,platform:process.platform,processManager,
+      termuxVersion:process.env.TERMUX_VERSION||null,
+      stack,
+    },
+    restart:{strategy:process.env.AL_UPDATE_RESTART_STRATEGY||(isTermux?'termux':'none'),pm2Name:process.env.AL_UPDATE_PM2_NAME||'al-sistemas',systemdService:process.env.AL_UPDATE_SYSTEMD_SERVICE||'al-sistemas.service'},
     updateCapabilities:{
       environment:IS_VERCEL?'vercel':'persistent-server',
       persistentStaging:!IS_VERCEL,
@@ -304,6 +344,22 @@ router.post('/prepare',upload.single('package'),async(req,res,next)=>{try{
     ephemeral:IS_VERCEL,
   })
 }catch(e){next(e)}finally{if(req.file)await fs.rm(req.file.path,{force:true}).catch(()=>{})}})
+router.delete('/staged/:stageId',async(req,res,next)=>{try{
+  if(IS_VERCEL)return res.status(409).json({erro:'Staging persistente não é usado na Vercel.'})
+  const active=await readUpdateLock()
+  if(active)return res.status(409).json({erro:'Não é possível excluir pacotes enquanto existe uma atualização/rollback em andamento.'})
+  const removed=await deleteStaged(req.params.stageId)
+  res.json({message:`Pacote ${removed.version} removido do staging.`,removed})
+}catch(e){next(e)}})
+
+router.delete('/snapshots/:snapshotId',async(req,res,next)=>{try{
+  if(IS_VERCEL)return res.status(409).json({erro:'Snapshots locais não são usados na Vercel.'})
+  const active=await readUpdateLock()
+  if(active)return res.status(409).json({erro:'Não é possível excluir snapshots enquanto existe uma atualização/rollback em andamento.'})
+  const removed=await deleteSnapshot(req.params.snapshotId)
+  res.json({message:`Snapshot da versão ${removed.version} excluído.`,removed})
+}catch(e){next(e)}})
+
 router.get('/:stageId/preflight',async(req,res,next)=>{try{
   if(IS_VERCEL)return res.status(409).json({erro:'Pré-check de instalação local não se aplica à Vercel. Use GitHub/Vercel.'})
   const report=await getUpdatePreflight(req.params.stageId)

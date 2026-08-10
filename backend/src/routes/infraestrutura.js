@@ -644,7 +644,7 @@ router.get('/plataformas/status', async (_req, res, next) => {
 // ── Render API autenticada ─────────────────────────────────────
 router.get('/plataformas/render/servicos', async (_req, res, next) => {
   const { value: apiKey } = await getCredential('render', 'RENDER_API_KEY')
-  if (!apiKey) return res.status(400).json({ erro: 'RENDER_API_KEY não configurada nas variáveis de ambiente do Render' })
+  if (!apiKey) return res.status(400).json({ erro: 'Render não configurado. Abra Integrações e APIs → Render.' })
   try {
     const r = await fetch('https://api.render.com/v1/services?limit=30', {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
@@ -668,7 +668,7 @@ router.get('/plataformas/render/servicos', async (_req, res, next) => {
 
 router.get('/plataformas/render/servicos/:serviceId/deploys', async (req, res, next) => {
   const { value: apiKey } = await getCredential('render', 'RENDER_API_KEY')
-  if (!apiKey) return res.status(400).json({ erro: 'RENDER_API_KEY não configurada' })
+  if (!apiKey) return res.status(400).json({ erro: 'Render não configurado. Abra Integrações e APIs → Render.' })
   try {
     const { serviceId } = req.params
     const r = await fetch(`https://api.render.com/v1/services/${serviceId}/deploys?limit=10`, {
@@ -743,10 +743,9 @@ router.delete('/credenciais/:plataforma', async (req, res, next) => {
 
 async function obterConfigVercel() {
   const cfg = await getCredential('vercel', 'VERCEL_TOKEN')
-  const doc = await PlataformaCredencial.findOne({ plataforma: 'vercel' }).lean()
   return {
     token: cfg.value,
-    teamId: doc?.metadata?.teamId || process.env.VERCEL_TEAM_ID || '',
+    teamId: cfg.metadata?.teamId || process.env.VERCEL_TEAM_ID || '',
     origem: cfg.source,
   }
 }
@@ -785,7 +784,7 @@ router.post('/plataformas/vercel/testar', async (req, res, next) => {
     const tokenInformado = String(req.body?.token || '').trim()
     const teamIdInformado = String(req.body?.teamId || '').trim()
     const cfg = tokenInformado ? { token: tokenInformado, teamId: teamIdInformado } : await obterConfigVercel()
-    if (!cfg.token) return res.status(400).json({ erro: 'Token da Vercel não configurado.' })
+    if (!cfg.token) return res.status(400).json({ erro: 'Vercel não configurada. Abra Integrações e APIs → Vercel.' })
     const r = await fetch(vercelUrl('/v2/user', cfg.teamId), { headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/json' } })
     if (!r.ok) return res.status(r.status).json({ erro: `Vercel API retornou ${r.status}` })
     const data = await r.json()
@@ -804,7 +803,7 @@ router.delete('/plataformas/vercel/configuracao', async (_req, res, next) => {
 router.get('/plataformas/vercel/projetos', async (_req, res, next) => {
   try {
     const { token, teamId } = await obterConfigVercel()
-    if (!token) return res.status(400).json({ erro: 'Token da Vercel não configurado. Use o Menu Plataformas ou VERCEL_TOKEN.' })
+    if (!token) return res.status(400).json({ erro: 'Vercel não configurada. Abra Integrações e APIs → Vercel.' })
     const r = await fetch(vercelUrl('/v9/projects?limit=30', teamId), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     })
@@ -825,7 +824,7 @@ router.get('/plataformas/vercel/projetos', async (_req, res, next) => {
 router.get('/plataformas/vercel/projetos/:projetoId/deploys', async (req, res, next) => {
   try {
     const { token, teamId } = await obterConfigVercel()
-    if (!token) return res.status(400).json({ erro: 'Token da Vercel não configurado.' })
+    if (!token) return res.status(400).json({ erro: 'Vercel não configurada. Abra Integrações e APIs → Vercel.' })
     const { projetoId } = req.params
     const r = await fetch(vercelUrl(`/v6/deployments?projectId=${encodeURIComponent(projetoId)}&limit=10`, teamId), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },

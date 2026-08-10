@@ -57,30 +57,86 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
   }
 
   function skipped(rel){
-    rel=rel.replace(/\\/g,'/')
+    rel=rel.replace(/\\/g,'/').replace(/^\.\//,'')
     const base=path.basename(rel)
     return rel==='.update-meta.json'
       || rel==='.git' || rel.startsWith('.git/')
-      || rel.includes('/node_modules/') || rel==='node_modules'
-      || rel.includes('/.al-sistemas/') || rel.endsWith('/.al-sistemas')
-      || /(^|\/)(uploads|backups|logs)(\/|$)/.test(rel)
+      || rel==='node_modules' || rel.includes('/node_modules/')
+      || rel==='.import_tmp' || rel.startsWith('.import_tmp/') || rel.includes('/.import_tmp/')
+      || rel==='.logs' || rel.startsWith('.logs/') || rel.includes('/.logs/')
+      || rel==='.pids' || rel.startsWith('.pids/') || rel.includes('/.pids/')
+      || rel==='.manager.lock' || rel==='.manager.conf'
+      || rel==='.al-sistemas' || rel.startsWith('.al-sistemas/') || rel.includes('/.al-sistemas/')
+      || /(^|\/)(uploads|backups|logs|tmp|temp|cache|coverage)(\/|$)/i.test(rel)
+      || /(^|\/)\.(vite|cache|parcel-cache|turbo)(\/|$)/i.test(rel)
       || (base.startsWith('.env') && base!=='.env.example')
       || /(^|\/)(bootstrap\.vault\.json|credentials\.vault\.json)$/i.test(rel)
+      || /\.(log|pid)$/i.test(base)
+  }
+
+  function remoteGarbage(rel){
+    rel=String(rel||'').replace(/\\/g,'/').replace(/^\.\//,'')
+    return rel==='.import_tmp' || rel.startsWith('.import_tmp/')
+      || rel==='.logs' || rel.startsWith('.logs/')
+      || rel==='.pids' || rel.startsWith('.pids/')
+      || rel==='.manager.lock' || rel==='.manager.conf'
+      || rel==='.al-sistemas' || rel.startsWith('.al-sistemas/')
+      || rel==='node_modules' || rel.startsWith('node_modules/') || rel.includes('/node_modules/')
+      || /(^|\/)(uploads|backups|logs|tmp|temp|cache|coverage)(\/|$)/i.test(rel)
+      || /(^|\/)\.(vite|cache|parcel-cache|turbo)(\/|$)/i.test(rel)
+      || /(^|\/)\.env($|\.)/i.test(rel)
+      || /(^|\/)(bootstrap\.vault\.json|credentials\.vault\.json)$/i.test(rel)
+      || /\.(log|pid)$/i.test(path.basename(rel))
   }
 
   async function walkFiles(dir,prefix=''){
-    const out=[]
+    const out=[]; const ignored=[]
     async function walk(current,rel=''){
       for(const ent of await fs.readdir(current,{withFileTypes:true})){
         const childRel=rel?`${rel}/${ent.name}`:ent.name
         const full=path.join(current,ent.name)
-        if(skipped(childRel)) continue
+        if(skipped(childRel)){ ignored.push(childRel); continue }
         if(ent.isDirectory()) await walk(full,childRel)
         else if(ent.isFile()) out.push({full,rel:childRel.replace(/\\/g,'/')})
       }
     }
     await walk(dir)
-    return out.map(f=>({...f,target:prefix?`${prefix}/${f.rel}`:f.rel}))
+    return {files:out.map(f=>({...f,target:prefix?`${prefix}/${f.rel}`:f.rel})),ignored}
+  }
+
+  async function dependencyPreflight(files){
+    const warnings=[]
+    for(const file of files){
+      if(/(^|\/)package\.json$/i.test(file.target)){
+        let pkg
+        try{ pkg=JSON.parse(await fs.readFile(file.full,'utf8')) }catch{ throw new Error(`package.json inválido: ${file.target}`) }
+        const groups={...(pkg.dependencies||{}),...(pkg.devDependencies||{}),...(pkg.optionalDependencies||{})}
+        for(const [name,range] of Object.entries(groups)){
+          if(/(?:alpha|beta|rc|canary|nightly|experimental|next)/i.test(String(range||''))){
+            throw new Error(`Dependência não estável em ${file.target}: ${name}@${range}. Use uma release estável antes de publicar.`)
+          }
+        }
+      }
+      if(!/(^|\/)package-lock\.json$/i.test(file.target)) continue
+      let raw=''
+      try{ raw=await fs.readFile(file.full,'utf8') }catch{ continue }
+      if(/typed-array-byte-offset\/-\/typed-array-byte-offset-1\.0\.5\.tgz/i.test(raw)){
+        throw new Error(`Dependências inválidas em ${file.target}: o lockfile referencia typed-array-byte-offset 1.0.5, cujo tarball não está disponível no npm. Regere ou remova esse package-lock antes de publicar.`)
+      }
+      if(/packages\.applied-caas-gateway|internal\.api\.openai\.org|localhost|127\.0\.0\.1/i.test(raw)){
+        throw new Error(`Lockfile não portável em ${file.target}: foram encontrados endereços de registry local/interno. Regere o package-lock usando o registry público antes de publicar.`)
+      }
+      if(/\"resolved\"\s*:\s*\"(?:file:|link:)/i.test(raw)){
+        warnings.push(`${file.target}: contém dependência local (file:/link:); confirme se ela existe no repositório.`)
+      }
+    }
+    const frontendLock=files.some(f=>f.target==='frontend/package-lock.json'||f.target==='package-lock.json'&&job.publishMode==='frontend-root')
+    const frontendPkg=files.some(f=>f.target==='frontend/package.json'||f.target==='package.json'&&job.publishMode==='frontend-root')
+    const backendLock=files.some(f=>f.target==='backend/package-lock.json'||f.target==='package-lock.json'&&job.publishMode==='backend-root')
+    const backendPkg=files.some(f=>f.target==='backend/package.json'||f.target==='package.json'&&job.publishMode==='backend-root')
+    if(frontendPkg&&!frontendLock) warnings.push('Frontend: sem package-lock obsoleto; npm install resolverá a última release estável compatível com o package.json.')
+    if(backendPkg&&!backendLock) warnings.push('Backend: sem package-lock obsoleto; npm install resolverá a última release estável compatível com o package.json.')
+    return warnings
   }
 
   function modeConfig(stage,mode){
@@ -140,8 +196,13 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
 
     await phase(emptyRepository?'github-empty':'github-scan',emptyRepository?'Repositório vazio — preparando primeiro commit':job.sourceType==='installed'?'Preparando arquivos da instalação atual':'Preparando arquivos do pacote',12)
     const cfg=modeConfig(stage,job.publishMode)
-    const files=await walkFiles(cfg.source,cfg.prefix)
+    const scan=await walkFiles(cfg.source,cfg.prefix)
+    const files=scan.files
+    const ignored=scan.ignored
+    await phase('github-filter',`${files.length} arquivo(s) serão publicados · ${ignored.length} item(ns) local(is) ignorado(s)`,14,{filesTotal:files.length,ignoredCount:ignored.length,ignoredPreview:ignored.slice(0,25)})
     if(!files.length) throw new Error(job.sourceType==='installed'?'Nenhum arquivo publicável foi encontrado na instalação atual.':'Nenhum arquivo publicável foi encontrado no pacote.')
+    const dependencyWarnings=await dependencyPreflight(files)
+    await phase('github-dependencies',dependencyWarnings.length?'Dependências verificadas com aviso':'Dependências prontas para hospedagem',15,{dependencyWarnings})
 
     // A Git Database API do GitHub (blobs/trees/refs) devolve 409 em repositórios
     // totalmente vazios. Inicializamos a branch usando a Contents API com um arquivo
@@ -179,14 +240,17 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
     }
     const incoming=new Set(files.map(f=>f.target))
     const deletes=[]
+    // Higiene do repositório: remove resíduos locais que versões antigas do publicador
+    // possam ter enviado por engano. Esses itens nunca fazem parte do código publicável.
+    for(const p of existing){ if(remoteGarbage(p) && !deletes.includes(p)) deletes.push(p) }
     if(cfg.deletePrefix!==null){
       for(const p of existing){
         const managed=cfg.deletePrefix===''?!preserveRootPath(p):p.startsWith(cfg.deletePrefix)
-        if(managed && !incoming.has(p)) deletes.push(p)
+        if(managed && !incoming.has(p) && !deletes.includes(p)) deletes.push(p)
       }
     }else{
       for(const p of existing){
-        if((p.startsWith('frontend/')||p.startsWith('backend/'))&&!incoming.has(p)) deletes.push(p)
+        if((p.startsWith('frontend/')||p.startsWith('backend/'))&&!incoming.has(p)&&!deletes.includes(p)) deletes.push(p)
       }
     }
 
@@ -205,6 +269,7 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
       if(n===1||n===files.length||n%10===0) await phase('github-upload',`Enviando arquivos ao GitHub (${n}/${files.length})`,progress,{filesDone:n,filesTotal:files.length})
     }
     for(const p of deletes) entries.push({path:p,mode:'100644',type:'blob',sha:null})
+    if(deletes.length) await phase('github-clean',`Removendo ${deletes.length} arquivo(s) local(is)/obsoleto(s) do repositório`,72,{deletedCount:deletes.length,deletedPreview:deletes.slice(0,25)})
 
     await phase('github-tree','Montando nova versão no repositório',74)
     const treeBody={tree:entries}

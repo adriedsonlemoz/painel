@@ -14,6 +14,11 @@ export const githubService = {
   repos: ({ page = 1, per_page = 30, sort = 'updated', type = 'all' } = {}) =>
     api(`/github/repos?page=${page}&per_page=${per_page}&sort=${sort}&type=${type}`),
   repo: (owner, repo) => api(`/github/repos/${owner}/${repo}`),
+  insight: (owner, repo, branch = 'main') => api(`/github/repos/${owner}/${repo}/insight?branch=${encodeURIComponent(branch)}`),
+  contents: (owner, repo, path = '', branch = '') => api(`/github/repos/${owner}/${repo}/contents?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`),
+  excluirConteudo: (owner, repo, path, branch = '') => api(`/github/repos/${owner}/${repo}/contents`, { method: 'DELETE', body: JSON.stringify({ path, branch, confirmar: true, confirmarPath: path }) }),
+  analisarResiduos: (owner, repo, branch = '') => api(`/github/repos/${owner}/${repo}/cleanup-preview?branch=${encodeURIComponent(branch)}`),
+  limparResiduos: (owner, repo, branch = '', confirmar = '') => api(`/github/repos/${owner}/${repo}/cleanup`, { method:'POST', body:JSON.stringify({ branch, confirmar }) }),
 
   /* ── Sprint 3 ─────────────────────────────────────────── */
   readme:    (owner, repo) => api(`/github/repos/${owner}/${repo}/readme`),

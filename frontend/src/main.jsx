@@ -58,8 +58,9 @@ window.onerror = function (mensagem, fonte, linha, coluna, erroObj) {
 
 // Remove apenas o parâmetro técnico após a recuperação, sem nova navegação.
 const currentUrl = new URL(window.location.href)
-if (currentUrl.searchParams.has('__als_update')) {
+if (currentUrl.searchParams.has('__als_update') || currentUrl.searchParams.has('__als_recover')) {
   currentUrl.searchParams.delete('__als_update')
+  currentUrl.searchParams.delete('__als_recover')
   window.history.replaceState({}, document.title, currentUrl.toString())
 }
 

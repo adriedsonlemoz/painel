@@ -3,7 +3,7 @@
  *
  * Sprint 3 EXTENSÃO — ADIÇÃO PURA. Nenhuma rota existente foi alterada.
  *
- * Token GitHub lido EXCLUSIVAMENTE do ambiente backend (GITHUB_TOKEN).
+ * Token GitHub obtido pelo cofre central de Integrações e APIs, com variável de ambiente apenas como fallback de compatibilidade.
  * Frontend NUNCA recebe ou vê o token.
  *
  * Rotas originais (preservadas):
@@ -41,6 +41,66 @@ const PROJETOS_DIR = process.env.PROJETOS_PATH
 
 function validarNome(str) {
   return /^[a-zA-Z0-9._-]+$/.test(str)
+}
+
+// Resumo técnico leve para enriquecer a listagem sem transformar cada card
+// em uma auditoria completa. Cache curto reduz chamadas à API do GitHub.
+const repoInsightCache = new Map()
+async function montarRepoInsight(owner, repo, branch='main') {
+  const key = `${owner}/${repo}@${branch}`
+  const cached = repoInsightCache.get(key)
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data
+
+  const root = await githubFetch(`/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`)
+  const itens = Array.isArray(root) ? root : []
+  const nomes = new Set(itens.map(i => i.name))
+  const arquivos = itens.filter(i => i.type === 'file').map(i => i.name)
+  const pastas = itens.filter(i => i.type === 'dir').map(i => i.name)
+  let produto = null, versao = null
+
+  const lerJson = async (nome) => {
+    try {
+      const f = await githubFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(nome)}?ref=${encodeURIComponent(branch)}`)
+      return JSON.parse(Buffer.from(f.content || '', 'base64').toString('utf8'))
+    } catch { return null }
+  }
+
+  if (nomes.has('al-sistemas.json')) {
+    const manifest = await lerJson('al-sistemas.json')
+    produto = manifest?.product || 'AL Sistemas'
+    versao = manifest?.version || null
+  } else if (nomes.has('package.json')) {
+    const pkg = await lerJson('package.json')
+    produto = pkg?.name || null
+    versao = pkg?.version || null
+  }
+
+  let tipo = 'Repositório de código'
+  if (nomes.has('frontend') && nomes.has('backend')) tipo = 'Aplicação full-stack'
+  else if (nomes.has('frontend')) tipo = 'Aplicação frontend'
+  else if (nomes.has('backend')) tipo = 'Serviço backend'
+  else if (nomes.has('package.json')) tipo = 'Projeto Node.js'
+  else if (arquivos.some(n => /\.(sh|bash|fish)$/i.test(n))) tipo = 'Automação / CLI'
+  else if (nomes.has('index.html')) tipo = 'Aplicação web'
+
+  const deploy = [
+    nomes.has('vercel.json') && 'Vercel',
+    (nomes.has('render.yaml') || nomes.has('render.yml')) && 'Render',
+    nomes.has('railway.toml') && 'Railway',
+    nomes.has('Dockerfile') && 'Docker',
+  ].filter(Boolean)
+  const qualidade = [
+    nomes.has('README.md') && 'README',
+    nomes.has('.github') && 'GitHub Actions',
+    (nomes.has('.env.example') || nomes.has('.env.sample')) && '.env exemplo',
+  ].filter(Boolean)
+
+  const data = {
+    produto, versao, tipo, deploy, qualidade, pastas: pastas.slice(0, 8),
+    resumo: `${produto ? `${produto}${versao ? ` ${versao}` : ''} · ` : ''}${tipo}${deploy.length ? ` · pronto para ${deploy.join(' / ')}` : ''}`,
+  }
+  repoInsightCache.set(key, { at: Date.now(), data })
+  return data
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -93,6 +153,11 @@ router.get('/status', autenticar, async (req, res) => {
     res.json({
       ok: true, login: user.login, nome: user.name,
       avatar: user.avatar_url, repos: user.public_repos,
+      reposPublicos: user.public_repos || 0,
+      reposPrivados: user.total_private_repos ?? null,
+      seguidores: user.followers || 0,
+      seguindo: user.following || 0,
+      criadoEm: user.created_at || null,
       empresa: user.company, url: user.html_url,
     })
   } catch (err) {
@@ -112,15 +177,31 @@ router.get('/repos', autenticar, async (req, res) => {
     else if (type === 'private') repos = repos.filter(r => r.private)
     const lista = repos.map(r => ({
       id: r.id, nome: r.name, nomeCompleto: r.full_name, descricao: r.description,
-      privado: r.private, url: r.html_url, linguagem: r.language,
-      stars: r.stargazers_count, forks: r.forks_count, issues: r.open_issues_count,
-      branch: r.default_branch, ultimaAtualizacao: r.updated_at, criadoEm: r.created_at,
-      temas: r.topics || [], arquivado: r.archived,
+      privado: r.private, visibilidade: r.visibility || (r.private ? 'private' : 'public'),
+      url: r.html_url, homepage: r.homepage || null, linguagem: r.language,
+      stars: r.stargazers_count, forks: r.forks_count, watchers: r.watchers_count,
+      issues: r.open_issues_count, branch: r.default_branch,
+      tamanho: r.size || 0, ultimoPush: r.pushed_at || null,
+      ultimaAtualizacao: r.updated_at, criadoEm: r.created_at,
+      temas: r.topics || [], arquivado: r.archived, fork: r.fork,
+      licenca: r.license?.spdx_id || r.license?.name || null,
+      permissoes: r.permissions || null,
     }))
     res.json({ repos: lista, total: lista.length })
   } catch (err) {
     if (err.message.includes('GITHUB_TOKEN')) return res.status(503).json({ erro: err.message, repos: [] })
     res.status(err.status || 500).json({ erro: err.message, repos: [] })
+  }
+})
+
+router.get('/repos/:owner/:repo/insight', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome de repositório inválido.' })
+  try {
+    const branch = String(req.query.branch || 'main')
+    res.json(await montarRepoInsight(owner, repo, branch))
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
   }
 })
 
@@ -172,6 +253,138 @@ router.delete('/repos/:owner/:repo', autenticar, async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ erro: err.message })
   }
+})
+
+
+
+/* GET /api/github/repos/:owner/:repo/contents?path=&branch=
+   Navegador de arquivos do repositório. O token permanece somente no backend. */
+router.get('/repos/:owner/:repo/contents', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  const branch = String(req.query.branch || '').trim()
+  const rel = String(req.query.path || '').replace(/^\/+|\/+$/g, '')
+  if (rel.includes('..')) return res.status(400).json({ erro: 'Caminho inválido.' })
+  try {
+    const repoInfo = await githubFetch(`/repos/${owner}/${repo}`)
+    const ref = branch || repoInfo.default_branch || 'main'
+    const endpoint = `/repos/${owner}/${repo}/contents${rel ? '/' + rel.split('/').map(encodeURIComponent).join('/') : ''}?ref=${encodeURIComponent(ref)}`
+    const data = await githubFetch(endpoint)
+    const raw = Array.isArray(data) ? data : [data]
+    const itens = raw.map(i => ({
+      nome: i.name, path: i.path, tipo: i.type === 'dir' ? 'pasta' : 'arquivo',
+      tamanho: i.size || 0, sha: i.sha, url: i.html_url || null, downloadUrl: i.download_url || null,
+    })).sort((a,b) => a.tipo === b.tipo ? a.nome.localeCompare(b.nome) : (a.tipo === 'pasta' ? -1 : 1))
+    res.json({ itens, path: rel, branch: ref, repo: `${owner}/${repo}` })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message, itens: [] })
+  }
+})
+
+/* DELETE /api/github/repos/:owner/:repo/contents
+   Remove arquivo OU pasta inteira em um único commit Git, com confirmação explícita. */
+router.delete('/repos/:owner/:repo/contents', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  const target = String(req.body?.path || '').replace(/^\/+|\/+$/g, '')
+  const branchInput = String(req.body?.branch || '').trim()
+  if (!target || target.includes('..')) return res.status(400).json({ erro: 'Caminho inválido.' })
+  if (req.body?.confirmar !== true || String(req.body?.confirmarPath || '') !== target) {
+    return res.status(400).json({ erro: 'Confirme exatamente o arquivo/pasta que será removido.' })
+  }
+  try {
+    const repoInfo = await githubFetch(`/repos/${owner}/${repo}`)
+    const branch = branchInput || repoInfo.default_branch || 'main'
+    const ref = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)
+    const parentSha = ref.object?.sha
+    const parent = await githubFetch(`/repos/${owner}/${repo}/git/commits/${parentSha}`)
+    const treeSha = parent.tree?.sha
+    const tree = await githubFetch(`/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`)
+    const prefix = target + '/'
+    const matches = (tree.tree || []).filter(e => e.type === 'blob' && (e.path === target || e.path.startsWith(prefix)))
+    if (!matches.length) return res.status(404).json({ erro: 'Arquivo ou pasta não encontrado nessa branch.' })
+    const deletionTree = await githubFetch(`/repos/${owner}/${repo}/git/trees`, {
+      method: 'POST',
+      body: JSON.stringify({ base_tree: treeSha, tree: matches.map(e => ({ path: e.path, mode: '100644', type: 'blob', sha: null })) }),
+    })
+    const commit = await githubFetch(`/repos/${owner}/${repo}/git/commits`, {
+      method: 'POST',
+      body: JSON.stringify({ message: `Remove ${target} via AL Sistemas`, tree: deletionTree.sha, parents: [parentSha] }),
+    })
+    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      method: 'PATCH', body: JSON.stringify({ sha: commit.sha, force: false }),
+    })
+    await AuditLog.create({
+      admin_id: req.usuario._id, admin_email: req.usuario.email, acao: 'excluir', recurso: 'github_conteudo',
+      recurso_id: `${owner}/${repo}:${target}`, payload: { owner, repo, branch, path: target, arquivos: matches.length },
+      ip: req.ip, request_id: req.requestId || null,
+    }).catch(() => {})
+    res.json({ ok: true, removidos: matches.length, path: target, branch, commitSha: commit.sha,
+      commitUrl: `https://github.com/${owner}/${repo}/commit/${commit.sha}` })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
+
+/* Resíduos locais que nunca devem fazer parte de um repositório publicado.
+   Mantemos a lista deliberadamente conservadora: ela NÃO inclui código-fonte,
+   documentação, workflows, package.json nem package-lock.json legítimo. */
+const REPO_RESIDUE_RULES = [
+  { id:'import_tmp', label:'Importações temporárias', test:p => p === '.import_tmp' || p.startsWith('.import_tmp/') || p.includes('/.import_tmp/') },
+  { id:'logs', label:'Logs locais', test:p => p === '.logs' || p.startsWith('.logs/') || p.includes('/.logs/') || /(^|\/)logs?\/.*\.log$/i.test(p) },
+  { id:'pids', label:'Processos locais', test:p => p === '.pids' || p.startsWith('.pids/') || p.includes('/.pids/') || /(^|\/)pids?\//i.test(p) },
+  { id:'manager', label:'Arquivos do Manager', test:p => /(^|\/)\.manager\.(lock|conf)$/i.test(p) },
+  { id:'node_modules', label:'node_modules', test:p => /(^|\/)node_modules\//.test(p) },
+  { id:'env', label:'Segredos .env', test:p => /(^|\/)\.env(\..+)?$/i.test(p) && !/(^|\/)\.env\.(example|sample|template)$/i.test(p) },
+  { id:'cache', label:'Caches locais', test:p => /(^|\/)(\.cache|\.vite|\.turbo|\.parcel-cache|\.eslintcache)(\/|$)/i.test(p) },
+  { id:'temp', label:'Arquivos temporários', test:p => /(^|\/)(tmp|temp)(\/|$)/i.test(p) || /\.(tmp|swp|swo)$/i.test(p) },
+]
+function classificarResiduo(path='') {
+  const p=String(path).replace(/^\/+/, '')
+  return REPO_RESIDUE_RULES.find(r => r.test(p)) || null
+}
+async function repoTreeInfo(owner, repo, branchInput='') {
+  const repoInfo = await githubFetch(`/repos/${owner}/${repo}`)
+  const branch = String(branchInput || '').trim() || repoInfo.default_branch || 'main'
+  const ref = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)
+  const parentSha = ref.object?.sha
+  const parent = await githubFetch(`/repos/${owner}/${repo}/git/commits/${parentSha}`)
+  const treeSha = parent.tree?.sha
+  const tree = await githubFetch(`/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`)
+  return { branch, parentSha, treeSha, tree: tree.tree || [] }
+}
+function detectarResiduos(tree=[]) {
+  return tree.filter(e => e.type === 'blob').map(e => {
+    const regra=classificarResiduo(e.path)
+    return regra ? { path:e.path, size:e.size||0, sha:e.sha, categoria:regra.id, categoriaLabel:regra.label } : null
+  }).filter(Boolean)
+}
+router.get('/repos/:owner/:repo/cleanup-preview', autenticar, async (req,res) => {
+  const {owner,repo}=req.params
+  if(!validarNome(owner)||!validarNome(repo)) return res.status(400).json({erro:'Nome inválido.'})
+  try{
+    const info=await repoTreeInfo(owner,repo,req.query.branch)
+    const itens=detectarResiduos(info.tree)
+    const categorias={}
+    for(const i of itens){ if(!categorias[i.categoria]) categorias[i.categoria]={id:i.categoria,label:i.categoriaLabel,arquivos:0,bytes:0}; categorias[i.categoria].arquivos++; categorias[i.categoria].bytes+=i.size||0 }
+    res.json({ok:true,branch:info.branch,itens,totalArquivos:itens.length,totalBytes:itens.reduce((a,b)=>a+(b.size||0),0),categorias:Object.values(categorias),seguro:true})
+  }catch(err){res.status(err.status||500).json({erro:err.message})}
+})
+router.post('/repos/:owner/:repo/cleanup', autenticar, async (req,res) => {
+  const {owner,repo}=req.params
+  if(!validarNome(owner)||!validarNome(repo)) return res.status(400).json({erro:'Nome inválido.'})
+  if(String(req.body?.confirmar||'')!=='LIMPAR') return res.status(400).json({erro:'Digite LIMPAR para confirmar a manutenção.'})
+  try{
+    const info=await repoTreeInfo(owner,repo,req.body?.branch)
+    const itens=detectarResiduos(info.tree)
+    if(!itens.length) return res.json({ok:true,removidos:0,branch:info.branch,mensagem:'Nenhum resíduo detectado.'})
+    const deletionTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{method:'POST',body:JSON.stringify({base_tree:info.treeSha,tree:itens.map(e=>({path:e.path,mode:'100644',type:'blob',sha:null}))})})
+    const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{method:'POST',body:JSON.stringify({message:`Limpeza segura de resíduos via AL Sistemas (${itens.length} arquivos)`,tree:deletionTree.sha,parents:[info.parentSha]})})
+    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(info.branch)}`,{method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false})})
+    await AuditLog.create({admin_id:req.usuario._id,admin_email:req.usuario.email,acao:'limpar',recurso:'github_residuos',recurso_id:`${owner}/${repo}`,payload:{branch:info.branch,arquivos:itens.length,paths:itens.slice(0,100).map(i=>i.path)},ip:req.ip,request_id:req.requestId||null}).catch(()=>{})
+    res.json({ok:true,removidos:itens.length,branch:info.branch,commitSha:commit.sha,commitUrl:`https://github.com/${owner}/${repo}/commit/${commit.sha}`,mensagem:`${itens.length} arquivo(s) local(is) removido(s) em um único commit.`})
+  }catch(err){res.status(err.status||500).json({erro:err.message})}
 })
 
 /* GET /api/github/repos/:owner/:repo/readme */

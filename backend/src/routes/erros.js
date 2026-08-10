@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit'
 import ErroLog from '../models/ErroLog.js'
 import { registrarErro } from '../services/errorLogService.js'
 import { importarErrosAtualizadorSpool } from '../services/updateErrorSpool.js'
+import { diagnosticarTermux } from '../services/termuxDiagnosticsService.js'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 
@@ -60,6 +61,15 @@ router.post('/', erroLimiter, async (req, res) => {
     console.error('[ErroLog] Falha ao salvar erro:', err.message)
     res.json({ ok: false })
   }
+})
+
+// ─── POST /api/erros/diagnostico ──────────────────────────────
+// Diagnóstico local seguro: inspeciona somente logs/PIDs conhecidos do AL Sistemas/Manager.
+router.post('/diagnostico', autenticar, verificarPermissao('erros.gerenciar'), async (req, res, next) => {
+  try {
+    const report = await diagnosticarTermux({ registrar: req.body?.registrar !== false })
+    res.json(report)
+  } catch (err) { next(err) }
 })
 
 // ─── GET /api/erros/contagem ──────────────────────────────────

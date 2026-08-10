@@ -10,10 +10,11 @@ import mongoose from 'mongoose'
 //   worker             → Jobs internos e subprocessos
 //   rss                → Falha crítica do scheduler RSS
 //   github             → Falha de publicação/sincronização GitHub
+//   termux             → Diagnóstico local do Termux/Manager
 const erroLogSchema = new mongoose.Schema({
   tipo: {
     type: String,
-    enum: ['render', 'js_error', 'unhandled_rejection', 'api', 'backend', 'update', 'worker', 'rss', 'github'],
+    enum: ['render', 'js_error', 'unhandled_rejection', 'api', 'backend', 'update', 'worker', 'rss', 'github', 'termux'],
     required: true,
     index: true,
   },

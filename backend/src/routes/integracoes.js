@@ -12,7 +12,7 @@ import AuditLog from '../models/AuditLog.js'
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
 const EXPORT_MASK='****************'
-const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY' }
+const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY' }
 const safe = (d) => ({
   configured:Boolean(d?.value)||Boolean(d?.locked),
   usable:Boolean(d?.value),
@@ -33,7 +33,6 @@ router.get('/status', async (_req,res,next)=>{ try {
   try { mongoHost=mongoUri?new URL(mongoUri.replace(/^mongodb\+srv:/,'https:').replace(/^mongodb:/,'http:')).host:null } catch {}
   let mongoUsername=null
   try { mongoUsername=mongoUri?decodeURIComponent(new URL(mongoUri.replace(/^mongodb\+srv:/,'https:').replace(/^mongodb:/,'http:')).username||'')||null:null } catch {}
-  const vercelCredential=await getCredential('vercel','VERCEL_TOKEN')
   res.json({
     mongodb:{
       configured:Boolean(mongoUri),
@@ -46,7 +45,6 @@ router.get('/status', async (_req,res,next)=>{ try {
       persistentConfigPath:vaultPaths().dataDir,
     },
     integrations,
-    vercel:{configured:Boolean(vercelCredential.value),identity:vercelCredential.metadata?.identity||null},
     vault:{ protected:true, localKey:!process.env.CREDENTIALS_MASTER_KEY, paths:Object.values(vaultPaths()).map(p=>p.split('/').pop()) }
   })
 } catch(e){next(e)} })
@@ -93,19 +91,31 @@ async function githubIdentity(token) {
   return {available:true,provider:'github',kind:'user',label:user.name||user.login,username:user.login||null,email,accountId:user.id?String(user.id):null,emailSource,detectedAt:new Date().toISOString()}
 }
 
-async function vercelIdentity() {
-  const c=await getCredential('vercel','VERCEL_TOKEN')
-  if(!c.value)return {available:false,provider:'vercel',reason:'not-configured',label:'Vercel não configurada'}
-  const r=await fetch('https://api.vercel.com/v2/user',{headers:{Authorization:`Bearer ${c.value}`}})
+async function vercelIdentity(c) {
+  if(!c?.value)return {available:false,provider:'vercel',reason:'not-configured',label:'Vercel não configurada'}
+  const url=new URL('https://api.vercel.com/v2/user')
+  if(c.metadata?.teamId)url.searchParams.set('teamId',c.metadata.teamId)
+  const r=await fetch(url,{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
   const body=await r.json().catch(()=>({}))
   if(!r.ok)throw new Error(body.error?.message||`Vercel respondeu ${r.status}`)
   const u=body.user||body
-  return {available:true,provider:'vercel',kind:'user',label:u.name||u.username||u.email||'Conta Vercel',username:u.username||null,email:u.email||null,accountId:u.id||null,detectedAt:new Date().toISOString()}
+  return {available:true,provider:'vercel',kind:'user',label:u.name||u.username||u.email||'Conta Vercel',username:u.username||null,email:u.email||null,accountId:u.id||null,teamId:c.metadata?.teamId||null,detectedAt:new Date().toISOString()}
+}
+
+async function renderIdentity(c) {
+  if(!c?.value)return {available:false,provider:'render',reason:'not-configured',label:'Render não configurado'}
+  const r=await fetch('https://api.render.com/v1/users',{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
+  const body=await r.json().catch(()=>null)
+  if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
+  const u=Array.isArray(body)?(body[0]?.user||body[0]||{}):(body?.user||body||{})
+  return {available:true,provider:'render',kind:'user',label:u.name||u.email||'Conta Render',email:u.email||null,accountId:u.id||null,detectedAt:new Date().toISOString()}
 }
 
 async function integrationIdentity(id,c) {
   if(!c?.value)return {available:false,provider:id,reason:'not-configured',label:'Não configurada'}
   if(id==='github')return githubIdentity(c.value)
+  if(id==='vercel')return vercelIdentity(c)
+  if(id==='render')return renderIdentity(c)
   if(id==='cloudinary'){
     let parsed={}; try{parsed=JSON.parse(c.value)}catch{}
     const cloudName=parsed.cloudName||c.metadata?.cloudName||null
@@ -116,7 +126,7 @@ async function integrationIdentity(id,c) {
     const accountId=c.metadata?.accountId||null
     return {available:Boolean(accountId),provider:id,kind:'cloud-account',label:accountId?`Conta Cloudflare: ${accountId}`:'Cloudflare configurado',accountId,email:null,detectedAt:new Date().toISOString(),note:'A API Token identifica a conta/permissões; o e-mail do proprietário não é necessário para o AL Sistemas.'}
   }
-  const labels={gemini:'Gemini',openrouter:'OpenRouter'}
+  const labels={gemini:'Gemini',openrouter:'OpenRouter',render:'Render',vercel:'Vercel'}
   return {available:false,provider:id,kind:'api-key',label:`${labels[id]||id}: chave configurada`,email:null,detectedAt:new Date().toISOString(),note:'Este provedor não disponibiliza ao AL Sistemas o e-mail do proprietário por meio desta chave/API.'}
 }
 
@@ -377,6 +387,20 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
       if(!br.ok || bb.success===false)throw new Error(bb.errors?.[0]?.message||`Bucket R2 respondeu ${br.status}`)
     }
     result.mensagem=`Cloudflare conectada${c.metadata?.r2Bucket?` • bucket R2 ${c.metadata.r2Bucket} acessível`:''}.`
+  } else if(id==='render'){
+    const r=await fetch('https://api.render.com/v1/users',{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
+    const body=await r.json().catch(()=>null)
+    if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
+    const u=Array.isArray(body)?(body[0]?.user||body[0]||{}):(body?.user||body||{})
+    result.mensagem=`Render conectado${u.email?` • ${u.email}`:''}.`
+  } else if(id==='vercel'){
+    const url=new URL('https://api.vercel.com/v2/user')
+    if(c.metadata?.teamId)url.searchParams.set('teamId',c.metadata.teamId)
+    const r=await fetch(url,{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
+    const body=await r.json().catch(()=>({}))
+    if(!r.ok)throw new Error(body.error?.message||`Vercel respondeu ${r.status}`)
+    const u=body.user||body
+    result.mensagem=`Vercel conectada${u.username||u.email?` • ${u.username||u.email}`:''}.`
   } else if(id==='gemini'){
     const model=c.metadata?.model||'gemini-2.5-flash'
     const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(c.value)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{text:'Responda somente OK'}]}],generationConfig:{maxOutputTokens:8,temperature:0}})})
@@ -439,12 +463,12 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
       add('CF_R2_SECRET_ACCESS_KEY',parsed.r2SecretAccessKey||'',c.source)
       add('CF_R2_BUCKET',c.metadata?.r2Bucket||'',c.source)
       add('CF_R2_PUBLIC_URL',c.metadata?.r2PublicUrl||'',c.source)
+    }else if(id==='vercel'){
+      add('VERCEL_TOKEN',c.value,c.source)
+      add('VERCEL_TEAM_ID',c.metadata?.teamId||process.env.VERCEL_TEAM_ID||'',c.source)
+    }else if(id==='render'){
+      add('RENDER_API_KEY',c.value,c.source)
     }else add(envName,c.value,c.source)
-  }
-  const vercel=await getCredential('vercel','VERCEL_TOKEN')
-  if(vercel.value){
-    add('VERCEL_TOKEN',vercel.value,vercel.source)
-    add('VERCEL_TEAM_ID',vercel.metadata?.teamId||process.env.VERCEL_TEAM_ID||'',vercel.source)
   }
   return rows
 }
@@ -456,10 +480,6 @@ router.post('/identities/refresh', async(req,res)=>{ try {
     const c=await getCredential(id,defs[id])
     if(c.value) identities[id]=await refreshStoredIdentity(id)
   }
-  try{
-    const v=await getCredential('vercel','VERCEL_TOKEN')
-    if(v.value){ const identity=await vercelIdentity(); await setCredential('vercel',v.value,{...(v.metadata||{}),identity}); identities.vercel=identity }
-  }catch(e){ identities.vercel={available:false,provider:'vercel',label:'Não foi possível identificar a conta',note:e.message} }
   await audit(req,'integracoes.identidades.atualizar',{providers:Object.keys(identities)})
   res.json({ok:true,identities})
 } catch(e){res.status(400).json({ok:false,erro:e.message})} })
@@ -474,8 +494,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const vc=await getCredential('vercel','VERCEL_TOKEN');if(vc.metadata?.identity)identityStatus.vercel=vc.metadata.identity
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.66',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.67',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
@@ -532,13 +551,16 @@ router.post('/import', async(req,res,next)=>{ try {
     }else skipped.push('Cloudflare')
   }
 
+  const renderKey=val('RENDER_API_KEY')
+  if(renderKey&&!isMasked(renderKey)){const old=await getCredential('render',defs.render);await setCredential('render',renderKey,old.metadata||{});imported.push('Render')}else if(renderKey)skipped.push('Render')
+
   const vercel=val('VERCEL_TOKEN')
-  if(vercel&&!isMasked(vercel)){const old=await getCredential('vercel','VERCEL_TOKEN');await setCredential('vercel',vercel,{...(old.metadata||{}),teamId:val('VERCEL_TEAM_ID')||old.metadata?.teamId||''});imported.push('Vercel')}else if(vercel)skipped.push('Vercel')
+  if(vercel&&!isMasked(vercel)){const old=await getCredential('vercel',defs.vercel);await setCredential('vercel',vercel,{...(old.metadata||{}),teamId:val('VERCEL_TEAM_ID')||old.metadata?.teamId||''});imported.push('Vercel')}else if(vercel)skipped.push('Vercel')
 
   await audit(req,'integracoes.importar',{imported,skipped})
   res.json({ok:true,imported,skipped,mensagem:imported.length?`${imported.length} configuração(ões) importada(s) com segurança.`:'Nenhuma credencial válida encontrada para importar.'})
 } catch(e){next(e)} })
 
 router.post('/password/generate', (_req,res)=>{ const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*+-_=?.'; let out=''; do { out=Array.from(crypto.randomBytes(36),b=>chars[b%chars.length]).join('') } while(!/[A-Z]/.test(out)||!/[a-z]/.test(out)||!/[0-9]/.test(out)||!/[!@#$%&*+\-_=?.]/.test(out)); res.json({password:out}) })
-router.get('/diagnostics/run', async(_req,res)=>{ const checks=[]; checks.push({name:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?mongoose.connection.name:'Desconectado'}); try{await configurarCloudinary();await cloudinary.api.ping();checks.push({name:'Cloudinary',ok:true})}catch(e){checks.push({name:'Cloudinary',ok:false,detail:e.message})}; for(const id of ['github','cloudinary','cloudflare','gemini','openrouter']){const c=await getCredential(id,defs[id]);checks.push({name:id,ok:Boolean(c.value),detail:c.locked?'Credencial existe, mas a chave de criptografia não corresponde':c.value?'Configurado':'Ausente'})}; const exposed=['.env','*.pem','*.key','bootstrap.vault.json']; res.json({ok:checks.every(c=>c.ok),checks,secretPatternsProtected:exposed}) })
+router.get('/diagnostics/run', async(_req,res)=>{ const checks=[]; checks.push({name:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?mongoose.connection.name:'Desconectado'}); try{await configurarCloudinary();await cloudinary.api.ping();checks.push({name:'Cloudinary',ok:true})}catch(e){checks.push({name:'Cloudinary',ok:false,detail:e.message})}; for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);checks.push({name:id,ok:Boolean(c.value),detail:c.locked?'Credencial existe, mas a chave de criptografia não corresponde':c.value?'Configurado':'Ausente'})}; const exposed=['.env','*.pem','*.key','bootstrap.vault.json']; res.json({ok:checks.every(c=>c.ok),checks,secretPatternsProtected:exposed}) })
 export default router

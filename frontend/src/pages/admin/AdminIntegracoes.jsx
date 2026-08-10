@@ -3,10 +3,10 @@ import toast from 'react-hot-toast'
 
 const INTEGRATIONS_BASE=`${import.meta.env.VITE_API_URL||'/api'}/admin/integracoes`
 const API=(path,options={})=>fetch(`${INTEGRATIONS_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.erro||'Falha na operação');return d})
-const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['gemini','Google Gemini'],['openrouter','OpenRouter']]
+const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter']]
 const AI_PROVIDERS=['gemini','openrouter']
 const API_DEFAULTS={gemini:'https://generativelanguage.googleapis.com/v1beta',openrouter:'https://openrouter.ai/api/v1'}
-const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',r2Bucket:'',r2PublicUrl:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.'}}
+const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.'}}
 
 const integrationHelp={
  mongodb:{
@@ -35,6 +35,20 @@ const integrationHelp={
   steps:['No painel Cloudflare, abra My Profile → API Tokens e crie um token com as permissões necessárias para zonas/DNS e R2.','Copie o Account ID da sua conta.','Para Projetos no R2, abra R2 → Manage R2 API Tokens e gere Access Key ID + Secret Access Key.','Informe o nome do bucket usado pelo AL Sistemas.','URL pública do R2 é opcional e só é necessária para links públicos diretos.','Use Testar antes de salvar.'],
   links:[['Abrir painel Cloudflare','https://dash.cloudflare.com'],['Criar API Token','https://dash.cloudflare.com/profile/api-tokens'],['Documentação R2','https://developers.cloudflare.com/r2/']],
   expected:'API Token + Account ID • para R2: Access Key ID + Secret Access Key + Bucket',
+ },
+ render:{
+  title:'Render',
+  text:'A chave da Render alimenta o módulo Infraestrutura → Plataformas. Serviços e deploys passam a usar esta credencial central; o ambiente fica apenas como fallback de compatibilidade.',
+  steps:['Entre no Render Dashboard.','Abra Account Settings → API Keys.','Crie uma API key dedicada ao AL Sistemas.','Cole a chave abaixo, use Testar e depois Salvar.','Depois disso, o módulo Plataformas carrega serviços e deploys sem pedir a chave novamente.'],
+  links:[['Abrir Render Dashboard','https://dashboard.render.com'],['Documentação oficial da API','https://api-docs.render.com/reference/authentication']],
+  expected:'Render API Key criada nas configurações da conta',
+ },
+ vercel:{
+  title:'Vercel',
+  text:'O token da Vercel alimenta o módulo Infraestrutura → Plataformas para listar projetos e deploys. Configure uma vez aqui; os demais módulos apenas consomem a credencial central.',
+  steps:['Entre na Vercel.','Abra Account Settings → Tokens e crie um Access Token.','Cole o token abaixo.','Se os projetos estiverem em uma Team, informe o Team ID; para conta pessoal deixe vazio.','Use Testar e depois Salvar.'],
+  links:[['Criar token na Vercel','https://vercel.com/account/tokens'],['Documentação oficial da REST API','https://vercel.com/docs/rest-api']],
+  expected:'Vercel Access Token • Team ID opcional',
  },
  gemini:{
   title:'Google Gemini',
@@ -100,6 +114,8 @@ export default function AdminIntegracoes(){
     <IntegrationCard id="cloudinary" name="Cloudinary" description="Hospedagem de imagens e mídia publicadas no portal." status={status?.integrations?.cloudinary} onOpen={openIntegration}/>
     <IntegrationCard id="cloudflare" name="Cloudflare" description="DNS, zonas, segurança e armazenamento R2 usado também pelos Projetos." status={status?.integrations?.cloudflare} onOpen={openIntegration}/>
     <IntegrationCard id="github" name="GitHub" description="Publicação, repositórios e fluxo de atualização do projeto." status={status?.integrations?.github} onOpen={openIntegration}/>
+    <IntegrationCard id="render" name="Render" description="Serviços, deploys e acompanhamento da hospedagem Render." status={status?.integrations?.render} onOpen={openIntegration}/>
+    <IntegrationCard id="vercel" name="Vercel" description="Projetos e deploys hospedados na Vercel, usando uma única credencial central." status={status?.integrations?.vercel} onOpen={openIntegration}/>
     <IntegrationCard id="gemini" name="Google Gemini" description="IA para Assistente, editor de notícias e recursos opcionais do RSS." status={status?.integrations?.gemini} onOpen={openIntegration}/>
     <IntegrationCard id="openrouter" name="OpenRouter" description="Provedor alternativo de IA com acesso unificado a vários modelos." status={status?.integrations?.openrouter} onOpen={openIntegration}/>
    </div>
@@ -114,6 +130,8 @@ export default function AdminIntegracoes(){
      </div><SecretField label="URL de conexão" value={mongo.uri} onChange={v=>setMongo({...mongo,uri:v})} placeholder={current?.configured?'Digite somente para substituir':'mongodb+srv://usuario:senha@cluster/...'}/><Field label="Nome do banco" value={mongo.databaseName} onChange={v=>setMongo({...mongo,databaseName:v})} placeholder={current?.database||'alsistemas'}/></>
      :tab==='github'?<GitHubConnector current={current} form={form} setForm={setForm} github={github} setGithub={setGithub} busy={busy} onConnect={connectGithub} onReload={loadGithub} onSavePreferences={saveGithubPreferences}/>
      :tab==='cloudflare'?<CloudflareConnector current={current} form={form} setForm={setForm}/>
+     :tab==='render'?<RenderConnector current={current} form={form} setForm={setForm}/>
+     :tab==='vercel'?<VercelConnector current={current} form={form} setForm={setForm}/>
      :AI_PROVIDERS.includes(tab)?<AIWizard provider={tab} form={form} setForm={setForm} current={current}/>
      :<><SecretField label="API Secret" value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a credencial'}/>{tab==='cloudinary'&&<><Field label="Cloud Name" value={form.metadata.cloudName} onChange={v=>setForm({...form,metadata:{...form.metadata,cloudName:v}})} placeholder="ex.: meu-cloud"/><Field label="API Key" value={form.metadata.apiKey} onChange={v=>setForm({...form,metadata:{...form.metadata,apiKey:v}})} placeholder="API Key do Console"/></>}</>}
     <div className="modal-actions">
@@ -150,7 +168,7 @@ export default function AdminIntegracoes(){
     .ai-api-readonly,.ai-note,.ai-review-callout{padding:11px 12px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-size:12px;line-height:1.5;margin:10px 0 14px}.ai-api-readonly{display:grid;gap:4px}.ai-api-readonly code{overflow-wrap:anywhere;color:var(--adm-accent)}.ai-api-readonly span,.ai-note,.ai-review-callout span{color:var(--adm-muted)}
     .model-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px}.model-picker-head button{font-size:11px}.ai-params-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
     .ai-toggle-row{display:flex;gap:10px;align-items:flex-start;padding:13px;border:1px solid var(--adm-border);border-radius:10px;margin:10px 0}.ai-toggle-row input{width:auto;margin-top:2px}.ai-toggle-row span{display:grid;gap:3px}.ai-toggle-row small{font-size:11px;font-weight:400;color:var(--adm-muted);line-height:1.45}.ai-toggle-row.disabled{opacity:.55}.ai-review-callout{display:grid;gap:4px;margin-top:14px}
-    @media(max-width:620px){.integrations-titlebar>button,.hub-heading>button{width:100%}.utility-strip{align-items:stretch;flex-direction:column}.utility-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.utility-actions button{padding:9px 5px;font-size:11px}.integration-hub{padding:14px}.integration-card-grid{gap:9px}.big-integration-card{min-height:150px;padding:13px}.big-integration-card h3{font-size:13px}.big-integration-card p{font-size:11px}.modal-backdrop{padding:0;align-items:flex-end}.integration-modal{border-radius:18px 18px 0 0;max-height:94vh;width:100%}.modal-body{padding:15px}.modal-actions{margin:18px -15px -15px;padding:12px 15px;display:grid;grid-template-columns:1fr 1fr}.modal-actions button{width:100%}.choice-grid{grid-template-columns:1fr}.integration-status-grid,.github-diagnostic-grid{grid-template-columns:1fr}.integration-help-links{display:grid!important;grid-template-columns:1fr}.integration-help-links a{text-align:center}.ai-steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}.ai-params-grid{grid-template-columns:1fr!important}.model-picker-head{align-items:flex-start;flex-direction:column}.model-picker-head button{width:100%}.ai-steps button{font-size:11px;padding:9px 5px!important}}
+    @media(max-width:620px){.integrations-titlebar>button,.hub-heading>button{width:100%}.utility-strip{align-items:stretch;flex-direction:column}.utility-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.utility-actions button{padding:9px 5px;font-size:11px}.integration-hub{padding:14px}.integration-card-grid{gap:9px}.big-integration-card{min-height:150px;padding:13px}.big-integration-card h3{font-size:13px}.big-integration-card p{font-size:11px}.modal-backdrop{padding:12px;align-items:center;justify-content:center}.integration-modal{border-radius:18px;max-height:calc(100dvh - 24px);width:100%}.modal-body{padding:15px}.modal-actions{margin:18px -15px -15px;padding:12px 15px;display:grid;grid-template-columns:1fr 1fr}.modal-actions button{width:100%}.choice-grid{grid-template-columns:1fr}.integration-status-grid,.github-diagnostic-grid{grid-template-columns:1fr}.integration-help-links{display:grid!important;grid-template-columns:1fr}.integration-help-links a{text-align:center}.ai-steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}.ai-params-grid{grid-template-columns:1fr!important}.model-picker-head{align-items:flex-start;flex-direction:column}.model-picker-head button{width:100%}.ai-steps button{font-size:11px;padding:9px 5px!important}}
   `}</style>
  </div>
 }
@@ -202,6 +220,29 @@ function IntegrationInstructions({info}){
   {!!info.steps?.length&&<ol style={{margin:'10px 0 0',paddingLeft:20,color:'var(--adm-text)'}}>{info.steps.map((step,i)=><li key={i} style={{margin:'4px 0'}}>{step}</li>)}</ol>}
   {info.expected&&<div style={{marginTop:9,fontSize:12,color:'var(--adm-muted)'}}><b>Formato/dados esperados:</b> <code>{info.expected}</code></div>}
   {!!info.links?.length&&<div className="integration-help-links" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>{info.links.map(([label,url])=><a key={url} href={url} target="_blank" rel="noreferrer" style={{display:'inline-block',padding:'7px 9px',borderRadius:8,border:'1px solid var(--adm-border)',background:'var(--adm-bg)',color:'var(--adm-accent)',fontWeight:700,textDecoration:'none'}}>{label} ↗</a>)}</div>}
+ </div>
+}
+
+function RenderConnector({current,form,setForm}){
+ return <div>
+  <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
+   <b>Fonte única para o módulo Plataformas</b>
+   <div style={{color:'var(--adm-muted)',marginTop:5}}>Serviços e deploys exibidos em <b>Infraestrutura → Plataformas</b> usam esta chave. Não é necessário configurar a Render em outra tela.</div>
+  </div>
+  <SecretField label={current?.configured?'Nova Render API Key (deixe vazio para manter)':'Render API Key'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a API Key da Render'}/>
+ </div>
+}
+
+function VercelConnector({current,form,setForm}){
+ const setMeta=(key,value)=>setForm(f=>({...f,metadata:{...f.metadata,[key]:value}}))
+ return <div>
+  <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
+   <b>Fonte única para projetos e deploys</b>
+   <div style={{color:'var(--adm-muted)',marginTop:5}}>O módulo <b>Infraestrutura → Plataformas</b> usa este token automaticamente. A configuração antiga dentro da própria página de plataformas foi desativada para evitar duas fontes diferentes.</div>
+  </div>
+  <SecretField label={current?.configured?'Novo Vercel Access Token (deixe vazio para manter)':'Vercel Access Token'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole o token da Vercel'}/>
+  <Field label="Team ID (opcional)" value={form.metadata.teamId||''} onChange={v=>setMeta('teamId',v)} placeholder="team_xxxxxxxxxxxx"/>
+  <div style={{fontSize:12,color:'var(--adm-muted)',marginTop:-6}}>Deixe vazio para sua conta pessoal. Informe apenas se quiser direcionar as consultas para uma Team específica.</div>
  </div>
 }
 

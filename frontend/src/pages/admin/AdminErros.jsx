@@ -28,6 +28,7 @@ const TIPO_META = {
   worker:              { label: 'Worker',  variant: 'purple' },
   rss:                 { label: 'RSS',     variant: 'green'  },
   github:              { label: 'GitHub',  variant: 'blue'   },
+  termux:              { label: 'Termux',  variant: 'green'  },
 }
 const STATUS_META = {
   novo:         { label: 'Novo',         variant: 'red'   },
@@ -46,6 +47,7 @@ const TIPOS_FILTRO = [
   { key: 'worker',              label: 'Worker' },
   { key: 'rss',                 label: 'RSS' },
   { key: 'github',              label: 'GitHub' },
+  { key: 'termux',              label: 'Termux' },
 ]
 const PERIODOS = [
   { value: '',    label: 'Todo período'     },
@@ -404,6 +406,8 @@ export default function AdminErros() {
   const [filtroMsg,     setFiltroMsg]     = useState('')
   const [pagina,        setPagina]        = useState(1)
   const [selected,      setSelected]      = useState(new Set())
+  const [diagnostico,   setDiagnostico]   = useState(null)
+  const [diagLoading,   setDiagLoading]   = useState(false)
   const [confirm, setConfirm] = useState({ aberto: false, titulo: '', msg: '', fn: null, carregando: false })
 
   const errosFiltrados = useMemo(() => {
@@ -513,6 +517,18 @@ export default function AdminErros() {
     })
   }
 
+  async function handleDiagnostico() {
+    setDiagLoading(true)
+    try {
+      const report = await errosService.diagnostico(true)
+      setDiagnostico(report)
+      const qtd = report?.resumo?.linhasSuspeitas || 0
+      toast.success(qtd ? `Diagnóstico concluído: ${qtd} linha(s) suspeita(s)` : 'Diagnóstico concluído sem novos erros')
+      if (qtd) carregar()
+    } catch (err) { toast.error(err.message) }
+    finally { setDiagLoading(false) }
+  }
+
   async function handleMarcarTodosLidos() {
     try {
       await errosService.marcarTodosLidos()
@@ -525,8 +541,9 @@ export default function AdminErros() {
   function exportar(format = 'csv') {
     const dados = modoAgrupado ? grupos.flatMap(g => g.exemplos) : errosFiltrados
     if (format === 'csv') {
-      const csv = ['Tipo,Status,Mensagem,Data,URL,Rota'].concat(
-        dados.map(e => `"${e.tipo}","${e.status || 'novo'}","${e.mensagem.replace(/"/g, '""')}","${e.criado_em}","${e.url || ''}","${e.rota || ''}"`)
+      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+      const csv = ['Tipo,Status,Mensagem,Data,URL,Rota,Ocorrencias,Contexto'].concat(
+        dados.map(e => [e.tipo,e.status || 'novo',e.mensagem,e.criado_em,e.url || '',e.rota || '',e.ocorrencias || 1,e.dados ? JSON.stringify(e.dados) : ''].map(esc).join(','))
       ).join('\n')
       const blob = new Blob([csv], { type: 'text/csv' })
       const a = document.createElement('a')
@@ -590,6 +607,49 @@ export default function AdminErros() {
             </button>
           </>)}
         </div>
+      </div>
+
+      <div className="adm-card" style={{ marginBottom: SPACE.lg, padding: SPACE.xl, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACE.lg, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+            <div style={{ fontSize: FONT.xs, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase', color: C.greenSolid }}>Diagnóstico local</div>
+            <div style={{ marginTop: 5, fontSize: FONT.lg, fontWeight: 800, color: 'var(--adm-text)' }}>Termux, Manager e atualizador</div>
+            <div style={{ marginTop: 5, fontSize: FONT.base, lineHeight: 1.55, color: 'var(--adm-muted)', maxWidth: 680 }}>Analisa somente os logs e PIDs conhecidos do AL Sistemas e do Manager. Credenciais e URLs sensíveis são mascaradas antes de aparecerem aqui.</div>
+          </div>
+          <button onClick={handleDiagnostico} disabled={diagLoading} className="adm-btn adm-btn-primary">
+            {diagLoading ? 'Analisando…' : 'Executar diagnóstico'}
+          </button>
+        </div>
+        {diagnostico && <div style={{ marginTop: SPACE.lg }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: SPACE.sm }}>
+            {[
+              ['Ambiente', diagnostico.termux ? 'Termux' : diagnostico.runtime?.platform || '—'],
+              ['Backend', diagnostico.backend?.ok ? 'respondendo' : 'indisponível'],
+              ['Manager', diagnostico.manager?.instalado ? 'detectado' : 'não detectado'],
+              ['PIDs ativos', diagnostico.resumo?.pidsAtivos ?? 0],
+              ['Logs analisados', diagnostico.resumo?.arquivosAnalisados ?? 0],
+              ['Alertas encontrados', diagnostico.resumo?.linhasSuspeitas ?? 0],
+            ].map(([label,value]) => <div key={label} style={{ padding: SPACE.md, border: '1px solid var(--adm-border)', borderRadius: RADIUS.md, background: 'var(--adm-surface2)' }}>
+              <div style={{ fontSize: FONT.xs, color: 'var(--adm-muted)', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
+              <div style={{ marginTop: 4, fontWeight: 800, color: 'var(--adm-text)', wordBreak: 'break-word' }}>{String(value)}</div>
+            </div>)}
+          </div>
+          {diagnostico.hipoteses?.length > 0 && <div style={{ marginTop: SPACE.md, display: 'grid', gap: SPACE.sm }}>
+            {diagnostico.hipoteses.map(h => <div key={h.codigo} style={{ padding: SPACE.md, borderRadius: RADIUS.md, border: `1px solid ${C.amberBorder}`, background: C.amberBg }}>
+              <div style={{ fontWeight: 800, color: 'var(--adm-text)' }}>{h.titulo}</div>
+              <div style={{ marginTop: 3, color: 'var(--adm-muted)', fontSize: FONT.base, lineHeight: 1.5 }}>{h.acao}</div>
+            </div>)}
+          </div>}
+          {diagnostico.achados?.length > 0 && <details style={{ marginTop: SPACE.md }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 800, color: 'var(--adm-text)' }}>Ver últimas linhas suspeitas ({diagnostico.achados.length})</summary>
+            <div style={{ marginTop: SPACE.sm, maxHeight: 260, overflow: 'auto', display: 'grid', gap: SPACE.xs }}>
+              {diagnostico.achados.slice(-12).reverse().map((a,i) => <div key={`${a.arquivo}-${i}`} style={{ padding: SPACE.md, borderRadius: RADIUS.md, background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)' }}>
+                <div style={{ fontSize: FONT.xs, color: C.greenSolid, fontWeight: 700 }}>{a.origem} · {a.arquivo}</div>
+                <code style={{ display: 'block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--adm-text)', fontSize: FONT.sm }}>{a.mensagem}</code>
+              </div>)}
+            </div>
+          </details>}
+        </div>}
       </div>
 
       <StatsBar erros={errosFiltrados} />

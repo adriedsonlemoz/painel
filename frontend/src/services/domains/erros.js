@@ -53,6 +53,7 @@ export const errosService = {
     return api(`/erros?${p}`)
   },
 
+  async diagnostico(registrar = true) { return api('/erros/diagnostico', { method: 'POST', body: JSON.stringify({ registrar }), timeoutMs: 30000 }) },
   async contagem()              { return api('/erros/contagem') },
   async marcarLido(id, lido = true) {
     return api(`/erros/${id}/lido`, { method: 'PATCH', body: JSON.stringify({ lido }) })

@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { ROOT_DIR, STATE_DIR, STAGING_DIR, SNAPSHOT_DIR, JOB_DIR, HISTORY_FILE, PRESERVE_PATHS, TRANSACTION_DIR, verifyStageIntegrity, touchUpdateLock, releaseUpdateLock } from '../services/systemUpdateService.js'
+import { ROOT_DIR, STATE_DIR, STAGING_DIR, SNAPSHOT_DIR, JOB_DIR, HISTORY_FILE, PRESERVE_PATHS, TRANSACTION_DIR, MANAGED_MANIFEST_FILE, LOCAL_RUNTIME_PATHS, writeManagedManifest, verifyStageIntegrity, touchUpdateLock, releaseUpdateLock } from '../services/systemUpdateService.js'
 import { gravarErroSistemaSpool } from '../services/systemErrorSpool.js'
 
 const jobFile = process.argv[2]
@@ -89,12 +89,12 @@ function monitorHtml(){
 .small{font-size:11px;color:#94a3b8;margin-top:10px;overflow-wrap:anywhere}
 </style></head>
 <body><div class="wrap"><main class="card">
-<div class="eyebrow">AL SISTEMAS · ATUALIZAÇÃO SEGURA</div>
-<div class="row"><div><h1 class="title">Servidor sendo atualizado</h1><div class="sub">Esta página é independente do Vite/React e continuará aberta enquanto os arquivos do sistema forem substituídos.</div></div><div id="pct" class="pct">0%</div></div>
+<div class="eyebrow">AL SISTEMAS · CANAL INDEPENDENTE</div>
+<div class="row"><div><h1 class="title">Atualização protegida em andamento</h1><div class="sub">Este monitor roda fora do backend e do Vite. Se algum deles reiniciar, esta tela continua acompanhando o job sem depender do painel principal.</div></div><div id="pct" class="pct">0%</div></div>
 <div class="bar"><div id="fill" class="fill"></div></div>
 <div id="status" class="status">Preparando atualização…</div>
 <div id="timeline" class="timeline"></div>
-<div id="note" class="note">A conexão com o painel pode cair temporariamente. Não feche esta página.</div>
+<div id="note" class="note">Canal independente ativo. Reinícios temporários do backend ou frontend são esperados durante a aplicação.</div>
 <div id="job" class="small">Job ${job.id}</div>
 </main></div>
 <script>
@@ -254,7 +254,11 @@ async function finalizeReport(status,extra={}){
   await updateJob({finalReport:report})
   return report
 }
-function preserved(rel){ rel=rel.replace(/\\/g,'/').replace(/^\.\//,''); return rel==='.update-meta.json' || rel==='al-update.json' || PRESERVE_PATHS.some(p=>rel===p||rel.startsWith(`${p}/`)) || rel==='.git' || rel.startsWith('.git/') || rel==='node_modules' || rel.includes('/node_modules/') }
+function preserved(rel){
+  rel=rel.replace(/\\/g,'/').replace(/^\.\//,'')
+  const localRuntime=LOCAL_RUNTIME_PATHS.some(p=>rel===p||rel.startsWith(`${p}/`))
+  return localRuntime || rel==='.update-meta.json' || rel==='al-update.json' || PRESERVE_PATHS.some(p=>rel===p||rel.startsWith(`${p}/`)) || rel==='.git' || rel.startsWith('.git/') || rel==='node_modules' || rel.includes('/node_modules/')
+}
 function preserveAncestor(rel){ rel=rel.replace(/\\/g,'/').replace(/^\.\//,''); return PRESERVE_PATHS.some(p=>p.startsWith(`${rel}/`)) || '.git'.startsWith(`${rel}/`) }
 
 async function copyTree(src,dst,{skipPreserved=false}={}){
@@ -292,7 +296,9 @@ async function snapshot(version){
       }
     }catch{}
   }
-  const meta={id,version,createdAt:new Date().toISOString(),safe:true,integrity:snapshotManifest}
+  let ownership=null
+  try{ownership=await readJson(MANAGED_MANIFEST_FILE)}catch{}
+  const meta={id,version,createdAt:new Date().toISOString(),safe:true,integrity:snapshotManifest,ownership}
   await writeJson(path.join(SNAPSHOT_DIR,id,'snapshot.json'),meta)
   return meta
 }
@@ -380,6 +386,11 @@ async function applyFiles(src,mode='apply',options={}){
   const current=await managedFiles(ROOT_DIR)
   const incremental=options.packageType==='incremental'
   const explicitRemoved=new Set((options.removedFiles||[]).map(r=>String(r).replace(/\\/g,'/').replace(/^\.\//,'')))
+  let ownedSet=null
+  try{
+    const ownership=await readJson(MANAGED_MANIFEST_FILE)
+    if(Array.isArray(ownership?.files))ownedSet=new Set(ownership.files)
+  }catch{}
   const preRemoves=[],writes=[],removes=[]
   const sourceKeys=[...source.map.keys()]
   const sourceSet=new Set(sourceKeys)
@@ -394,7 +405,7 @@ async function applyFiles(src,mode='apply',options={}){
     if(hasSourceDescendant(rel))preRemoves.push({type:'remove',rel,to,reason:'file-to-directory'})
     else if(incremental){
       if(explicitRemoved.has(rel))removes.push({type:'remove',rel,to,reason:'incremental-manifest'})
-    }else if(!hasSourceFileAncestor(rel))removes.push({type:'remove',rel,to})
+    }else if(!hasSourceFileAncestor(rel) && (!ownedSet || ownedSet.has(rel)))removes.push({type:'remove',rel,to,reason:ownedSet?'managed-manifest':'legacy-full'})
   }
   if(incremental){
     for(const rel of explicitRemoved){
@@ -434,9 +445,19 @@ async function applyFiles(src,mode='apply',options={}){
 async function clearFrontendViteCache(){
   const nodeModules=path.join(ROOT_DIR,'frontend','node_modules')
   if(!(await exists(nodeModules))) return true
+  // No Termux o Vite costuma permanecer ativo durante a atualização.
+  // Nunca removemos o cache que a versão em execução pode estar usando.
+  // O vite.config usa .vite-<versão>, então a próxima inicialização já nasce
+  // com um pre-bundle novo sem desestabilizar o processo atual.
+  const keepActive=IS_TERMUX_RUNTIME&&job.fromVersion?`.vite-${job.fromVersion}`:null
+  const removed=[]
   for(const name of await fs.readdir(nodeModules).catch(()=>[])){
-    if(name==='.vite' || name.startsWith('.vite-')) await fs.rm(path.join(nodeModules,name),{recursive:true,force:true}).catch(()=>{})
+    if(!(name==='.vite'||name.startsWith('.vite-')))continue
+    if(keepActive&&name===keepActive)continue
+    await fs.rm(path.join(nodeModules,name),{recursive:true,force:true}).catch(()=>{})
+    removed.push(name)
   }
+  await updateJob({viteCachePolicy:{mode:keepActive?'version-isolated-termux':'reset',kept:keepActive,removed,at:new Date().toISOString()}}).catch(()=>{})
   return true
 }
 async function run(cmd,args,cwd,options={}){
@@ -547,8 +568,39 @@ async function buildFrontend(){
   await updateJob({frontendBuild:{skipped:false,completedAt:new Date().toISOString()}})
   return {skipped:false}
 }
-async function restart(cfg){ if(cfg.strategy==='none') return false; if(cfg.strategy==='pm2') await run('pm2',['restart',cfg.pm2Name,'--update-env'],ROOT_DIR,{timeoutMs:90*1000}); else if(cfg.strategy==='systemd') await run('systemctl',['restart',cfg.systemdService],ROOT_DIR,{timeoutMs:90*1000}); else throw new Error(`Estratégia de reinício desconhecida: ${cfg.strategy}`); return true }
+async function restart(cfg){
+  if(cfg.strategy==='none'||cfg.strategy==='termux') return false
+  if(cfg.strategy==='pm2') await run('pm2',['restart',cfg.pm2Name,'--update-env'],ROOT_DIR,{timeoutMs:90*1000})
+  else if(cfg.strategy==='systemd') await run('systemctl',['restart',cfg.systemdService],ROOT_DIR,{timeoutMs:90*1000})
+  else throw new Error(`Estratégia de reinício desconhecida: ${cfg.strategy}`)
+  return true
+}
 async function health(url,tries=12){ for(let i=0;i<tries;i++){ await sleep(2500); try{ const r=await fetch(url,{signal:AbortSignal.timeout(4000)}); if(r.ok) return true }catch{} } return false }
+async function recoverTermuxBackend(reason='health-check'){
+  if(!IS_TERMUX_RUNTIME) return false
+  if(await health(job.healthUrl,2)) return true
+  const backendDir=path.join(ROOT_DIR,'backend')
+  const pkg=await readJson(path.join(backendDir,'package.json')).catch(()=>({}))
+  const script=pkg.scripts?.dev?'dev':pkg.scripts?.start?'start':null
+  if(!script){
+    await updateJob({termuxRecovery:{ok:false,reason:'script-ausente',at:new Date().toISOString()}})
+    return false
+  }
+  const logDir=path.join(ROOT_DIR,'.logs')
+  await fs.mkdir(logDir,{recursive:true})
+  const logFile=path.join(logDir,'al-update-backend-recovery.log')
+  const handle=await fs.open(logFile,'a')
+  let child
+  try{
+    child=spawn('npm',['run',script],{cwd:backendDir,detached:true,stdio:['ignore',handle.fd,handle.fd],env:{...process.env,AL_UPDATE_RECOVERY:'1'}})
+    child.unref()
+  }finally{ await handle.close().catch(()=>{}) }
+  await updateJob({termuxRecovery:{pid:child?.pid||null,script:`npm run ${script}`,reason,logFile,startedAt:new Date().toISOString()}})
+  const ok=await health(job.healthUrl,12)
+  await updateJob({termuxRecovery:{...(job.termuxRecovery||{}),pid:child?.pid||null,script:`npm run ${script}`,reason,logFile,ok,finishedAt:new Date().toISOString()}})
+  if(!ok) await gravarErroSistemaSpool({tipo:'update',mensagem:'Recuperação automática do backend no Termux não respondeu ao health check.',rota:'/admin/atualizacoes',dados:{source:'termux-recovery',jobId:job.id,logFile}}).catch(()=>{})
+  return ok
+}
 async function versionHealthy(url,expected,tries=16){
   for(let i=0;i<tries;i++){
     await sleep(1800)
@@ -560,7 +612,11 @@ async function versionHealthy(url,expected,tries=16){
   }
   return false
 }
-async function restoreSnapshot(meta){ await applyFiles(path.join(SNAPSHOT_DIR,meta.id,'files')); await clearFrontendViteCache() }
+async function restoreSnapshot(meta){
+  await applyFiles(path.join(SNAPSHOT_DIR,meta.id,'files'),'rollback')
+  if(meta.ownership?.files) await writeManagedManifest(meta.ownership.files,meta.version,'rollback')
+  await clearFrontendViteCache()
+}
 
 try{
   await fs.mkdir(STATE_DIR,{recursive:true})
@@ -573,12 +629,11 @@ try{
     const snap=await readJson(path.join(SNAPSHOT_DIR,job.snapshotId,'snapshot.json'))
     await setMaintenance(true,{phase:'recovery'})
     await phase('recovery-files','Restaurando snapshot após interrupção',42)
-    await applyFiles(path.join(SNAPSHOT_DIR,snap.id,'files'),'recovery')
-    await clearFrontendViteCache()
+    await restoreSnapshot(snap)
     await phase('recovery-restart','Reiniciando após recuperação',74)
     const did=await restart(job.restart)
     await phase('recovery-health','Validando instalação restaurada',90)
-    const healthy=did?await health(job.healthUrl):true
+    const healthy=did?await health(job.healthUrl):IS_TERMUX_RUNTIME?await recoverTermuxBackend('recovery-mode'):true
     await updateJob({status:'rolled-back',recovered:true,rollbackHealthy:healthy,completedAt:new Date().toISOString()})
     await finalizeReport('rolled-back',{recovered:true,healthCheck:healthy?'approved':'failed'})
     await setMaintenance(false)
@@ -595,8 +650,8 @@ try{
     await setMaintenance(true,{phase:'rollback'})
     await phase('rollback-files','Restaurando arquivos do snapshot',45); await restoreSnapshot(snap)
     if(snap.dependencyAreas?.length){await phase('rollback-dependencies','Restaurando dependências da versão anterior',60);await restoreDependencies(snap.dependencyAreas)}
-    await phase('rollback-restart','Reiniciando o AL Sistemas',70); await restart(job.restart)
-    await phase('rollback-health','Verificando funcionamento após rollback',88); const ok=job.restart.strategy==='none'?true:await health(job.healthUrl); if(!ok) throw new Error('Health check falhou após rollback.')
+    await phase('rollback-restart','Reiniciando o AL Sistemas',70); const rollbackRestarted=await restart(job.restart)
+    await phase('rollback-health','Verificando funcionamento após rollback',88); let ok=rollbackRestarted?await health(job.healthUrl):job.restart.strategy==='none'?true:await health(job.healthUrl,6); if(!ok&&IS_TERMUX_RUNTIME){await phase('rollback-termux-recovery','Recuperando backend no Termux',93);ok=await recoverTermuxBackend('manual-rollback')} if(!ok) throw new Error('Health check falhou após rollback.')
     await phase('completed','Rollback concluído',100); await updateJob({status:'completed',completedAt:new Date().toISOString()}); await finalizeReport('success',{healthCheck:'approved'}); await setMaintenance(false); await history({id:job.id,type:'rollback',status:'success',fromVersion:job.fromVersion,toVersion:snap.version,createdAt:new Date().toISOString(),snapshotId:snap.id,durationMs:durationMs()}); await housekeeping(); await finishWithMonitor(0)
   }
   const stage=path.join(STAGING_DIR,job.stageId), meta=await readJson(path.join(stage,'.update-meta.json'))
@@ -636,12 +691,19 @@ try{
     if(meta.migrations?.length){ await phase('migrations','Executando migrações do banco',72); await migrate(); migrationsApplied=true }
     else await phase('migrations-none','Nenhuma migração necessária',74)
     await updateJob({status:'files-applied'})
-    await phase('restart','Reiniciando o AL Sistemas',82); const explicitlyRestarted=await restart(job.restart)
+    await phase('restart','Reiniciando o AL Sistemas',82); let explicitlyRestarted=await restart(job.restart)
     await phase('health','Executando liveness e conferindo versão ativa',90)
-    const live=await health(job.healthUrl,explicitlyRestarted?12:8)
+    let live=await health(job.healthUrl,explicitlyRestarted?12:8)
+    if(!live&&IS_TERMUX_RUNTIME){
+      await phase('termux-recovery','Backend não voltou — iniciando recuperação local',94)
+      live=await recoverTermuxBackend('post-update')
+      if(live) explicitlyRestarted=true
+    }
     const correctVersion=live?await versionHealthy(job.versionUrl,job.toVersion,explicitlyRestarted?12:8):false
     if(explicitlyRestarted && (!live||!correctVersion)) throw new Error('Health check/versionamento falhou após a atualização.')
     const restarted=explicitlyRestarted||correctVersion
+    const stageManaged=await managedFiles(stage)
+    await writeManagedManifest([...stageManaged.map.keys()],job.toVersion,'update')
     await phase(restarted?'completed':'restart-required',restarted?'Atualização concluída e versão confirmada':'Arquivos aplicados — reinício manual necessário',100)
     await updateJob({status: restarted?'completed':'restart-required',completedAt:new Date().toISOString(),health:{live,correctVersion}}); await finalizeReport(restarted?'success':'restart-required',{healthCheck:restarted?'approved':'not-run',versionConfirmed:correctVersion,removedSnapshots}); await setMaintenance(false); await history({id:job.id,type:'update',status:restarted?'success':'restart-required',fromVersion:job.fromVersion,toVersion:job.toVersion,createdAt:new Date().toISOString(),snapshotId:snap.id,restartStrategy:job.restart.strategy,durationMs:durationMs()}); await fs.rm(stage,{recursive:true,force:true}).catch(()=>{}); await housekeeping(); await finishWithMonitor(0)
   }catch(err){
@@ -654,7 +716,7 @@ try{
     if(migrationsApplied && meta.migrations?.length && meta.migrationRollbackSafe!==false){ try{ await phase('rollback-auto-migrations','Revertendo migrações',86); await migrateDown(meta.migrations.length) }catch(e){ migrationRollbackError=e.message } }
     await phase('rollback-auto-files','Restaurando versão anterior',90); await restoreSnapshot(snap)
     if(dependenciesTouched&&snap.dependencyAreas?.length){try{await phase('rollback-auto-dependencies','Restaurando dependências anteriores',93);await restoreDependencies(snap.dependencyAreas)}catch(e){dependencyRollbackError=e.message}}
-    let rollbackHealthy=true; try{ const did=await restart(job.restart); if(did){ await phase('rollback-auto-health','Verificando versão restaurada',96); rollbackHealthy=await health(job.healthUrl) } }catch{ rollbackHealthy=false }
+    let rollbackHealthy=true; try{ const did=await restart(job.restart); if(did){ await phase('rollback-auto-health','Verificando versão restaurada',96); rollbackHealthy=await health(job.healthUrl) } else if(IS_TERMUX_RUNTIME){ await phase('rollback-auto-termux','Recuperando backend após rollback',96); rollbackHealthy=await recoverTermuxBackend('automatic-rollback') } }catch{ rollbackHealthy=false }
     if(migrationRollbackError||dependencyRollbackError) rollbackHealthy=false; await phase('rolled-back',rollbackHealthy?'Rollback automático concluído':'Rollback concluído com alerta',100,{error:err.message}); await updateJob({status:'rolled-back',error:err.message,migrationRollbackError,dependencyRollbackError,rollbackHealthy,completedAt:new Date().toISOString()}); await finalizeReport('rolled-back',{error:err.message,migrationRollbackError,dependencyRollbackError,rollbackHealthy,healthCheck:rollbackHealthy?'approved':'failed',removedSnapshots}); await setMaintenance(false); await history({id:job.id,type:'update',status:'rolled-back',fromVersion:job.fromVersion,toVersion:job.toVersion,createdAt:new Date().toISOString(),snapshotId:snap.id,error:err.message,migrationRollbackError,dependencyRollbackError,rollbackHealthy,durationMs:durationMs()}); await finishWithMonitor(1)
   }
 }catch(err){ await phase('failed','Atualização interrompida',100,{error:err.message}).catch(()=>{}); await updateJob({status:'failed',error:err.message,completedAt:new Date().toISOString()}).catch(()=>{}); await finalizeReport('failed',{error:err.message}).catch(()=>{}); await setMaintenance(false).catch(()=>{}); await finishWithMonitor(1) }

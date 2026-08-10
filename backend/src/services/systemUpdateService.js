@@ -9,6 +9,7 @@ import mongoose from 'mongoose'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT_DIR = path.resolve(__dirname, '../../..')
 export const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION)
+export const IS_TERMUX = Boolean(process.env.TERMUX_VERSION || String(process.env.PREFIX || '').includes('com.termux'))
 // Em Vercel o filesystem da Function é somente leitura; /tmp é scratch temporário.
 // Nunca tratamos este diretório como armazenamento persistente entre requisições.
 export const STATE_DIR = IS_VERCEL
@@ -20,6 +21,14 @@ export const JOB_DIR = path.join(STATE_DIR, 'jobs')
 export const HISTORY_FILE = path.join(STATE_DIR, 'history.json')
 export const LOCK_FILE = path.join(STATE_DIR, 'update.lock.json')
 export const TRANSACTION_DIR = path.join(STATE_DIR, 'transactions')
+export const MANAGED_MANIFEST_FILE = path.join(STATE_DIR, 'managed-files.json')
+export const LOCAL_RUNTIME_PATHS = [
+  '.import_tmp',
+  '.logs',
+  '.pids',
+  '.manager.lock',
+  '.manager.conf',
+]
 
 export const PRESERVE_PATHS = [
   '.env',
@@ -302,10 +311,12 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
       const changelog=String(updateManifest.changelog||'Atualização incremental do AL Sistemas.')
       const currentViteConfig=await fileFingerprint(path.join(ROOT_DIR,'frontend/vite.config.js'))
       const nextViteConfig=await fileFingerprint(path.join(target,'frontend/vite.config.js'))
+      const currentFrontendPkg=await fileFingerprint(path.join(ROOT_DIR,'frontend/package.json'))
+      const nextFrontendPkg=await fileFingerprint(path.join(target,'frontend/package.json'))
       const meta={
         id,version:updateManifest.version,baseVersion:updateManifest.baseVersion,packageType:'incremental',filename:originalName,createdAt:new Date().toISOString(),
         changelog,dependencies:deps,...(await detectMigrations(target)),removedFiles,
-        frontendCacheResetRequired:Boolean(deps.frontend?.installRequired||(nextViteConfig&&currentViteConfig!==nextViteConfig)),
+        frontendCacheResetRequired:Boolean(deps.frontend?.installRequired||(nextViteConfig&&currentViteConfig!==nextViteConfig)||(nextFrontendPkg&&currentFrontendPkg!==nextFrontendPkg)),
         sha256:await hashFile(zipPath),integrity,status:'ready',ephemeral:!persist,
       }
       if(persist){
@@ -340,11 +351,13 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
     const deps = await dependencyPlan(target, { checkInstalled: persist })
     const currentViteConfig = await fileFingerprint(path.join(ROOT_DIR, 'frontend/vite.config.js'))
     const nextViteConfig = await fileFingerprint(path.join(target, 'frontend/vite.config.js'))
+    const currentFrontendPkg = await fileFingerprint(path.join(ROOT_DIR, 'frontend/package.json'))
+    const nextFrontendPkg = await fileFingerprint(path.join(target, 'frontend/package.json'))
     const integrity=await buildStageManifest(target)
     const meta = {
       id, version: backendPkg.version, baseVersion:null, packageType:'full', filename: originalName, createdAt: new Date().toISOString(),
       changelog, dependencies: deps, ...(await detectMigrations(target)), removedFiles:[],
-      frontendCacheResetRequired: Boolean(deps.frontend?.installRequired || currentViteConfig !== nextViteConfig),
+      frontendCacheResetRequired: Boolean(deps.frontend?.installRequired || currentViteConfig !== nextViteConfig || currentFrontendPkg !== nextFrontendPkg),
       sha256: await hashFile(zipPath), integrity, status: 'ready', ephemeral: !persist,
     }
     if (persist) {
@@ -371,13 +384,9 @@ async function readChangelog(root, version, manifest) {
 }
 
 async function dependencyFingerprint(areaDir) {
-  const lockFile = path.join(areaDir, 'package-lock.json')
-  if (await exists(lockFile)) {
-    const lock = await json(lockFile)
-    delete lock.version
-    if (lock.packages?.['']) delete lock.packages[''].version
-    return crypto.createHash('sha256').update(JSON.stringify(lock)).digest('hex')
-  }
+  // Compara apenas a declaração semântica de dependências. package-lock é um
+  // detalhe de instalação e pode ser criado/removido sem exigir reinstalação
+  // no Termux quando package.json e node_modules continuam compatíveis.
   const pkg = await json(path.join(areaDir, 'package.json'))
   const dependencyShape = {
     dependencies: pkg.dependencies || {},
@@ -385,9 +394,19 @@ async function dependencyFingerprint(areaDir) {
     optionalDependencies: pkg.optionalDependencies || {},
     peerDependencies: pkg.peerDependencies || {},
     overrides: pkg.overrides || {},
-    engines: pkg.engines || {},
   }
   return crypto.createHash('sha256').update(JSON.stringify(dependencyShape)).digest('hex')
+}
+
+async function lockFingerprint(areaDir) {
+  const lockFile = path.join(areaDir, 'package-lock.json')
+  if (!(await exists(lockFile))) return null
+  try {
+    const lock = await json(lockFile)
+    delete lock.version
+    if (lock.packages?.['']) delete lock.packages[''].version
+    return crypto.createHash('sha256').update(JSON.stringify(lock)).digest('hex')
+  } catch { return 'invalid-lock' }
 }
 
 async function installedDependencyHealth(area) {
@@ -429,20 +448,27 @@ async function installedDependencyHealth(area) {
 async function dependencyPlan(staged, { checkInstalled = true } = {}) {
   const result = {}
   for (const area of ['backend', 'frontend']) {
-    const currentLock = await dependencyFingerprint(path.join(ROOT_DIR, area))
-    const nextLock = await dependencyFingerprint(path.join(staged, area))
+    const currentDeps = await dependencyFingerprint(path.join(ROOT_DIR, area))
+    const nextDeps = await dependencyFingerprint(path.join(staged, area))
+    const dependencyChanged = currentDeps !== nextDeps
+    const [currentLock,nextLock] = await Promise.all([
+      lockFingerprint(path.join(ROOT_DIR, area)),
+      lockFingerprint(path.join(staged, area)),
+    ])
     const lockChanged = currentLock !== nextLock
     const health = checkInstalled ? await installedDependencyHealth(area) : { ok:true, repairPackages:[] }
-    const installRequired = lockChanged || !health.ok
+    // Lockfile sozinho não força npm install. Isso evita derrubar um ambiente Termux
+    // funcional somente porque uma release removeu/regenerou package-lock.json.
+    const installRequired = dependencyChanged || !health.ok
     result[area] = {
-      installRequired,
-      lockChanged,
-      integrityOk: health.ok,
+      installRequired, dependencyChanged, lockChanged, integrityOk: health.ok,
       repairPackages: health.repairPackages,
-      reason: lockChanged
-        ? 'Árvore de dependências alterada.'
+      reason: dependencyChanged
+        ? 'Declaração de dependências alterada.'
         : health.ok
-          ? 'Dependências inalteradas e instalação íntegra.'
+          ? lockChanged
+            ? 'Dependências inalteradas; lockfile mudou, sem reinstalação local.'
+            : 'Dependências inalteradas e instalação íntegra.'
           : `Instalação incompleta/corrompida: ${health.repairPackages.join(', ')}.`,
     }
   }
@@ -465,10 +491,16 @@ async function detectMigrations(staged) {
 }
 
 
+function localRuntimePath(rel){
+  rel=String(rel||'').replace(/\\/g,'/').replace(/^\.\//,'')
+  return LOCAL_RUNTIME_PATHS.some(p=>rel===p||rel.startsWith(`${p}/`))
+}
+
 function replaceablePath(rel){
   rel=rel.replace(/\\/g,'/').replace(/^\.\//,'')
   if(!rel) return false
   if(PRESERVE_PATHS.some(p=>rel===p||rel.startsWith(`${p}/`))) return false
+  if(localRuntimePath(rel)) return false
   if(rel==='.update-meta.json'||rel==='al-update.json'||rel==='.git'||rel.startsWith('.git/')||rel==='node_modules'||rel.includes('/node_modules/')) return false
   return true
 }
@@ -489,6 +521,66 @@ async function scanTree(base){
   }
   await walk(base)
   return map
+}
+
+async function summarizeLocalRuntime(base){
+  let fileCount=0,totalBytes=0
+  async function walk(full){
+    const st=await fs.lstat(full).catch(()=>null)
+    if(!st)return
+    if(st.isDirectory()){
+      for(const ent of await fs.readdir(full,{withFileTypes:true}).catch(()=>[])) await walk(path.join(full,ent.name))
+    }else if(st.isFile()){
+      fileCount++; totalBytes+=Number(st.size||0)
+    }
+  }
+  for(const rel of LOCAL_RUNTIME_PATHS) await walk(path.join(base,rel))
+  return {fileCount,totalBytes,paths:LOCAL_RUNTIME_PATHS}
+}
+
+async function readManagedManifest(){
+  try{
+    const data=await json(MANAGED_MANIFEST_FILE)
+    const files=Array.isArray(data.files)?data.files.filter(x=>typeof x==='string'&&replaceablePath(x)):[]
+    return {...data,files}
+  }catch{return null}
+}
+
+async function ensureManagedManifest(){
+  let current=await readManagedManifest()
+  if(current)return current
+  const files=await scanTree(ROOT_DIR)
+  current={
+    schema:1,
+    version:(await installedVersion()).version,
+    createdAt:new Date().toISOString(),
+    source:'baseline',
+    files:[...files.keys()].sort(),
+  }
+  await atomicJson(MANAGED_MANIFEST_FILE,current)
+  return current
+}
+
+export async function writeManagedManifest(files,version,source='update'){
+  const clean=[...new Set((files||[]).map(x=>String(x).replace(/\\/g,'/').replace(/^\.\//,'')).filter(replaceablePath))].sort()
+  const data={schema:1,version,createdAt:new Date().toISOString(),source,files:clean}
+  await atomicJson(MANAGED_MANIFEST_FILE,data)
+  return data
+}
+
+export async function deleteStaged(stageId){
+  await ensureUpdateDirs()
+  const meta=await getStage(stageId)
+  await fs.rm(path.join(STAGING_DIR,stageId),{recursive:true,force:true})
+  return meta
+}
+
+export async function deleteSnapshot(snapshotId){
+  await ensureUpdateDirs()
+  if(!/^snapshot_[0-9]+_[0-9A-Za-z._-]+$/.test(snapshotId)) throw new Error('Snapshot inválido.')
+  const meta=await json(path.join(SNAPSHOT_DIR,snapshotId,'snapshot.json'))
+  await fs.rm(path.join(SNAPSHOT_DIR,snapshotId),{recursive:true,force:true})
+  return meta
 }
 
 async function sameFile(a,b){
@@ -572,8 +664,8 @@ export async function getUpdaterDiagnostics(){
   const diskOk=freeBytes===null||freeBytes>=minFreeBytes
   checks.push({id:'free-space',label:'Espaço livre mínimo',ok:diskOk,detail:freeBytes,minFreeBytes,blocking:true})
 
-  const restartStrategy=process.env.AL_UPDATE_RESTART_STRATEGY||'none'
-  const restartOk=['none','pm2','systemd'].includes(restartStrategy)
+  const restartStrategy=process.env.AL_UPDATE_RESTART_STRATEGY||(IS_TERMUX?'termux':'none')
+  const restartOk=['none','termux','pm2','systemd'].includes(restartStrategy)
   checks.push({id:'restart-strategy',label:'Estratégia de reinício',ok:restartOk,detail:restartStrategy,blocking:true})
 
   let sourceWorker=true
@@ -583,6 +675,7 @@ export async function getUpdaterDiagnostics(){
   const blocking=checks.filter(c=>c.blocking&&!c.ok)
   const warnings=[]
   if(restartStrategy==='none') warnings.push('Reinício automático não está configurado; a atualização poderá terminar como “reinício manual necessário”.')
+  if(restartStrategy==='termux') warnings.push('Termux detectado: se o Manager permanecer ativo e o backend cair durante a atualização, o mecanismo de recuperação local poderá reiniciá-lo.')
   if(freeBytes!==null&&freeBytes<256*1024*1024) warnings.push('Há menos de 256 MB livres; pacotes maiores podem exigir mais espaço para snapshot e build.')
   return {
     ok:blocking.length===0,
@@ -606,7 +699,13 @@ export async function getUpdatePreflight(stageId){
   let rootWritable=true,stateWritable=true
   try{await fs.access(ROOT_DIR,2)}catch{rootWritable=false}
   try{await fs.access(STATE_DIR,2)}catch{stateWritable=false}
-  const [currentFiles,nextFiles]=await Promise.all([scanTree(ROOT_DIR),scanTree(stageDir)])
+  const [currentFiles,nextFiles,localRuntime,managedManifest]=await Promise.all([
+    scanTree(ROOT_DIR),
+    scanTree(stageDir),
+    summarizeLocalRuntime(ROOT_DIR),
+    ensureManagedManifest(),
+  ])
+  const ownedFiles=new Set((managedManifest?.files||[]).filter(rel=>currentFiles.has(rel)))
   const added=[],changed=[],removed=[],unchanged=[]
   for(const [rel,next] of nextFiles){
     const cur=currentFiles.get(rel)
@@ -617,10 +716,12 @@ export async function getUpdatePreflight(stageId){
   if(meta.packageType==='incremental'){
     for(const rel of meta.removedFiles||[]) if(currentFiles.has(rel)) removed.push(rel)
   }else{
-    for(const rel of currentFiles.keys()) if(!nextFiles.has(rel)) removed.push(rel)
+    // Pacote completo é referência, não "apaga tudo que não veio no ZIP".
+    // Somente arquivos que pertencem ao manifesto gerenciado podem ser removidos.
+    for(const rel of ownedFiles) if(!nextFiles.has(rel)) removed.push(rel)
   }
 
-  const currentBytes=await dirBytes(currentFiles)
+  const currentBytes=await dirBytes(new Map([...currentFiles].filter(([rel])=>ownedFiles.has(rel))))
   const incomingBytes=await dirBytes(nextFiles)
   let freeBytes=null
   try{
@@ -642,7 +743,16 @@ export async function getUpdatePreflight(stageId){
   if(meta.migrations?.length) warnings.push(`${meta.migrations.length} migração(ões) de banco serão executadas.`)
   if(meta.migrationRollbackSafe===false) warnings.push('Há migrações sem rollback seguro.')
   if(dependencyChanges.length) warnings.push(`Dependências serão processadas em: ${dependencyChanges.join(', ')}.`)
-  if(removed.length>25) warnings.push(`${removed.length} arquivos serão removidos da instalação atual.`)
+  if(removed.length>25) warnings.push(`${removed.length} arquivos gerenciados pelo AL Sistemas serão removidos porque deixaram de existir na nova versão.`)
+  const notes=[
+    `Aplicação diferencial: ${unchanged.length} arquivo(s) já estão iguais e não serão regravados.`,
+    localRuntime.fileCount
+      ? `${localRuntime.fileCount} arquivo(s) locais do Termux/Manager (${Math.round(localRuntime.totalBytes/1024)} KB) foram preservados fora da comparação.`
+      : 'Nenhum artefato local do Termux/Manager entrou na comparação.',
+    managedManifest?.source==='baseline'
+      ? 'Manifesto de propriedade inicial criado: a partir desta versão o atualizador sabe quais arquivos pertencem ao AL Sistemas.'
+      : `Manifesto de propriedade ativo para ${ownedFiles.size} arquivo(s) gerenciados.`,
+  ]
 
   let risk='baixo'
   if(meta.migrations?.length||dependencyChanges.length||removed.length>10) risk='médio'
@@ -655,7 +765,12 @@ export async function getUpdatePreflight(stageId){
     createdAt:new Date().toISOString(),
     files:{
       added:added.length,changed:changed.length,removed:removed.length,unchanged:unchanged.length,
+      operations:added.length+changed.length+removed.length,
+      writes:added.length+changed.length,
       totalIncoming:nextFiles.size,
+      managedCurrent:ownedFiles.size,
+      ignoredLocal:localRuntime,
+      ownershipSource:managedManifest?.source||'baseline',
       samples:{added:added.slice(0,12),changed:changed.slice(0,12),removed:removed.slice(0,12)},
     },
     dependencies:{
@@ -667,7 +782,7 @@ export async function getUpdatePreflight(stageId){
     environment:{rootWritable,stateWritable,nodeEngine},
     updaterDiagnostics,
     disk:{freeBytes,estimatedBackupBytes,estimatedWorkingBytes,estimatedRequiredBytes,ok:diskOk},
-    risk,warnings,
+    risk,warnings,notes,
   }
 }
 
@@ -772,7 +887,7 @@ export async function createJob(stageId, options = {}) {
     id, type: 'update', stageId, fromVersion: current.version, toVersion: meta.version, packageType:meta.packageType||'full', baseVersion:meta.baseVersion||null, stageIntegrity:integrity,
     createdAt: new Date().toISOString(), status: 'queued',
     restart: {
-      strategy: options.restartStrategy || process.env.AL_UPDATE_RESTART_STRATEGY || 'none',
+      strategy: options.restartStrategy || process.env.AL_UPDATE_RESTART_STRATEGY || (IS_TERMUX ? 'termux' : 'none'),
       pm2Name: options.pm2Name || process.env.AL_UPDATE_PM2_NAME || 'al-sistemas',
       systemdService: options.systemdService || process.env.AL_UPDATE_SYSTEMD_SERVICE || 'al-sistemas.service',
     },
@@ -791,7 +906,12 @@ export async function createJob(stageId, options = {}) {
 export async function listSnapshots() {
   await ensureUpdateDirs(); const result=[]
   for (const name of await fs.readdir(SNAPSHOT_DIR)) {
-    try { result.push(await json(path.join(SNAPSHOT_DIR, name, 'snapshot.json'))) } catch {}
+    try {
+      const meta=await json(path.join(SNAPSHOT_DIR, name, 'snapshot.json'))
+      const managedFileCount=Array.isArray(meta.ownership?.files)?meta.ownership.files.length:null
+      const {ownership,...publicMeta}=meta
+      result.push({...publicMeta,managedFileCount})
+    } catch {}
   }
   return result.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
 }
@@ -801,6 +921,6 @@ export async function createRollbackJob(snapshotId, options={}) {
   const meta = await json(path.join(SNAPSHOT_DIR, snapshotId, 'snapshot.json'))
   if (meta.safe === false) throw new Error('Este snapshot não permite rollback manual seguro porque a atualização associada possui migrações sem reversão garantida.')
   const id=`job_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`
-  const job={id,type:'rollback',snapshotId,fromVersion:(await installedVersion()).version,toVersion:meta.version,createdAt:new Date().toISOString(),status:'queued',restart:{strategy:options.restartStrategy||process.env.AL_UPDATE_RESTART_STRATEGY||'none',pm2Name:options.pm2Name||process.env.AL_UPDATE_PM2_NAME||'al-sistemas',systemdService:options.systemdService||process.env.AL_UPDATE_SYSTEMD_SERVICE||'al-sistemas.service'},healthUrl:options.healthUrl||process.env.AL_UPDATE_HEALTH_URL||`http://127.0.0.1:${process.env.PORT||3001}/api/health/live`,versionUrl:options.versionUrl||process.env.AL_UPDATE_VERSION_URL||`http://127.0.0.1:${process.env.PORT||3001}/`,frontendUrl:options.frontendUrl||process.env.AL_UPDATE_FRONTEND_URL||'http://127.0.0.1:5173',returnPath:options.returnPath||'/admin/atualizacoes',monitorPort:Number(options.monitorPort||process.env.AL_UPDATE_MONITOR_PORT||(32100+crypto.randomInt(0,800)))}
+  const job={id,type:'rollback',snapshotId,fromVersion:(await installedVersion()).version,toVersion:meta.version,createdAt:new Date().toISOString(),status:'queued',restart:{strategy:options.restartStrategy||process.env.AL_UPDATE_RESTART_STRATEGY||(IS_TERMUX?'termux':'none'),pm2Name:options.pm2Name||process.env.AL_UPDATE_PM2_NAME||'al-sistemas',systemdService:options.systemdService||process.env.AL_UPDATE_SYSTEMD_SERVICE||'al-sistemas.service'},healthUrl:options.healthUrl||process.env.AL_UPDATE_HEALTH_URL||`http://127.0.0.1:${process.env.PORT||3001}/api/health/live`,versionUrl:options.versionUrl||process.env.AL_UPDATE_VERSION_URL||`http://127.0.0.1:${process.env.PORT||3001}/`,frontendUrl:options.frontendUrl||process.env.AL_UPDATE_FRONTEND_URL||'http://127.0.0.1:5173',returnPath:options.returnPath||'/admin/atualizacoes',monitorPort:Number(options.monitorPort||process.env.AL_UPDATE_MONITOR_PORT||(32100+crypto.randomInt(0,800)))}
   await atomicJson(path.join(JOB_DIR,`${id}.json`),job); return job
 }

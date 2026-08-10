@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appPackage = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'))
-const viteCacheDir = path.resolve(__dirname, 'node_modules', '.vite')
+const viteCacheDir = path.resolve(__dirname, 'node_modules', `.vite-${appPackage.version}`)
+// AL Sistemas: alterações de release invalidam o grafo otimizado com segurança no Termux.
 
 // ─── Plugin: injeta versão de build no sw.js ─────────────────
 function swVersionPlugin() {
@@ -33,9 +34,9 @@ if (process.env.VERCEL && !process.env.VITE_API_URL) {
 }
 
 export default defineConfig({
-  // Cache estável entre releases. O atualizador invalida este cache somente
-  // quando dependências do frontend ou a configuração do Vite realmente mudam.
-  // Isso evita o pre-bundle completo a cada atualização no Termux.
+  // Cache isolado por versão. O Vite que já está rodando continua usando
+  // o cache da versão atual; a próxima inicialização usa um diretório novo.
+  // Isso evita apagar o pre-bundle ativo no Termux durante uma atualização.
   cacheDir: viteCacheDir,
   define: { __APP_BUILD_ID__: JSON.stringify(buildId) },
   plugins: [react(), swVersionPlugin()],

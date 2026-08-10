@@ -48,6 +48,18 @@ function fmtBytes(b) {
   return `${(b / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function fmtRepoSize(kb) {
+  const n = Number(kb || 0)
+  if (n < 1024) return `${n} KB`
+  return `${(n / 1024).toFixed(n >= 10240 ? 0 : 1)} MB`
+}
+
+function shortDate(iso) {
+  if (!iso) return '—'
+  try { return new Intl.DateTimeFormat('pt-BR', { day:'2-digit', month:'short', year:'numeric' }).format(new Date(iso)).replace('.', '') }
+  catch { return '—' }
+}
+
 function fmtDuracao(ms) {
   if (!ms || ms < 0) return '—'
   const s = Math.floor(ms / 1000)
@@ -331,17 +343,19 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
 
   const NOMES_ETAPA = { baixando: '⬇ Baixando código-fonte...', extraindo: '📦 Extraindo arquivos...', ok: '✅ Projeto salvo com sucesso!', erro: '❌ Erro ao salvar' }
   const ABAS = [
-    { id: 'visao',     label: 'Visão Geral' },
-    { id: 'meta',      label: 'Metadados'   },
-    { id: 'commits',   label: 'Commits'     },
-    { id: 'releases',  label: 'Releases'    },
-    { id: 'artifacts', label: 'Artefatos'   },
-    { id: 'secrets',   label: '🔑 Secrets'  },
-    { id: 'workflows', label: '⚙ Workflows' },
-    { id: 'analysis',  label: 'Análise'     },
-    { id: 'push',      label: '⬆ Push',    destaque: true },
-    { id: 'delete',    label: '⚠ Excluir', perigo: true },
+    { id:'visao', icon:'◈', label:'Visão geral', desc:'Status, README e informações', grupo:'Projeto' },
+    { id:'meta', icon:'⌁', label:'Organização', desc:'Alias, tags e vínculo local', grupo:'Projeto' },
+    { id:'analysis', icon:'◎', label:'Análise', desc:'Saúde e composição do código', grupo:'Projeto' },
+    { id:'arquivos', icon:'▤', label:'Arquivos', desc:'Navegar, limpar e remover itens', grupo:'Código' },
+    { id:'commits', icon:'⌘', label:'Commits', desc:'Histórico de alterações', grupo:'Código' },
+    { id:'releases', icon:'◇', label:'Releases', desc:'Versões publicadas', grupo:'Código' },
+    { id:'artifacts', icon:'□', label:'Artefatos', desc:'Arquivos gerados por Actions', grupo:'Código' },
+    { id:'workflows', icon:'↯', label:'Workflows', desc:'Automações e execuções', grupo:'Automação' },
+    { id:'secrets', icon:'◆', label:'Secrets', desc:'Segredos de Actions', grupo:'Automação' },
+    { id:'push', icon:'↑', label:'Publicar', desc:'Enviar projeto local ao GitHub', grupo:'Automação', destaque:true },
+    { id:'delete', icon:'×', label:'Excluir repositório', desc:'Zona de risco permanente', grupo:'Manutenção', perigo:true },
   ]
+  const abaAtual = ABAS.find(a => a.id === aba) || ABAS[0]
 
   return (
     <div style={{
@@ -355,7 +369,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
       }}>
         {/* Header */}
-        <div style={{
+        <div className="gh-repo-head" style={{
           padding: `${SPACE.xl}px ${SPACE.xl2}px`, borderBottom: `1px solid ${C.border}`,
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACE.lg,
           position: 'sticky', top: 0, background: C.bg, zIndex: 10,
@@ -498,23 +512,29 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
           </div>
         </DSModal>
 
-        {/* Abas */}
-        <div style={{
-          display: 'flex', gap: 2, padding: `${SPACE.md}px ${SPACE.xl2}px`,
-          borderBottom: `1px solid ${C.border}`, flexWrap: 'wrap',
-          position: 'sticky', top: 57, background: C.bg, zIndex: 9,
-        }}>
-          {ABAS.map(a => (
-            <button key={a.id} onClick={() => mudarAba(a.id)} style={{
-              fontSize: FONT.sm, fontWeight: 600,
-              padding: `${SPACE.xs + 1}px ${SPACE.md + 2}px`,
-              borderRadius: RADIUS.sm,
-              border: `1px solid ${aba === a.id ? (a.perigo ? `${C.red}40` : C.accent) : 'transparent'}`,
-              background: aba === a.id ? (a.perigo ? `${C.red}18` : a.destaque ? `${C.greenSolid}18` : `${C.accent}18`) : 'none',
-              color: a.perigo ? C.red : a.destaque ? (aba === a.id ? C.greenSolid : C.greenSolid) : (aba === a.id ? C.text : C.muted),
-              cursor: 'pointer',
-            }}>{a.label}</button>
-          ))}
+        {/* Ponte de comando — navegação por intenção */}
+        <div className="gh-command-deck" style={{padding:`${SPACE.lg}px ${SPACE.xl2}px`,borderBottom:`1px solid ${C.border}`,position:'sticky',top:57,background:C.bg,zIndex:9}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:SPACE.md,marginBottom:SPACE.md}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:900,letterSpacing:'.16em',textTransform:'uppercase',color:C.accent}}>Ponte de comando</div>
+              <div style={{fontSize:FONT.sm,color:C.muted,marginTop:3}}>{abaAtual.grupo} · {abaAtual.label}</div>
+            </div>
+            <div style={{width:8,height:8,borderRadius:'50%',background:C.greenSolid,boxShadow:`0 0 0 5px ${C.greenSolid}18`}} title="Conectado ao GitHub" />
+          </div>
+          <div className="gh-command-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8}}>
+            {ABAS.map(a => (
+              <button key={a.id} onClick={() => mudarAba(a.id)} className="gh-command-btn" style={{
+                minWidth:0,textAlign:'left',padding:'10px 9px',borderRadius:RADIUS.md,cursor:'pointer',
+                border:`1px solid ${aba===a.id?(a.perigo?C.red:a.destaque?C.greenSolid:C.accent):C.border}`,
+                background:aba===a.id?(a.perigo?C.redBg:a.destaque?`${C.greenSolid}12`:`${C.accent}10`):C.surface,
+                color:a.perigo?C.red:a.destaque?C.greenSolid:C.text,
+              }}>
+                <div style={{display:'flex',alignItems:'center',gap:7,minWidth:0}}><span style={{fontSize:16,fontWeight:900}}>{a.icon}</span><b style={{fontSize:11,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.label}</b></div>
+                <small className="gh-command-desc" style={{display:'block',fontSize:9,color:C.muted,lineHeight:1.35,marginTop:5}}>{a.desc}</small>
+              </button>
+            ))}
+          </div>
+          <style>{`@media(max-width:720px){.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-command-desc{font-size:9px!important}.gh-command-deck{position:relative!important;top:auto!important}.gh-repo-head{position:relative!important;top:auto!important}.gh-file-row{grid-template-columns:minmax(0,1fr)!important}.gh-file-actions{justify-content:flex-end!important}.gh-clean-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}}`}</style>
         </div>
 
         {/* Conteúdo */}
@@ -530,6 +550,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               {aba === 'commits'   && <AbaCommits commits={commits} owner={owner} repo={repoNome} />}
               {aba === 'releases'  && <AbaReleases releases={releases} showRelease={showRelease} setShowRelease={setShowRelease} novaRelease={novaRelease} setNovaRelease={setNovaRelease} onCriar={criarRelease} criandoRelease={criandoRelease} />}
               {aba === 'artifacts' && <AbaArtifacts artifacts={artifacts} owner={owner} repo={repoNome} />}
+              {aba === 'arquivos'  && <AbaArquivos owner={owner} repo={repoNome} branch={repo.branch || repo.default_branch || 'main'} toastShow={toastShow} />}
               {aba === 'analysis'  && <AbaAnalysis analysis={analysis} />}
               {aba === 'secrets'   && <AbaSecrets secrets={secrets} owner={owner} repo={repoNome} onRefresh={() => { setSecrets(null); carregarAba('secrets') }} toastShow={toastShow} />}
               {aba === 'workflows' && <AbaWorkflows workflows={workflows} owner={owner} repo={repoNome} toastShow={toastShow} />}
@@ -555,6 +576,117 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
 }
 
 /* ── ABA: Visão Geral ────────────────────────────────────── */
+
+function AbaArquivos({ owner, repo, branch, toastShow }) {
+  const [pathAtual, setPathAtual] = useState('')
+  const [itens, setItens] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState(null)
+  const [alvo, setAlvo] = useState(null)
+  const [confirmacao, setConfirmacao] = useState('')
+  const [apagando, setApagando] = useState(false)
+  const [showCleanup, setShowCleanup] = useState(false)
+  const [cleanup, setCleanup] = useState(null)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
+  const [cleanupConfirm, setCleanupConfirm] = useState('')
+  const [cleanupRunning, setCleanupRunning] = useState(false)
+
+  const carregar = useCallback(async (novoPath = pathAtual) => {
+    setLoading(true); setErro(null)
+    try {
+      const d = await githubService.contents(owner, repo, novoPath, branch)
+      setItens(d.itens || []); setPathAtual(d.path || novoPath || '')
+    } catch (e) { setErro(e.message || 'Não foi possível listar os arquivos.') }
+    finally { setLoading(false) }
+  }, [owner, repo, branch, pathAtual])
+
+  useEffect(() => { carregar('') }, [owner, repo, branch])
+
+  const analisarLimpeza = async () => {
+    setShowCleanup(true); setCleanupLoading(true); setCleanup(null); setCleanupConfirm('')
+    try { setCleanup(await githubService.analisarResiduos(owner, repo, branch)) }
+    catch(e){ toastShow('Não foi possível analisar o repositório: '+(e.message||'erro'), 'erro'); setShowCleanup(false) }
+    finally{ setCleanupLoading(false) }
+  }
+  const executarLimpeza = async () => {
+    if(cleanupConfirm!=='LIMPAR') return
+    setCleanupRunning(true)
+    try{
+      const r=await githubService.limparResiduos(owner,repo,branch,cleanupConfirm)
+      toastShow(r.mensagem || `${r.removidos||0} resíduo(s) removido(s).`)
+      setShowCleanup(false); setCleanup(null); setCleanupConfirm(''); await carregar(pathAtual)
+    }catch(e){toastShow('Falha na limpeza: '+(e.message||'erro no GitHub'),'erro')}
+    finally{setCleanupRunning(false)}
+  }
+  const subir = () => { if (!pathAtual) return; const partes=pathAtual.split('/'); partes.pop(); carregar(partes.join('/')) }
+  const abrir = item => item.tipo === 'pasta' ? carregar(item.path) : window.open(item.url,'_blank','noopener,noreferrer')
+  const solicitarApagar = item => { setAlvo(item); setConfirmacao('') }
+  const apagar = async () => {
+    if (!alvo || confirmacao !== alvo.nome) return
+    setApagando(true)
+    try {
+      const r = await githubService.excluirConteudo(owner, repo, alvo.path, branch)
+      toastShow(`${alvo.tipo === 'pasta' ? 'Pasta' : 'Arquivo'} removido do GitHub (${r.removidos || 1} arquivo(s)).`)
+      setAlvo(null); setConfirmacao(''); await carregar(pathAtual)
+    } catch (e) { toastShow('Erro ao apagar: ' + (e.message || 'falha no GitHub'), 'erro') }
+    finally { setApagando(false) }
+  }
+
+  const crumbParts = pathAtual ? pathAtual.split('/') : []
+  return <div>
+    <div style={{padding:SPACE.xl,border:`1px solid ${C.border}`,borderRadius:RADIUS.lg,background:`linear-gradient(145deg,${C.surface2},${C.surface})`,marginBottom:SPACE.lg,position:'relative',overflow:'hidden'}}>
+      <div style={{position:'absolute',right:-28,top:-38,width:120,height:120,borderRadius:'50%',border:`1px solid ${C.accent}18`,boxShadow:`0 0 0 22px ${C.accent}08`}} />
+      <div style={{position:'relative',display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:SPACE.lg,flexWrap:'wrap'}}>
+        <div style={{minWidth:0,flex:'1 1 260px'}}>
+          <div style={{fontSize:10,fontWeight:900,letterSpacing:'.16em',textTransform:'uppercase',color:C.accent}}>Sistema de arquivos remoto</div>
+          <div style={{fontWeight:850,color:C.text,fontSize:FONT.lg,marginTop:5}}>Código sob controle</div>
+          <div style={{fontSize:FONT.sm,color:C.muted,marginTop:5,lineHeight:1.55}}>Navegue pela branch <b style={{color:C.text}}>{branch}</b>, remova itens manualmente ou deixe o AL Sistemas localizar resíduos de execução que nunca deveriam ter sido publicados.</div>
+        </div>
+        <DSBtn variant="primary" onClick={analisarLimpeza}>◎ Analisar resíduos</DSBtn>
+      </div>
+    </div>
+
+    <div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap',marginBottom:SPACE.md,padding:'8px 10px',border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}>
+      <DSBtn size="sm" onClick={()=>carregar('')}>⌂ Raiz</DSBtn>
+      {crumbParts.map((part,i)=>{const p=crumbParts.slice(0,i+1).join('/');return <button key={p} onClick={()=>carregar(p)} style={{border:0,background:'none',color:C.accent,cursor:'pointer',fontSize:FONT.sm,padding:2}}>/ {part}</button>})}
+      <span style={{flex:1}} />
+      {pathAtual&&<DSBtn size="sm" variant="ghost" onClick={subir}>← Subir</DSBtn>}
+      <DSBtn size="sm" variant="ghost" onClick={()=>carregar(pathAtual)}>↻</DSBtn>
+    </div>
+
+    {loading ? <Skeleton n={4}/> : erro ? <div style={{padding:SPACE.xl,color:C.red}}>{erro}</div> : itens.length===0 ? <div style={{padding:SPACE.xl3,color:C.muted,textAlign:'center',border:`1px dashed ${C.border}`,borderRadius:RADIUS.lg}}>Esta pasta está vazia.</div> :
+      <div style={{display:'grid',gap:8}}>{itens.map(item=><div key={item.path} className="gh-file-row" style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) auto',gap:SPACE.md,alignItems:'center',padding:`${SPACE.md+2}px ${SPACE.lg}px`,border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}>
+        <button onClick={()=>abrir(item)} style={{minWidth:0,border:0,background:'none',padding:0,textAlign:'left',cursor:'pointer',color:C.text,display:'flex',gap:SPACE.md,alignItems:'center'}}>
+          <span style={{width:34,height:34,borderRadius:10,display:'grid',placeItems:'center',fontSize:17,flexShrink:0,background:item.tipo==='pasta'?`${C.blue}12`:`${C.accent}10`,border:`1px solid ${item.tipo==='pasta'?C.blue:C.accent}22`}}>{item.tipo==='pasta'?'▰':'▤'}</span>
+          <span style={{minWidth:0}}><b style={{display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.nome}</b><small style={{color:C.muted}}>{item.tipo==='pasta'?'Pasta do repositório':fmtBytes(item.tamanho)}</small></span>
+        </button>
+        <div className="gh-file-actions" style={{display:'flex',gap:6}}><DSBtn size="sm" variant="danger" onClick={()=>solicitarApagar(item)}>Apagar</DSBtn></div>
+      </div>)}</div>}
+
+    <DSModal open={showCleanup} onClose={()=>!cleanupRunning&&setShowCleanup(false)} title="Manutenção inteligente do repositório" size="md" footer={<>{cleanup?.totalArquivos>0&&<DSBtn variant="danger" onClick={executarLimpeza} disabled={cleanupConfirm!=='LIMPAR'||cleanupRunning} loading={cleanupRunning}>Limpar em um commit</DSBtn>}<DSBtn onClick={()=>setShowCleanup(false)} disabled={cleanupRunning}>Fechar</DSBtn></>}>
+      {cleanupLoading ? <div style={{padding:SPACE.xl3,textAlign:'center',color:C.muted}}>Mapeando a árvore do repositório…</div> : cleanup && <div>
+        <div style={{padding:SPACE.lg,borderRadius:RADIUS.lg,background:cleanup.totalArquivos?C.amberBg:C.greenBg,border:`1px solid ${cleanup.totalArquivos?C.amber:C.greenSolid}30`,lineHeight:1.55,color:C.text}}>
+          <b>{cleanup.totalArquivos ? 'Resíduos detectados.' : 'Repositório limpo.'}</b><div style={{fontSize:FONT.sm,color:C.muted,marginTop:4}}>{cleanup.totalArquivos ? 'Somente padrões locais conhecidos serão removidos. Código-fonte, documentação, workflows e arquivos legítimos ficam intactos.' : 'Nenhum padrão local conhecido foi encontrado nesta branch.'}</div>
+        </div>
+        {cleanup.totalArquivos>0&&<>
+          <div className="gh-clean-stats" style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8,marginTop:SPACE.lg}}>
+            <div style={{padding:12,border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}><small style={{color:C.muted}}>Arquivos</small><div style={{fontWeight:900,fontSize:20,color:C.text}}>{cleanup.totalArquivos}</div></div>
+            <div style={{padding:12,border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}><small style={{color:C.muted}}>Espaço</small><div style={{fontWeight:900,fontSize:20,color:C.text}}>{fmtBytes(cleanup.totalBytes)}</div></div>
+            <div style={{padding:12,border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}><small style={{color:C.muted}}>Commit</small><div style={{fontWeight:900,fontSize:14,color:C.greenSolid}}>Único</div></div>
+          </div>
+          <div style={{marginTop:SPACE.lg}}>{(cleanup.categorias||[]).map(c=><div key={c.id} style={{display:'flex',justifyContent:'space-between',gap:10,padding:'9px 0',borderBottom:`1px solid ${C.border}`}}><span style={{color:C.text}}>{c.label}</span><span style={{color:C.muted,fontSize:FONT.sm}}>{c.arquivos} · {fmtBytes(c.bytes)}</span></div>)}</div>
+          <details style={{marginTop:SPACE.lg}}><summary style={{cursor:'pointer',fontWeight:700,color:C.accent}}>Ver caminhos detectados ({cleanup.itens.length})</summary><div style={{maxHeight:190,overflow:'auto',marginTop:8,padding:10,borderRadius:RADIUS.md,background:C.surface2,fontFamily:'monospace',fontSize:11,color:C.muted}}>{cleanup.itens.map(i=><div key={i.path} style={{padding:'3px 0',wordBreak:'break-all'}}>{i.path}</div>)}</div></details>
+          <label style={{display:'block',marginTop:SPACE.xl,fontSize:FONT.sm,color:C.muted}}>Para autorizar a limpeza, digite <b style={{color:C.text}}>LIMPAR</b><input value={cleanupConfirm} onChange={e=>setCleanupConfirm(e.target.value.toUpperCase())} style={{...inp(),marginTop:SPACE.sm}} placeholder="LIMPAR" /></label>
+        </>}
+      </div>}
+    </DSModal>
+
+    <DSModal open={!!alvo} onClose={()=>!apagando&&setAlvo(null)} title="Apagar do GitHub" size="sm" footer={<><DSBtn variant="danger" onClick={apagar} disabled={!alvo||confirmacao!==alvo.nome||apagando} loading={apagando}>Apagar definitivamente</DSBtn><DSBtn onClick={()=>setAlvo(null)} disabled={apagando}>Cancelar</DSBtn></>}>
+      {alvo&&<div><div style={{padding:SPACE.lg,borderRadius:RADIUS.md,background:C.redBg,border:`1px solid ${C.redBorder}`,color:C.red,lineHeight:1.5}}>Você vai remover <b>{alvo.path}</b>{alvo.tipo==='pasta'?' e todo o conteúdo dentro dela':''}. O GitHub registrará a remoção em um novo commit.</div><label style={{display:'block',marginTop:SPACE.lg,fontSize:FONT.sm,color:C.muted}}>Digite <b style={{color:C.text}}>{alvo.nome}</b> para confirmar<input value={confirmacao} onChange={e=>setConfirmacao(e.target.value)} style={{...inp(),marginTop:SPACE.sm}} autoFocus/></label></div>}
+    </DSModal>
+  </div>
+}
+
 function AbaVisao({ repo, readme }) {
   return (
     <div>
@@ -1559,56 +1691,72 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
 }
 
 /* ── Card de repo (lista principal) ─────────────────────── */
-function RepoCard({ repo, meta, onAbrir }) {
+function RepoCard({ repo, meta, insight, onAbrir }) {
   const statusCfg = STATUS_CFG[meta?.statusInterno]
+  const acesso = repo.permissoes?.admin || repo.permissoes?.maintain || repo.permissoes?.push ? 'Leitura e escrita' : 'Somente leitura'
+  const resumo = repo.descricao?.trim() || insight?.resumo || `${repo.linguagem ? `Projeto ${repo.linguagem}` : 'Repositório'} no GitHub · branch principal ${repo.branch || '—'}`
+  const visibilidade = repo.privado ? 'Privado' : 'Público'
   return (
-    <div onClick={() => onAbrir(repo)}
-      style={{
-        background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.lg,
-        padding: `14px ${SPACE.xl}px`, display: 'flex', flexDirection: 'column', gap: SPACE.md + 2,
-        cursor: 'pointer', transition: 'border-color .15s',
-      }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = C.accent}
-      onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: SPACE.md }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap' }}>
-            {meta?.favorito && <span style={{ fontSize: FONT.base }}>⭐</span>}
-            <span style={{ fontSize: FONT.md, fontWeight: 700, color: C.text }}>{repo.nome}</span>
-            {meta?.alias && <span style={{ fontSize: FONT.xs, color: C.muted }}>({meta.alias})</span>}
-            {repo.privado   && <DSBadge variant="amber">privado</DSBadge>}
+    <article className="gh-repo-card" onClick={() => onAbrir(repo)}>
+      <div className="gh-card-topline" />
+      <div style={{ display:'flex', justifyContent:'space-between', gap:SPACE.md, alignItems:'flex-start' }}>
+        <div style={{ minWidth:0, flex:1 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:SPACE.sm, flexWrap:'wrap' }}>
+            {meta?.favorito && <span title="Favorito" style={{ fontSize:14 }}>★</span>}
+            <h2 style={{ margin:0, fontSize:FONT.xl, lineHeight:1.15, color:C.text, letterSpacing:'-.02em' }}>{repo.nome}</h2>
+            <DSBadge variant={repo.privado ? 'amber' : 'green'}>{visibilidade}</DSBadge>
+            {repo.fork && <DSBadge variant="blue">fork</DSBadge>}
             {repo.arquivado && <DSBadge variant="gray">arquivado</DSBadge>}
             {statusCfg && meta?.statusInterno !== 'ativo' && (
-              <DSBadge style={{ color: statusCfg.cor, background: `${statusCfg.cor}18` }}>{statusCfg.label}</DSBadge>
+              <DSBadge style={{ color:statusCfg.cor, background:`${statusCfg.cor}18` }}>{statusCfg.label}</DSBadge>
             )}
           </div>
-          {repo.descricao && (
-            <div style={{ fontSize: FONT.sm, color: C.muted, marginTop: 3, lineHeight: 1.4 }}>
-              {repo.descricao.length > 90 ? repo.descricao.slice(0, 90) + '…' : repo.descricao}
-            </div>
-          )}
-          {meta?.tags?.length > 0 && (
-            <div style={{ display: 'flex', gap: SPACE.xs, marginTop: SPACE.xs + 1, flexWrap: 'wrap' }}>
-              {meta.tags.map(t => <DSBadge key={t} variant="purple">{t}</DSBadge>)}
-            </div>
-          )}
+          <div style={{ marginTop:4, color:C.subtle, fontSize:FONT.xs, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{repo.nomeCompleto}</div>
         </div>
-        <div style={{ flexShrink: 0, color: C.muted, fontSize: FONT.xs, marginTop: 2 }}>›</div>
+        <span aria-hidden="true" style={{ color:C.muted, fontSize:18, lineHeight:1 }}>›</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.sm }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap' }}>
-          <LangBadge lang={repo.linguagem} />
-          {repo.temas?.slice(0, 3).map(t => <DSBadge key={t} variant="blue">{t}</DSBadge>)}
+
+      <p style={{ margin:0, color:C.muted, fontSize:FONT.md, lineHeight:1.5, minHeight:38 }}>
+        {resumo.length > 145 ? resumo.slice(0,145) + '…' : resumo}
+      </p>
+
+      {insight && (insight.produto || insight.tipo || insight.versao) && (
+        <div style={{ display:'flex', gap:SPACE.xs, flexWrap:'wrap' }}>
+          {insight.produto && <DSBadge variant="purple">{insight.produto}</DSBadge>}
+          {insight.versao && <DSBadge variant="blue">v{insight.versao}</DSBadge>}
+          {insight.tipo && <DSBadge variant="gray">{insight.tipo}</DSBadge>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md + 2 }}>
-          {repo.stars  > 0 && <span style={{ fontSize: FONT.xs, color: C.muted }}>★ {repo.stars}</span>}
-          {repo.forks  > 0 && <span style={{ fontSize: FONT.xs, color: C.muted }}>⑂ {repo.forks}</span>}
-          {repo.issues > 0 && <span style={{ fontSize: FONT.xs, color: C.amber }}>● {repo.issues}</span>}
-          <span style={{ fontSize: FONT.xs, color: C.muted }}>{relTime(repo.ultimaAtualizacao)}</span>
-        </div>
+      )}
+
+      <div className="gh-repo-facts">
+        <div><span>BRANCH</span><b>{repo.branch || '—'}</b></div>
+        <div><span>TAMANHO</span><b>{fmtRepoSize(repo.tamanho)}</b></div>
+        <div><span>ÚLTIMO PUSH</span><b>{relTime(repo.ultimoPush || repo.ultimaAtualizacao)}</b></div>
       </div>
-    </div>
+
+      <div style={{ display:'flex', alignItems:'center', gap:SPACE.sm, flexWrap:'wrap' }}>
+        <LangBadge lang={repo.linguagem} size={FONT.xs} />
+        {repo.licenca && <DSBadge variant="gray">{repo.licenca}</DSBadge>}
+        <DSBadge variant={acesso === 'Leitura e escrita' ? 'green' : 'gray'}>{acesso}</DSBadge>
+        {repo.temas?.slice(0,2).map(t => <DSBadge key={t} variant="blue">{t}</DSBadge>)}
+      </div>
+
+      <div className="gh-repo-footer">
+        <div className="gh-repo-counters">
+          <span title="Stars">★ <b>{repo.stars || 0}</b></span>
+          <span title="Forks">⑂ <b>{repo.forks || 0}</b></span>
+          <span title="Issues abertas">● <b>{repo.issues || 0}</b></span>
+          {repo.watchers > 0 && <span title="Watchers">◉ <b>{repo.watchers}</b></span>}
+        </div>
+        <span title={`Criado em ${shortDate(repo.criadoEm)}`}>Atualizado {relTime(repo.ultimaAtualizacao)}</span>
+      </div>
+
+      {meta?.tags?.length > 0 && (
+        <div style={{ display:'flex', gap:SPACE.xs, flexWrap:'wrap' }}>
+          {meta.tags.map(t => <DSBadge key={t} variant="purple">{t}</DSBadge>)}
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -1634,8 +1782,10 @@ export default function AdminGitHub() {
   const [sort,         setSort]         = useState('updated')
   const [busca,        setBusca]        = useState('')
   const [filtroStatus, setFiltroStatus] = useState('todos')
+  const [filtroVis,    setFiltroVis]    = useState('todos')
   const [repoAberto,   setRepoAberto]   = useState(null)
   const [metas,        setMetas]        = useState({})
+  const [insights,     setInsights]     = useState({})
 
   const { repos, status, total, loading, erro, recarregar } = useGitHubRepos({ sort })
   const { toast, show: toastShow } = useToast()
@@ -1647,18 +1797,33 @@ export default function AdminGitHub() {
     })
   }, [repos.length])
 
+  useEffect(() => {
+    if (!repos.length) return
+    repos.slice(0, 12).forEach(r => {
+      const [owner, nome] = (r.nomeCompleto || '').split('/')
+      if (!owner || !nome || insights[r.id]) return
+      githubService.insight(owner, nome, r.branch || 'main')
+        .then(info => setInsights(prev => ({ ...prev, [r.id]: info })))
+        .catch(() => {})
+    })
+  }, [repos.length])
+
   const reposFiltrados = repos.filter(r => {
     const meta = metas[r.id]
     const matchBusca = !busca.trim() ||
       r.nome.toLowerCase().includes(busca.toLowerCase()) ||
       (r.descricao || '').toLowerCase().includes(busca.toLowerCase()) ||
       (meta?.alias || '').toLowerCase().includes(busca.toLowerCase()) ||
-      (meta?.tags || []).some(t => t.toLowerCase().includes(busca.toLowerCase()))
+      (meta?.tags || []).some(t => t.toLowerCase().includes(busca.toLowerCase())) ||
+      (insights[r.id]?.produto || '').toLowerCase().includes(busca.toLowerCase()) ||
+      (insights[r.id]?.tipo || '').toLowerCase().includes(busca.toLowerCase())
     const matchStatus =
       filtroStatus === 'todos' ? true :
-      filtroStatus === 'favoritos' ? meta?.favorito :
+      filtroStatus === 'favoritos' ? !!meta?.favorito :
+      filtroStatus === 'arquivado' ? !!r.arquivado :
       (meta?.statusInterno || 'ativo') === filtroStatus
-    return matchBusca && matchStatus
+    const matchVis = filtroVis === 'todos' ? true : filtroVis === 'privados' ? !!repo.privado : !repo.privado
+    return matchBusca && matchStatus && matchVis
   })
 
   function fecharPainel(recarregarLista = false) {
@@ -1669,50 +1834,86 @@ export default function AdminGitHub() {
   return (
     <div style={{ maxWidth: 900 }}>
       <Toast toast={toast} />
+      <style>{`
+        .gh-account-hero{background:linear-gradient(135deg,var(--adm-surface,#fff),var(--adm-surface2,#f7f5f2));border:1px solid var(--adm-border,#e8e3dc);border-radius:14px;padding:18px;margin-bottom:18px;position:relative;overflow:hidden}
+        .gh-account-hero:after{content:'';position:absolute;right:-48px;top:-62px;width:180px;height:180px;border-radius:50%;border:1px solid color-mix(in srgb,var(--adm-accent) 14%,transparent);box-shadow:0 0 0 28px color-mix(in srgb,var(--adm-accent) 5%,transparent)}
+        .gh-account-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
+        .gh-account-stat{background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:10px;padding:10px 12px;min-width:0}
+        .gh-account-stat span,.gh-repo-facts span{display:block;font-size:9px;letter-spacing:.10em;color:var(--adm-muted);font-weight:800}
+        .gh-account-stat b{display:block;margin-top:4px;font-size:15px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis}
+        .gh-repo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+        .gh-repo-card{position:relative;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;overflow:hidden;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+        .gh-repo-card:hover{border-color:var(--adm-accent);transform:translateY(-1px);box-shadow:0 10px 30px rgba(20,30,24,.06)}
+        .gh-card-topline{position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--adm-accent),transparent 72%);opacity:.75}
+        .gh-repo-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+        .gh-repo-facts>div{background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:8px;padding:8px 9px;min-width:0}
+        .gh-repo-facts b{display:block;margin-top:3px;font-size:11px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .gh-repo-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}
+        .gh-repo-counters{display:flex;align-items:center;gap:12px}.gh-repo-counters b{color:var(--adm-text)}
+        .gh-filter-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:8px}
+        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-account-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-90px;top:-80px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media(max-width:420px){.gh-repo-facts{grid-template-columns:1fr 1fr}.gh-repo-facts>div:last-child{grid-column:1/-1}.gh-repo-footer{align-items:flex-start;flex-direction:column}.gh-account-stat b{font-size:13px}}
+      `}</style>
 
-      <div className="adm-page-header">
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, marginBottom: SPACE.xs }}>
-            <span style={{ color: C.accent }}><AdminIcon name="git" size={18} /></span>
-            <h1 className="adm-page-title" style={{ margin: 0 }}>GitHub Module</h1>
-          </div>
-          {status?.ok ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm }}>
-              {status.avatar && <img src={status.avatar} alt={status.login} style={{ width: 20, height: 20, borderRadius: '50%', border: `1px solid ${C.border}` }} />}
-              <span className="adm-page-sub">{status.nome || status.login}{status.empresa && ` · ${status.empresa}`}</span>
-              <DSBadge variant="green">conectado</DSBadge>
+      <section className="gh-account-hero">
+        <div style={{ position:'relative', zIndex:1, display:'flex', justifyContent:'space-between', gap:SPACE.lg, alignItems:'flex-start' }}>
+          <div style={{ minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:SPACE.md, marginBottom:SPACE.xs }}>
+              <span style={{ color:C.accent }}><AdminIcon name="git" size={19} /></span>
+              <h1 className="adm-page-title" style={{ margin:0 }}>Central GitHub</h1>
+              {status?.ok && <DSBadge variant="green">conectado</DSBadge>}
             </div>
-          ) : (
-            <span className="adm-page-sub">Repositórios via proxy seguro</span>
-          )}
+            {status?.ok ? (
+              <div style={{ display:'flex', alignItems:'center', gap:SPACE.sm, color:C.muted, fontSize:FONT.md, flexWrap:'wrap' }}>
+                {status.avatar && <img src={status.avatar} alt={status.login} style={{ width:24, height:24, borderRadius:'50%', border:`1px solid ${C.border}` }} />}
+                <b style={{ color:C.text }}>{status.nome || status.login}</b>
+                <span>@{status.login}</span>
+                {status.empresa && <span>· {status.empresa}</span>}
+              </div>
+            ) : <span className="adm-page-sub">Código, publicação, automações e manutenção em uma única central.</span>}
+          </div>
+          <DSBtn variant="secondary" size="sm" onClick={recarregar} loading={loading}>
+            <AdminIcon name="refresh" size={12} /> Atualizar
+          </DSBtn>
         </div>
-        <DSBtn variant="secondary" size="sm" onClick={recarregar} loading={loading}>
-          <AdminIcon name="refresh" size={12} /> Atualizar
-        </DSBtn>
-      </div>
+        {status?.ok && (
+          <div className="gh-account-stats" style={{ position:'relative', zIndex:1 }}>
+            <div className="gh-account-stat"><span>REPOSITÓRIOS VISÍVEIS</span><b>{total}</b></div>
+            <div className="gh-account-stat"><span>PÚBLICOS</span><b>{repos.filter(r => !r.privado).length}</b></div>
+            <div className="gh-account-stat"><span>PRIVADOS</span><b>{repos.filter(r => r.privado).length}</b></div>
+            <div className="gh-account-stat"><span>ATIVIDADE</span><b>{repos[0]?.ultimaAtualizacao ? relTime(repos[0].ultimaAtualizacao) : '—'}</b></div>
+          </div>
+        )}
+      </section>
 
       {/* Filtros */}
       {!erro && !loading && (
-        <div style={{ marginBottom: SPACE.lg, display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
-          <div style={{ display: 'flex', gap: SPACE.md, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom:SPACE.lg, display:'flex', flexDirection:'column', gap:SPACE.md }}>
+          <div className="gh-filter-row">
             <input value={busca} onChange={e => setBusca(e.target.value)}
-              placeholder="Buscar por nome, descrição, alias, tag..."
-              style={{ flex: '1 1 200px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.sm}px ${SPACE.lg}px`, fontSize: FONT.base, color: C.text, outline: 'none' }} />
+              placeholder="Buscar repositório, descrição, alias ou tag…"
+              style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:RADIUS.md, padding:`${SPACE.md + 2}px ${SPACE.lg}px`, fontSize:FONT.base, color:C.text, outline:'none', minWidth:0 }} />
+            <select value={filtroVis} onChange={e => setFiltroVis(e.target.value)}
+              style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:RADIUS.md, padding:`${SPACE.md}px ${SPACE.md + 2}px`, fontSize:FONT.base, color:C.text }}>
+              <option value="todos">Toda visibilidade</option>
+              <option value="publicos">Públicos</option>
+              <option value="privados">Privados</option>
+            </select>
             <select value={sort} onChange={e => setSort(e.target.value)}
-              style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.sm}px ${SPACE.md + 2}px`, fontSize: FONT.base, color: C.text, cursor: 'pointer' }}>
+              style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:RADIUS.md, padding:`${SPACE.md}px ${SPACE.md + 2}px`, fontSize:FONT.base, color:C.text }}>
               {SORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </div>
-          <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display:'flex', gap:SPACE.sm, flexWrap:'wrap', alignItems:'center' }}>
             {FILTRO_STATUS.map(f => (
               <button key={f.value} onClick={() => setFiltroStatus(f.value)} style={{
-                fontSize: FONT.sm, fontWeight: 600, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, borderRadius: RADIUS.sm,
-                border: `1px solid ${filtroStatus === f.value ? C.accent : C.border}`,
-                background: filtroStatus === f.value ? `${C.accent}18` : C.surface,
-                color: filtroStatus === f.value ? C.text : C.muted, cursor: 'pointer',
+                fontSize:FONT.sm, fontWeight:700, padding:`${SPACE.sm}px ${SPACE.md + 2}px`, borderRadius:RADIUS.pill,
+                border:`1px solid ${filtroStatus === f.value ? C.accent : C.border}`,
+                background:filtroStatus === f.value ? `${C.accent}14` : C.surface,
+                color:filtroStatus === f.value ? C.text : C.muted, cursor:'pointer',
               }}>{f.label}</button>
             ))}
-            <span style={{ fontSize: FONT.sm, color: C.muted, marginLeft: 'auto' }}>{reposFiltrados.length}/{total} repos</span>
+            <span style={{ fontSize:FONT.sm, color:C.muted, marginLeft:'auto' }}>{reposFiltrados.length} exibido(s) · {total} carregado(s)</span>
           </div>
         </div>
       )}
@@ -1724,7 +1925,7 @@ export default function AdminGitHub() {
             {erro.includes('GITHUB_TOKEN') ? 'Token GitHub não configurado' : 'Erro ao carregar repositórios'}
           </div>
           <div style={{ fontSize: FONT.base, color: C.muted, marginBottom: SPACE.lg }}>
-            {erro.includes('GITHUB_TOKEN') ? 'Adicione GITHUB_TOKEN no .env do backend.' : erro}
+            {erro.includes('GITHUB_TOKEN') ? 'Configure a credencial GitHub em Integrações e APIs.' : erro}
           </div>
           {!erro.includes('GITHUB_TOKEN') && (
             <DSBtn variant="secondary" size="sm" onClick={recarregar}>Tentar novamente</DSBtn>
@@ -1737,8 +1938,8 @@ export default function AdminGitHub() {
           {busca || filtroStatus !== 'todos' ? 'Nenhum repositório para esses filtros.' : 'Nenhum repositório disponível.'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: SPACE.md + 2 }}>
-          {reposFiltrados.map(repo => <RepoCard key={repo.id} repo={repo} meta={metas[repo.id]} onAbrir={setRepoAberto} />)}
+        <div className="gh-repo-grid">
+          {reposFiltrados.map(repo => <RepoCard key={repo.id} repo={repo} meta={metas[repo.id]} insight={insights[repo.id]} onAbrir={setRepoAberto} />)}
         </div>
       )}
 

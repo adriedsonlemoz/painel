@@ -69,8 +69,8 @@ function CategoriaModal({ categoria, onSalvar, onFechar, salvando }) {
         }
         @keyframes cat-slide-up { from { transform: translateY(10px); opacity: 0 } to { transform: none; opacity: 1 } }
         @media (max-width: 600px) {
-          .cat-overlay { align-items: flex-end; padding: 0; }
-          .cat-modal   { border-radius: 20px 20px 0 0; max-width: 100%; padding: SPACE.xl3px 20px 32px; }
+          .cat-overlay { align-items: center; justify-content: center; padding: 12px; }
+          .cat-modal   { border-radius: 20px; max-width: 100%; max-height: calc(100dvh - 24px); overflow-y: auto; padding: SPACE.xl3px 20px 24px; }
         }
       `}</style>
 

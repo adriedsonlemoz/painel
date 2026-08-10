@@ -9,6 +9,8 @@ export const updatesService = {
     const res=await fetch(`${BASE_URL}/admin/updates/prepare`,{method:'POST',body:form,credentials:'include'})
     const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||`Erro ${res.status}`); return data
   },
+  excluirPreparado(id){ return api(`/admin/updates/staged/${id}`,{method:'DELETE',timeoutMs:20000}) },
+  excluirSnapshot(id){ return api(`/admin/updates/snapshots/${id}`,{method:'DELETE',timeoutMs:20000}) },
   preflight(id){ return api(`/admin/updates/${id}/preflight`,{timeoutMs:60000}) },
   instalar(id,config={}){ return api(`/admin/updates/${id}/install`,{method:'POST',body:JSON.stringify(config),timeoutMs:60000}) },
   rollback(id,config={}){ return api(`/admin/updates/rollback/${id}`,{method:'POST',body:JSON.stringify(config),timeoutMs:20000}) },

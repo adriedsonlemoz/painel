@@ -1,6 +1,6 @@
 {
   "name": "al-sistemas-backend",
-  "version": "1.0.66",
+  "version": "1.0.80",
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
@@ -60,5 +60,9 @@
     "rimraf": "^5.0.0",
     "uuid": "^11.0.0",
     "inflight": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
   }
 }
