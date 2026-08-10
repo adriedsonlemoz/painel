@@ -1,11 +1,27 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { spawn } from 'child_process'
+import os from 'os'
 import { STAGING_DIR, HISTORY_FILE, touchUpdateLock, releaseUpdateLock } from '../services/systemUpdateService.js'
 import { gravarErroSistemaSpool } from '../services/systemErrorSpool.js'
 
 const readJson=async f=>JSON.parse(await fs.readFile(f,'utf8'))
 const writeJson=async(f,v)=>fs.writeFile(f,JSON.stringify(v,null,2))
+
+const execGit=(args,{cwd,env={},timeout=120000}={})=>new Promise((resolve,reject)=>{
+  const child=spawn('git',args,{cwd,env:{...process.env,...env},stdio:['ignore','pipe','pipe']})
+  let stdout='',stderr=''
+  const timer=setTimeout(()=>{child.kill('SIGKILL');reject(new Error(`Git excedeu ${Math.round(timeout/1000)}s: git ${args.join(' ')}`))},timeout)
+  child.stdout.on('data',d=>stdout+=d);child.stderr.on('data',d=>stderr+=d)
+  child.once('error',e=>{clearTimeout(timer);reject(e)})
+  child.once('close',code=>{clearTimeout(timer);code===0?resolve({stdout:stdout.trim(),stderr:stderr.trim()}):reject(new Error((stderr||stdout||`git terminou com código ${code}`).trim()))})
+})
+async function gitAvailable(){try{await execGit(['--version'],{timeout:5000});return true}catch{return false}}
+async function copyTreeFiltered(source,dest,skipped){
+  async function walk(current,rel=''){for(const ent of await fs.readdir(current,{withFileTypes:true})){const childRel=rel?`${rel}/${ent.name}`:ent.name;if(skipped(childRel))continue;const from=path.join(current,ent.name),to=path.join(dest,childRel);if(ent.isDirectory()){await fs.mkdir(to,{recursive:true});await walk(from,childRel)}else if(ent.isFile()){await fs.mkdir(path.dirname(to),{recursive:true});await fs.copyFile(from,to)}}}
+  await walk(source)
+}
 
 export async function runGithubPublish(initialJob,token,{jobFile=null,persistHistory=true}={}){
   if(!token) throw new Error('Token GitHub ausente.')
@@ -150,6 +166,33 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
     return p==='.gitignore'||p==='README.md'||p==='LICENSE'||p==='LICENSE.md'||p==='vercel.json'||p.startsWith('.github/')||p.startsWith('backend/')
   }
 
+  async function publishWithNativeGit({stage,meta,owner,repo,branch,cfg,ignored,dependencyWarnings}){
+    const temp=await fs.mkdtemp(path.join(os.tmpdir(),'alsistemas-git-')),askpass=path.join(temp,'askpass.sh'),repoDir=path.join(temp,'repo')
+    try{
+      await fs.writeFile(askpass,'#!/bin/sh\ncase "$1" in *Username*) echo "x-access-token";; *) echo "$AL_GITHUB_TOKEN";; esac\n',{mode:0o700})
+      const gitEnv={GIT_ASKPASS:askpass,GIT_TERMINAL_PROMPT:'0',AL_GITHUB_TOKEN:token}
+      await phase('git-native-init','Git nativo disponível · preparando cópia de trabalho',18,{publishEngine:'git-native',ignoredCount:ignored.length,dependencyWarnings})
+      await fs.mkdir(repoDir,{recursive:true});await execGit(['init'],{cwd:repoDir,env:gitEnv});await execGit(['remote','add','origin',`https://github.com/${owner}/${repo}.git`],{cwd:repoDir,env:gitEnv})
+      let hasRemote=false
+      try{await execGit(['fetch','--depth=1','origin',branch],{cwd:repoDir,env:gitEnv});await execGit(['checkout','-B',branch,'FETCH_HEAD'],{cwd:repoDir,env:gitEnv});hasRemote=true}catch{await execGit(['checkout','--orphan',branch],{cwd:repoDir,env:gitEnv})}
+      await phase('git-native-sync','Comparando a release com o repositório',28,{publishEngine:'git-native'})
+      if(cfg.deletePrefix===''){for(const ent of await fs.readdir(repoDir,{withFileTypes:true})){if(ent.name==='.git'||preserveRootPath(ent.name))continue;await fs.rm(path.join(repoDir,ent.name),{recursive:true,force:true})}}
+      else if(cfg.deletePrefix)await fs.rm(path.join(repoDir,cfg.deletePrefix.replace(/\/$/,'')),{recursive:true,force:true})
+      else for(const name of ['frontend','backend'])await fs.rm(path.join(repoDir,name),{recursive:true,force:true})
+      if(cfg.prefix){const target=path.join(repoDir,cfg.prefix);await fs.mkdir(target,{recursive:true});await copyTreeFiltered(cfg.source,target,skipped)}else await copyTreeFiltered(cfg.source,repoDir,skipped)
+      await execGit(['add','-A'],{cwd:repoDir,env:gitEnv})
+      const status=(await execGit(['status','--porcelain'],{cwd:repoDir,env:gitEnv})).stdout,changes=status?status.split(/\r?\n/).filter(Boolean):[]
+      const added=changes.filter(x=>x.startsWith('A ')||x.startsWith('??')).length,removed=changes.filter(x=>x.startsWith('D ')||x.slice(1,2)==='D').length,changed=Math.max(0,changes.length-added-removed),diff={total:changes.length,added,changed,removed}
+      await phase('git-native-diff',changes.length?`${changes.length} alteração(ões) reais encontradas`:'Repositório já está sincronizado',48,{publishEngine:'git-native',diff,diffPreview:changes.slice(0,30)})
+      if(!changes.length){const head=hasRemote?(await execGit(['rev-parse','HEAD'],{cwd:repoDir,env:gitEnv})).stdout:null;return {commitSha:head,commitUrl:head?`https://github.com/${owner}/${repo}/commit/${head}`:`https://github.com/${owner}/${repo}`,noChanges:true,diff}}
+      await execGit(['config','user.name','AL Sistemas'],{cwd:repoDir,env:gitEnv});await execGit(['config','user.email','al-sistemas@localhost'],{cwd:repoDir,env:gitEnv})
+      await phase('git-native-commit','Criando commit local',68,{publishEngine:'git-native'});await execGit(['commit','-m',job.commitMessage||`Atualiza AL Sistemas para ${meta.version}`],{cwd:repoDir,env:gitEnv})
+      const sha=(await execGit(['rev-parse','HEAD'],{cwd:repoDir,env:gitEnv})).stdout
+      await phase('git-native-push','Enviando pacote Git compactado para o GitHub',84,{publishEngine:'git-native',commitSha:sha});await execGit(['push','origin',`HEAD:${branch}`],{cwd:repoDir,env:gitEnv,timeout:180000})
+      return {commitSha:sha,commitUrl:`https://github.com/${owner}/${repo}/commit/${sha}`,noChanges:false,diff}
+    }finally{await fs.rm(temp,{recursive:true,force:true}).catch(()=>{})}
+  }
+
   try{
     await update({status:'running',startedAt:new Date().toISOString(),timeline:[],progress:2})
     await phase('github-validate','Validando destino no GitHub',5)
@@ -203,6 +246,16 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
     if(!files.length) throw new Error(job.sourceType==='installed'?'Nenhum arquivo publicável foi encontrado na instalação atual.':'Nenhum arquivo publicável foi encontrado no pacote.')
     const dependencyWarnings=await dependencyPreflight(files)
     await phase('github-dependencies',dependencyWarnings.length?'Dependências verificadas com aviso':'Dependências prontas para hospedagem',15,{dependencyWarnings})
+
+    if(job.preferNativeGit!==false && await gitAvailable()){
+      try{
+        const native=await publishWithNativeGit({stage,meta,owner,repo,branch,cfg,ignored,dependencyWarnings})
+        await phase('completed',native.noChanges?'Nenhuma alteração para publicar':'Publicado com Git nativo',100,{publishEngine:'git-native',commitSha:native.commitSha,commitUrl:native.commitUrl,version:meta.version,diff:native.diff})
+        await update({status:'completed',completedAt:new Date().toISOString(),commitSha:native.commitSha,commitUrl:native.commitUrl,version:meta.version,publishEngine:'git-native',diff:native.diff,noChanges:native.noChanges})
+        await history({id:job.id,type:'github-publish',status:'success',engine:'git-native',fromVersion:job.fromVersion,toVersion:meta.version,repository:job.repository,branch:job.branch,commitSha:native.commitSha,commitUrl:native.commitUrl,diff:native.diff,createdAt:new Date().toISOString()})
+        if(heartbeat)clearInterval(heartbeat);if(jobFile)await releaseUpdateLock(job.id);return job
+      }catch(nativeError){await phase('github-api-fallback','Git nativo não concluiu · alternando automaticamente para API',17,{publishEngine:'github-api',nativeError:nativeError.message})}
+    }else await phase('github-api-mode','Git nativo indisponível · usando API do GitHub',17,{publishEngine:'github-api'})
 
     // A Git Database API do GitHub (blobs/trees/refs) devolve 409 em repositórios
     // totalmente vazios. Inicializamos a branch usando a Contents API com um arquivo
@@ -295,8 +348,8 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
     }
 
     const commitUrl=`https://github.com/${owner}/${repo}/commit/${newCommit.sha}`
-    await phase('completed','Publicado no GitHub',100,{commitSha:newCommit.sha,commitUrl,version:meta.version})
-    await update({status:'completed',completedAt:new Date().toISOString(),commitSha:newCommit.sha,commitUrl,version:meta.version})
+    await phase('completed','Publicado no GitHub',100,{publishEngine:'github-api',commitSha:newCommit.sha,commitUrl,version:meta.version})
+    await update({status:'completed',completedAt:new Date().toISOString(),publishEngine:'github-api',commitSha:newCommit.sha,commitUrl,version:meta.version})
     await history({id:job.id,type:'github-publish',status:'success',fromVersion:job.fromVersion,toVersion:meta.version,repository:job.repository,branch:job.branch,commitSha:newCommit.sha,commitUrl,createdAt:new Date().toISOString()})
     if(heartbeat)clearInterval(heartbeat)
     if(jobFile)await releaseUpdateLock(job.id)

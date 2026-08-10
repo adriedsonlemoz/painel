@@ -1,16 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.80",
+  "version": "1.0.82",
   "packageFormat": 2,
   "changelog": [
-    "Após validar um ZIP, a Central abre automaticamente a simulação da instalação; não é mais necessário procurar o pacote preparado.",
-    "A ação Instalar passa a ficar ao lado de Publicar na Central; a antiga opção GitHub/Vercel foi removida dos cards de staging para evitar duplicidade.",
-    "Tela de versões preparadas redesenhada com Release Brief, integridade, dependências, migrações e alterações mais importantes visíveis.",
-    "Resumo técnico da Central agora mostra Backend, Frontend, Node.js, npm, React, Vite, Express e Mongoose.",
-    "Painel Ambiente ganhou React Router, versão do Termux e estado da conexão MongoDB.",
-    "Mensagem do monitor externo foi substituída por Canal independente, com nova tentativa automática de transferência quando ele terminar de iniciar.",
-    "Cache do Vite passa a ser isolado por versão e o atualizador no Termux preserva o cache que o processo ativo pode estar usando.",
-    "Mantidas as proteções de aplicação diferencial, manifesto de propriedade, snapshots, rollback, recuperação e diagnóstico."
+    "Publicação GitHub em Termux/VPS agora prefere Git nativo, enviando o diff compactado em vez de criar um blob HTTP para cada arquivo.",
+    "Se Git nativo não estiver disponível ou falhar, o publicador alterna automaticamente para a API GitHub existente.",
+    "O job registra o motor usado e o diff real: novos, alterados e removidos.",
+    "Publicação sem mudanças termina sem criar commit desnecessário.",
+    "Corrigido workflow Android: capacitor.config.ts agora existe e pode receber a URL da Vercel antes do npx cap sync.",
+    "Confirmado pelo novo log que npm ci está saudável: 418 pacotes instalados em cerca de 5 segundos; o erro atual do APK era exclusivamente a ausência de capacitor.config.ts."
   ],
   "updatePackages": {
     "full": true,

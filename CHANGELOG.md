@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.82
+- Publicação GitHub em Termux/VPS agora prefere Git nativo, enviando o diff compactado em vez de criar um blob HTTP para cada arquivo.
+- Se Git nativo não estiver disponível ou falhar, o publicador alterna automaticamente para a API GitHub existente.
+- O job registra o motor usado e o diff real: novos, alterados e removidos.
+- Publicação sem mudanças termina sem criar commit desnecessário.
+- Corrigido workflow Android: capacitor.config.ts agora existe e pode receber a URL da Vercel antes do npx cap sync.
+- Confirmado pelo novo log que npm ci está saudável: 418 pacotes instalados em cerca de 5 segundos; o erro atual do APK era exclusivamente a ausência de capacitor.config.ts.
+
+# Changelog
+
+## 1.0.81
+- Dashboard administrativo redesenhado do zero como Central Editorial do Portal de Notícias.
+- Conteúdo passa a ser a informação principal, com última publicação, publicadas, rascunhos, eventos e alertas.
+- Projetos passam para a segunda área da hierarquia, preparados visualmente para Termux e futura migração a VPS.
+- APIs deixam de aparecer como etiquetas de fornecedores; o Dashboard passa a mostrar funções operacionais: Núcleo, Banco, Cache, Mídia, Publicação, IA e Rede.
+- Nova área Atenção transforma contadores em ações compreensíveis e navegáveis.
+- Atividade administrativa e notícias recentes foram reorganizadas em painéis de leitura rápida.
+- Usuários deixam de dominar o Dashboard e passam a uma área contextual de equipe.
+- Layout responsivo prioriza celular, sem grids horizontais ou cards estreitos.
+
 ## 1.0.80
 - Fluxo de atualização contínuo: depois de enviar e validar o ZIP, o pré-check de instalação abre automaticamente.
 - `Instalar` foi promovido para a Central, ao lado de `Publicar`; a ação GitHub/Vercel duplicada foi removida dos cards de versões preparadas.
