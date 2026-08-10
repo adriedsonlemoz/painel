@@ -1,0 +1,1 @@
+[2026-08-09 23:34:22 -0300] rc=1 arquivo=/data/data/com.termux/files/home/scripts/manager/modules/projects.sh linha=891 função=excluir_painel_inteiro comando=rm -rf "${PAINEL_DIR:?}" incidente=/data/data/com.termux/files/home/Painel/.logs/diagnostics/manager/erro-20260809-233422-32104-9858.txt

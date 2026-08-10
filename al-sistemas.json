@@ -1,0 +1,15 @@
+{
+  "product": "AL Sistemas",
+  "version": "1.0.54",
+  "packageFormat": 2,
+  "changelog": [
+    "Corrige publicação da versão atual em repositório GitHub totalmente vazio.",
+    "Primeiro envio inicializa a branch pela Contents API antes de usar blobs, trees e refs.",
+    "Suporta branch padrão e branch personalizada no primeiro envio, mantendo arquivos sensíveis excluídos."
+  ],
+  "updatePackages": {
+    "full": true,
+    "incremental": true,
+    "incrementalFrom": "1.0.52"
+  }
+}

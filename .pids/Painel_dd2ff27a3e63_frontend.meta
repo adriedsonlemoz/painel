@@ -1,0 +1,9 @@
+DIR=/data/data/com.termux/files/home/Painel/frontend
+PROJECT=/data/data/com.termux/files/home/Painel
+LABEL=Painel
+COMPONENT=frontend
+CMD=npm run dev -- --host 127.0.0.1
+START=1786330360
+EXPECTED_PORT=5173
+PORT=5173
+STATE=healthy

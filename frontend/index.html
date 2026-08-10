@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AL Sistemas — Painel de Gerenciamento SaaS" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="google" content="notranslate" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#16a34a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AL Sistemas" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" /></noscript>
+    <style>
+      #boot-screen{min-height:100vh;display:grid;place-items:center;background:#f8faf9;color:#18221d;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .boot-card{display:flex;align-items:center;gap:13px;padding:18px 20px;border:1px solid #e4ebe6;border-radius:16px;background:#fff;box-shadow:0 14px 38px rgba(27,94,59,.10)}
+      .boot-dot{width:13px;height:13px;border:2px solid #1B5E3B;border-top-color:transparent;border-radius:999px;animation:boot-spin .7s linear infinite}
+      .boot-copy strong{display:block;font-size:14px;color:#18221d}.boot-copy span{display:block;margin-top:2px;color:#66756c;font-size:12px}
+      @keyframes boot-spin{to{transform:rotate(360deg)}}
+    </style>
+    <title>AL Sistemas</title>
+  </head>
+  <body>
+    <div id="als-native-guard" style="position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:#f8faf9;color:#18221d;font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:20px">
+      <div style="max-width:560px;width:100%;background:#fff;border:1px solid #e4ebe6;border-radius:16px;padding:20px;box-shadow:0 14px 38px rgba(27,94,59,.10)">
+        <strong style="display:block;font-size:16px">AL Sistemas</strong>
+        <span id="als-native-guard-message" style="display:block;margin-top:5px;color:#66756c;font-size:13px;line-height:1.5">Inicializando interface…</span>
+      </div>
+    </div>
+    <script>
+      (function(){
+        function showFatal(message){
+          var guard=document.getElementById('als-native-guard');
+          var text=document.getElementById('als-native-guard-message');
+          if(guard) guard.style.display='grid';
+          if(text) text.textContent='Falha ao iniciar a interface: '+String(message||'erro desconhecido')+'. Recarregue a página. Se continuar, abra Administração → Erros.';
+        }
+        window.__AL_NATIVE_GUARD_HIDE__=function(){ var g=document.getElementById('als-native-guard'); if(g) g.remove(); };
+        window.addEventListener('error',function(e){ if(!document.getElementById('root')?.hasChildNodes()) showFatal(e.error?.message||e.message); });
+        window.addEventListener('unhandledrejection',function(e){ if(!document.getElementById('root')?.hasChildNodes()) showFatal(e.reason?.message||e.reason); });
+        // Em execução local/Termux, SW antigo é uma causa comum de tela branca após troca de versão.
+        if((location.hostname==='127.0.0.1'||location.hostname==='localhost')&&'serviceWorker' in navigator){
+          navigator.serviceWorker.getRegistrations().then(function(regs){ regs.forEach(function(r){ r.unregister(); }); }).catch(function(){});
+          if('caches' in window) caches.keys().then(function(keys){ keys.filter(function(k){return k.indexOf('alsistemas-')===0;}).forEach(function(k){caches.delete(k);}); }).catch(function(){});
+        }
+      })();
+    </script>
+    <div id="root"><div id="boot-screen"><div class="boot-card"><span class="boot-dot"></span><div class="boot-copy"><strong id="boot-portal-name">AL Sistemas</strong><span>Carregando portal de notícias...</span></div></div></div></div>
+    <script>
+      // Mostra a identidade pública já no primeiro carregamento, antes do React iniciar.
+      // Falhas de API não impedem o boot: "AL Sistemas" permanece como fallback.
+      // Primeiro uso: o status é lido apenas do cofre local do backend, sem MongoDB.
+      // Isso permite redirecionar uma instalação nova mesmo quando a pessoa abre '/'.
+      window.__AL_SETUP_STATUS_PROMISE__ = fetch('/api/setup/status', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null })
+        .then(function (status) {
+          if (status && status.setup_needed && location.pathname !== '/admin/setup') {
+            location.replace('/admin/setup')
+          }
+          return status
+        })
+        .catch(function () { return null })
+
+      window.__AL_PUBLIC_CONFIG_PROMISE__ = window.__AL_SETUP_STATUS_PROMISE__.then(function (status) {
+        if (status && status.setup_needed) return null
+        return fetch('/api/configuracoes', { credentials: 'same-origin' })
+      })
+        .then(function (r) { return r && r.ok ? r.json() : null })
+        .then(function (cfg) {
+          if (!cfg) return null
+          window.__AL_PUBLIC_CONFIG__ = cfg
+          var nome = String(cfg.nome_site || '').trim()
+          if (nome) {
+            var el = document.getElementById('boot-portal-name')
+            if (el) el.textContent = nome
+            document.title = cfg.site_titulo || nome
+          }
+          return cfg
+        })
+        .catch(function () { return null })
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
