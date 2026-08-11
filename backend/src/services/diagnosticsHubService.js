@@ -37,7 +37,17 @@ export async function githubSnapshot(){
     const results=await Promise.allSettled((repos||[]).slice(0,6).map(async repo=>{
       const runs=await readJson(`https://api.github.com/repos/${repo.full_name}/actions/runs?per_page=5`,h,9000)
       const failed=(runs.workflow_runs||[]).find(r=>['failure','cancelled','timed_out','action_required','startup_failure'].includes(r.conclusion))
-      return failed?{id:`github:${failed.id}`,source:'github',severity:failed.conclusion==='failure'?'critical':'warning',title:failed.name||'Workflow com falha',message:`${repo.full_name} · ${failed.conclusion}`,createdAt:iso(failed.updated_at||failed.created_at),url:failed.html_url,meta:{owner:repo.owner?.login,repo:repo.name,runId:failed.id,workflow:failed.name,branch:failed.head_branch,sha:failed.head_sha}}:null
+      if(!failed)return null
+      let severity=failed.conclusion==='failure'?'critical':'warning',title=failed.name||'Workflow com falha',message=`${repo.full_name} · ${failed.conclusion}`,failureKind='workflow'
+      if(failed.conclusion==='failure'){
+        try{
+          const jobs=await readJson(`https://api.github.com/repos/${repo.full_name}/actions/runs/${failed.id}/jobs?per_page=100`,h,9000)
+          const badSteps=(jobs.jobs||[]).flatMap(j=>(j.steps||[]).filter(st=>st.conclusion==='failure').map(st=>({job:j.name,step:st.name})))
+          const artifactOnly=badSteps.length>0&&badSteps.every(x=>/upload.*artifact|artifact.*upload|upload apk/i.test(String(x.step||'')))
+          if(artifactOnly){severity='warning';failureKind='artifact-upload';title=`${failed.name||'Workflow'} · artefato não enviado`;message=`${repo.full_name} · o build terminou, mas o GitHub não conseguiu armazenar o artefato. Reexecutar o workflow normalmente resolve falhas transitórias do serviço de artifacts.`}
+        }catch{}
+      }
+      return {id:`github:${failed.id}`,source:'github',severity,title,message,createdAt:iso(failed.updated_at||failed.created_at),url:failed.html_url,meta:{owner:repo.owner?.login,repo:repo.name,runId:failed.id,workflow:failed.name,branch:failed.head_branch,sha:failed.head_sha,failureKind}}
     }))
     const events=results.filter(r=>r.status==='fulfilled'&&r.value).map(r=>r.value).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
     return {source:'github',configured:true,ok:events.length===0,label:'GitHub',summary:events.length?`${events.length} execução(ões) com falha`:'Sem falhas recentes',events:events.slice(0,8)}
@@ -68,7 +78,9 @@ export async function renderSnapshot(){
   const h={Authorization:`Bearer ${cred.value}`}
   try{
     const rows=await readJson('https://api.render.com/v1/services?limit=20',h,12000)
-    const services=(Array.isArray(rows)?rows:[]).map(r=>r.service||r).filter(s=>s?.id)
+    let services=(Array.isArray(rows)?rows:[]).map(r=>r.service||r).filter(s=>s?.id)
+    const primaryId=cred.metadata?.primaryServiceId||''
+    if(primaryId){const primary=services.find(s=>s.id===primaryId);if(primary)services=[primary]}
     const results=await Promise.allSettled(services.slice(0,10).map(async s=>{
       const data=await readJson(`https://api.render.com/v1/services/${encodeURIComponent(s.id)}/deploys?limit=5`,h,9000)
       const ds=(Array.isArray(data)?data:[]).map(r=>r.deploy||r)

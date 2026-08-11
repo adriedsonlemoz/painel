@@ -490,7 +490,7 @@ async function run(cmd,args,cwd,options={}){
       if(settled)return;settled=true;clear()
       const elapsedMs=Date.now()-startedMs
       await updateJob({externalProcess:null,lastExternalProcess:{command,cwd,pid:child.pid,startedAt,finishedAt:new Date().toISOString(),elapsedMs,exitError:err?.message||null,stdoutTail,stderrTail}}).catch(()=>{})
-      if(err)await incident(err.message,{terminal:true,exitError:err.message})
+      if(err){err.stdoutTail=stdoutTail;err.stderrTail=stderrTail;err.command=command;await incident(err.message,{terminal:true,exitError:err.message})}
       err?reject(err):resolve()
     }
     progressTimer=setInterval(()=>{
@@ -520,6 +520,18 @@ async function run(cmd,args,cwd,options={}){
     })
   })
 }
+async function runNpmDependencyInstall(cwd,hasLock){
+  if(!hasLock)return run('npm',['install','--prefer-offline','--omit=optional','--no-audit','--no-fund'],cwd,{timeoutMs:15*60*1000})
+  try{
+    return await run('npm',['ci','--prefer-offline','--omit=optional','--no-audit','--no-fund'],cwd,{timeoutMs:15*60*1000})
+  }catch(e){
+    const detail=`${e?.message||''} ${e?.stderrTail||''}`
+    if(!/EUSAGE|package-lock.*sync|Missing: .* from lock file|can only install packages/i.test(detail))throw e
+    await updateJob({dependencyRecovery:{reason:'lockfile-out-of-sync',action:'npm-install',cwd,at:new Date().toISOString()}}).catch(()=>{})
+    return run('npm',['install','--prefer-offline','--omit=optional','--no-audit','--no-fund'],cwd,{timeoutMs:15*60*1000})
+  }
+}
+
 async function dependencies(meta){
   for(const area of ['backend','frontend']){
     const dep=meta.dependencies?.[area]
@@ -537,7 +549,7 @@ async function dependencies(meta){
       continue
     }
 
-    await run('npm',[hasLock?'ci':'install','--prefer-offline','--omit=optional','--no-audit','--no-fund'],cwd,{timeoutMs:15*60*1000})
+    await runNpmDependencyInstall(cwd,hasLock)
   }
 }
 async function restoreDependencies(areas=[]){
@@ -546,7 +558,7 @@ async function restoreDependencies(areas=[]){
     const cwd=path.join(ROOT_DIR,area)
     if(!(await exists(path.join(cwd,'package.json'))))continue
     const hasLock=await exists(path.join(cwd,'package-lock.json'))
-    await run('npm',[hasLock?'ci':'install','--prefer-offline','--omit=optional','--no-audit','--no-fund'],cwd,{timeoutMs:15*60*1000})
+    await runNpmDependencyInstall(cwd,hasLock)
   }
 }
 async function migrate(){ if(await exists(path.join(ROOT_DIR,'backend/migrate-mongo-config.js'))||await exists(path.join(ROOT_DIR,'backend/migrate-mongo-config.cjs'))){ await run('npm',['run','migrate'],path.join(ROOT_DIR,'backend'),{timeoutMs:5*60*1000}) } }

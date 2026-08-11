@@ -16,7 +16,13 @@ export const MAX_TOKENS_DEFAULT = parseInt(process.env.AI_MAX_TOKENS || '1200', 
 export const AI_TIMEOUT_MS = Math.max(6000, Math.min(45000, parseInt(process.env.AI_TIMEOUT_MS || '20000', 10)))
 export const AI_OPERATION_TIMEOUT_MS = Math.max(15000, Math.min(120000, parseInt(process.env.AI_OPERATION_TIMEOUT_MS || '45000', 10)))
 
-const DEFAULTS = { gemini: 'gemini-2.5-flash', openrouter: 'openrouter/free' }
+const DEFAULTS = { gemini: 'gemini-3.5-flash-lite', openrouter: 'openrouter/free' }
+const GEMINI_RETIRED_ALIASES = new Set(['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'])
+function runtimeModel(id, model){
+  const value=String(model||DEFAULTS[id]||'').trim()
+  if(id==='gemini'&&GEMINI_RETIRED_ALIASES.has(value))return DEFAULTS.gemini
+  return value||DEFAULTS[id]
+}
 const PROVIDERS = ['gemini','openrouter']
 const healthMemory = new Map()
 
@@ -30,10 +36,10 @@ export function truncarContexto(contexto) {
 async function providerConfig(id, override = null) {
   const envMap = { gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY' }
   if (override?.value) {
-    return { id, value: override.value, locked: false, source: 'temporary-test', metadata: override.metadata || {}, model: override.metadata?.model || DEFAULTS[id], enabled: override.metadata?.enabled !== false }
+    return { id, value: override.value, locked: false, source: 'temporary-test', metadata: override.metadata || {}, model: runtimeModel(id,override.metadata?.model), enabled: override.metadata?.enabled !== false }
   }
   const c = await getCredential(id, envMap[id])
-  return { id, ...c, metadata:c.metadata || {}, model:c.metadata?.model || DEFAULTS[id], enabled:c.metadata?.enabled !== false }
+  return { id, ...c, metadata:c.metadata || {}, model:runtimeModel(id,c.metadata?.model), configuredModel:String(c.metadata?.model||''), enabled:c.metadata?.enabled !== false }
 }
 
 async function providerCandidates(preferred) {

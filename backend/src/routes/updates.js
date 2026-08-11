@@ -128,7 +128,9 @@ function cloudReleaseView(doc){
     cloudStored:true,storage:d.storage||'r2',bucket:d.bucket,objectKey:d.objectKey,
     packageBytes:d.packageBytes||0,repository:d.repository||'',branch:d.branch||'main',
     publishMode:d.publishMode||'project',commitSha:d.commitSha||'',commitUrl:d.commitUrl||'',
-    githubStatus:d.githubStatus||'pending',vercel:d.vercel||{},render:d.render||{},
+    githubStatus:d.githubStatus||'pending',githubVerified:Boolean(d.githubVerified),githubVerifiedAt:d.githubVerifiedAt||null,githubVerification:d.githubVerification||{},
+    productionTarget:d.productionTarget||{},trackingStartedAt:d.trackingStartedAt||null,lastCheckedAt:d.lastCheckedAt||null,trackingAttempts:Number(d.trackingAttempts||0),
+    stalledAt:d.stalledAt||null,interruptedAt:d.interruptedAt||null,recovery:d.recovery||{},vercel:d.vercel||{},render:d.render||{},
     productionReady:Boolean(d.productionReady),error:d.error||'',publishedAt:d.publishedAt||null,
     completedAt:d.completedAt||null,
   }
@@ -136,11 +138,102 @@ function cloudReleaseView(doc){
 async function listCloudReleases(limit=20){
   if(mongoose.connection.readyState!==1)return []
   const docs=await UpdateRelease.find({}).sort({createdAt:-1}).limit(limit).lean()
+  const publishTimeout=Math.max(2*60*1000,Number(process.env.AL_UPDATE_GITHUB_PUBLISH_TIMEOUT_MS||12*60*1000))
+  const now=Date.now()
+  for(const doc of docs){
+    if(doc.status==='publishing'&&!doc.commitSha){
+      const started=new Date(doc.updatedAt||doc.publishedAt||doc.createdAt||0).getTime()
+      if(started&&now-started>publishTimeout){
+        doc.status='publish-stalled'
+        doc.error='A publicação no GitHub foi interrompida antes de confirmar um commit. O pacote continua preservado no R2 e pode ser publicado novamente.'
+        doc.stalledAt=new Date()
+        doc.completedAt=new Date()
+        doc.recovery={action:'republish',message:'Reinicie a publicação usando o ZIP já armazenado no R2.',detectedAt:new Date()}
+        await UpdateRelease.updateOne({_id:doc._id},{$set:{status:doc.status,error:doc.error,stalledAt:doc.stalledAt,completedAt:doc.completedAt,recovery:doc.recovery}}).catch(()=>{})
+      }
+    }
+  }
   return docs.map(cloudReleaseView)
 }
 async function cloudStorageStatus(){
   try{return await testR2UpdateStorage()}
   catch(e){return {ok:false,error:e.message,code:e.code||null}}
+}
+
+function normalizeGithubRepository(value=''){
+  let raw=String(value||'').trim()
+  if(!raw)return ''
+  raw=raw.replace(/^https?:\/\/(?:www\.)?github\.com\//i,'').replace(/^git@github\.com:/i,'').replace(/\.git$/i,'').replace(/^\/+|\/+$/g,'')
+  const m=raw.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/)
+  return m?`${m[1]}/${m[2]}`:''
+}
+
+async function resolveProductionGitTarget(){
+  const [vercelCred,renderCred]=await Promise.all([
+    getCredential('vercel','VERCEL_TOKEN'),
+    getCredential('render','RENDER_API_KEY'),
+  ])
+  const result={ok:false,repository:'',branch:'',sources:{vercel:null,render:null},message:'',conflict:false}
+  if(vercelCred.value&&vercelCred.metadata?.primaryProjectId){
+    try{
+      const teamId=vercelCred.metadata?.teamId||process.env.VERCEL_TEAM_ID||''
+      const r=await fetch(vercelApiUrl(`/v9/projects/${encodeURIComponent(vercelCred.metadata.primaryProjectId)}`,teamId),{headers:{Authorization:`Bearer ${vercelCred.value}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
+      const body=await r.json().catch(()=>({}))
+      if(!r.ok)throw new Error(body.error?.message||`Vercel respondeu ${r.status}`)
+      const project=body.project||body||{}
+      const link=project.link||{}
+      const repoRaw=String(link.repo||'')
+      const repo=normalizeGithubRepository(repoRaw)||(repoRaw&&link.org?normalizeGithubRepository(`${link.org}/${repoRaw}`):'')
+      result.sources.vercel={configured:true,projectId:project.id||vercelCred.metadata.primaryProjectId,name:project.name||'',repository:repo,branch:String(link.productionBranch||'').trim()||''}
+    }catch(e){result.sources.vercel={configured:true,error:e.message,repository:'',branch:''}}
+  }else result.sources.vercel={configured:Boolean(vercelCred.value),repository:'',branch:'',message:vercelCred.value?'Projeto principal não selecionado.':'Vercel não configurada.'}
+
+  if(renderCred.value&&renderCred.metadata?.primaryServiceId){
+    try{
+      const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(renderCred.metadata.primaryServiceId)}`,{headers:{Authorization:`Bearer ${renderCred.value}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
+      const body=await r.json().catch(()=>({}))
+      if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
+      const service=body.service||body||{}
+      result.sources.render={configured:true,serviceId:service.id||renderCred.metadata.primaryServiceId,name:service.name||'',repository:normalizeGithubRepository(service.repo||''),branch:String(service.branch||'').trim()||''}
+    }catch(e){result.sources.render={configured:true,error:e.message,repository:'',branch:''}}
+  }else result.sources.render={configured:Boolean(renderCred.value),repository:'',branch:'',message:renderCred.value?'Serviço principal não selecionado.':'Render não configurada.'}
+
+  const repos=[result.sources.vercel?.repository,result.sources.render?.repository].filter(Boolean)
+  const uniqueRepos=[...new Set(repos.map(x=>x.toLowerCase()))]
+  if(uniqueRepos.length>1){
+    result.conflict=true
+    result.message=`Vercel e Render estão ligados a repositórios diferentes (${repos.join(' / ')}). Corrija os vínculos na Central de Plataformas antes de atualizar.`
+    return result
+  }
+  const branches=[result.sources.vercel?.branch,result.sources.render?.branch].filter(Boolean)
+  const uniqueBranches=[...new Set(branches.map(x=>x.toLowerCase()))]
+  if(uniqueBranches.length>1){
+    result.conflict=true
+    result.repository=repos[0]||''
+    result.message=`Vercel e Render usam branches diferentes (${branches.join(' / ')}). Alinhe a branch de produção antes de atualizar.`
+    return result
+  }
+  result.repository=repos[0]||''
+  result.branch=branches[0]||'main'
+  result.ok=Boolean(result.repository)
+  result.message=result.ok?`Produção vinculada a ${result.repository} @ ${result.branch}.`:'Não foi possível determinar automaticamente o repositório de produção. Vincule Vercel ou Render na Central de Plataformas.'
+  return result
+}
+
+async function verifyGithubReleaseCommit({token,repository,branch,commitSha,version}){
+  const normalized=normalizeGithubRepository(repository)
+  if(!normalized||!commitSha)throw new Error('Não foi possível verificar o commit: destino GitHub ou SHA ausente.')
+  const [owner,repo]=normalized.split('/')
+  const commit=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(commitSha)}`)
+  if(String(commit.sha||'').toLowerCase()!==String(commitSha).toLowerCase())throw new Error('O GitHub retornou um commit diferente do SHA publicado.')
+  const file=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/al-sistemas.json?ref=${encodeURIComponent(commitSha)}`)
+  if(!file?.content)throw new Error('O commit foi criado, mas al-sistemas.json não foi encontrado na raiz do repositório.')
+  let manifest
+  try{manifest=JSON.parse(Buffer.from(String(file.content).replace(/\n/g,''),'base64').toString('utf8'))}catch{throw new Error('O commit foi criado, mas al-sistemas.json não pôde ser validado.') }
+  if(String(manifest.version||'')!==String(version||''))throw new Error(`O commit publicado contém AL Sistemas ${manifest.version||'sem versão'}, mas a release preparada é ${version}.`)
+  let headSha=''
+  try{const branchData=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch||'main')}`);headSha=branchData?.commit?.sha||''}catch{}
+  return {ok:true,repository:normalized,branch:branch||'main',commitSha:commit.sha,branchHeadSha:headSha,version:String(manifest.version||''),verifiedAt:new Date()}
 }
 async function platformDeployState(release){
   const [vercelCred,renderCred]=await Promise.all([
@@ -155,7 +248,7 @@ async function platformDeployState(release){
   if(vercelCred.value&&vercelCred.metadata?.primaryProjectId&&commitSha){
     try{
       const teamId=vercelCred.metadata?.teamId||process.env.VERCEL_TEAM_ID||''
-      const r=await fetch(vercelApiUrl(`/v6/deployments?projectId=${encodeURIComponent(vercelCred.metadata.primaryProjectId)}&limit=20`,teamId),{headers:{Authorization:`Bearer ${vercelCred.value}`,Accept:'application/json'}})
+      const r=await fetch(vercelApiUrl(`/v6/deployments?projectId=${encodeURIComponent(vercelCred.metadata.primaryProjectId)}&limit=20`,teamId),{headers:{Authorization:`Bearer ${vercelCred.value}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
       const body=await r.json().catch(()=>({}))
       if(!r.ok)throw new Error(body.error?.message||`Vercel respondeu ${r.status}`)
       const found=(body.deployments||[]).find(d=>String(d.meta?.githubCommitSha||'').toLowerCase()===commitSha.toLowerCase() && String(d.target||'').toLowerCase()==='production')
@@ -168,7 +261,7 @@ async function platformDeployState(release){
 
   if(renderCred.value&&renderCred.metadata?.primaryServiceId&&commitSha){
     try{
-      const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(renderCred.metadata.primaryServiceId)}/deploys?limit=20`,{headers:{Authorization:`Bearer ${renderCred.value}`,Accept:'application/json'}})
+      const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(renderCred.metadata.primaryServiceId)}/deploys?limit=20`,{headers:{Authorization:`Bearer ${renderCred.value}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
       const body=await r.json().catch(()=>[])
       if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
       const rows=Array.isArray(body)?body:[]
@@ -183,19 +276,54 @@ function deploymentReady(state){
   const rd=['live','succeeded','deployed'].includes(String(state.render?.status||'').toLowerCase())
   return vc&&rd
 }
-async function refreshCloudRelease(release){
+async function refreshCloudRelease(release,{force=false}={}){
   if(!release?.commitSha)return cloudReleaseView(release)
+  const target=await resolveProductionGitTarget()
+  const publishedRepo=normalizeGithubRepository(release.repository||'')
+  if(target.ok && publishedRepo && publishedRepo.toLowerCase()!==target.repository.toLowerCase()){
+    const error=`O commit foi publicado em ${publishedRepo}, mas a produção está ligada a ${target.repository}. Acompanhamento interrompido para evitar esperar por um deploy que nunca chegará.`
+    const updated=await UpdateRelease.findOneAndUpdate({releaseId:release.releaseId},{$set:{
+      status:'deploy-target-mismatch',productionReady:false,error,productionTarget:target,lastCheckedAt:new Date(),stalledAt:new Date(),completedAt:new Date(),
+      recovery:{action:'republish',message:'Publique novamente o mesmo pacote do R2 usando o repositório de produção detectado.',detectedAt:new Date()},
+    },$inc:{trackingAttempts:1}},{new:true})
+    return cloudReleaseView(updated)
+  }
+  if(target.conflict){
+    const updated=await UpdateRelease.findOneAndUpdate({releaseId:release.releaseId},{$set:{
+      status:'deploy-blocked',productionReady:false,error:target.message,productionTarget:target,lastCheckedAt:new Date(),completedAt:new Date(),
+    },$inc:{trackingAttempts:1}},{new:true})
+    return cloudReleaseView(updated)
+  }
+
   const platform=await platformDeployState(release)
   const ready=deploymentReady(platform)
   const failed=String(platform.vercel?.status||'').toUpperCase()==='ERROR'||/fail|error|cancel/i.test(String(platform.render?.status||''))
   const blocked=['not-configured','not-linked'].includes(String(platform.vercel?.status||''))||['not-configured','not-linked'].includes(String(platform.render?.status||''))
-  const status=ready?'completed':failed?'deploy-failed':blocked?'deploy-blocked':'deploying'
-  const error=blocked
-    ? [platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Vincule Vercel e Render na Central de Plataformas.'
-    : failed?[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Um dos deploys falhou.':''
-  const updated=await UpdateRelease.findOneAndUpdate({releaseId:release.releaseId},{
-    $set:{vercel:platform.vercel,render:platform.render,productionReady:ready,status,error,completedAt:ready?new Date():null},
-  },{new:true})
+  const startedAt=new Date(release.trackingStartedAt||release.publishedAt||release.updatedAt||release.createdAt||Date.now()).getTime()
+  const ageMs=Math.max(0,Date.now()-startedAt)
+  const vc=String(platform.vercel?.status||'waiting')
+  const rd=String(platform.render?.status||'waiting')
+  const vcWaiting=['waiting','pending',''].includes(vc.toLowerCase())
+  const rdWaiting=['waiting','pending',''].includes(rd.toLowerCase())
+  const vcWorking=['BUILDING','QUEUED','INITIALIZING','PENDING'].includes(vc.toUpperCase())
+  const rdWorking=/build|progress|queued|pending|update|create/i.test(rd)
+  const recognitionTimeout=Math.max(2*60*1000,Number(process.env.AL_UPDATE_DEPLOY_RECOGNITION_TIMEOUT_MS||8*60*1000))
+  const buildTimeout=Math.max(recognitionTimeout,Number(process.env.AL_UPDATE_DEPLOY_BUILD_TIMEOUT_MS||45*60*1000))
+  const stalled=!ready&&!failed&&!blocked&&((vcWaiting&&rdWaiting&&ageMs>recognitionTimeout)||((vcWorking||rdWorking||vcWaiting||rdWaiting)&&ageMs>buildTimeout))
+
+  let status=ready?'completed':failed?'deploy-failed':blocked?'deploy-blocked':stalled?'deploy-stalled':'deploying'
+  let error=''
+  if(blocked) error=[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Vincule Vercel e Render na Central de Plataformas.'
+  else if(failed) error=[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Um dos deploys falhou.'
+  else if(stalled) error=vcWaiting&&rdWaiting
+    ?`Vercel e Render não reconheceram o commit ${String(release.commitSha).slice(0,12)} dentro do tempo esperado. O acompanhamento foi pausado; o pacote continua preservado no R2.`
+    :'O deploy excedeu o tempo esperado. O acompanhamento foi pausado para não deixar a Central travada indefinidamente.'
+
+  const set={vercel:platform.vercel,render:platform.render,productionReady:ready,status,error,productionTarget:target,lastCheckedAt:new Date(),completedAt:ready||failed||blocked||stalled?new Date():null}
+  if(stalled)set.stalledAt=new Date()
+  if(ready)set.stalledAt=null
+  if(stalled)set.recovery={action:'reconcile-or-republish',message:'Reconsultar as plataformas ou publicar novamente o pacote preservado no R2.',detectedAt:new Date()}
+  const updated=await UpdateRelease.findOneAndUpdate({releaseId:release.releaseId},{$set:set,$inc:{trackingAttempts:1}},{new:true})
   return cloudReleaseView(updated)
 }
 async function maybeTriggerRenderCommit(commitSha){
@@ -203,7 +331,7 @@ async function maybeTriggerRenderCommit(commitSha){
   const serviceId=cred.metadata?.primaryServiceId||''
   if(!cred.value||!serviceId||!commitSha)return {triggered:false,reason:'not-configured'}
   try{
-    const serviceResp=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`,{headers:{Authorization:`Bearer ${cred.value}`,Accept:'application/json'}})
+    const serviceResp=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`,{headers:{Authorization:`Bearer ${cred.value}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
     const serviceBody=await serviceResp.json().catch(()=>({}))
     const service=serviceBody?.service||serviceBody||{}
     const auto=String(service.autoDeploy??'').toLowerCase()
@@ -225,8 +353,8 @@ router.get('/',async(_req,res,next)=>{try{
   const stack=await runtimeStack()
   const cloudReleases=IS_MANAGED_PLATFORM?await listCloudReleases():[]
   const cloudStorage=IS_MANAGED_PLATFORM?await cloudStorageStatus():null
-  const cloudReady=cloudReleases.filter(x=>['ready','publishing','deploying','deploy-failed','deploy-blocked','failed'].includes(x.status))
-  const cloudHistory=cloudReleases.filter(x=>['completed','deploy-failed','deploy-blocked','failed'].includes(x.status))
+  const cloudReady=cloudReleases.filter(x=>['ready','publishing','publish-stalled','deploying','deploy-stalled','deploy-target-mismatch','deploy-failed','deploy-blocked','failed','interrupted'].includes(x.status))
+  const cloudHistory=cloudReleases.filter(x=>['completed','publish-stalled','deploy-stalled','deploy-target-mismatch','deploy-failed','deploy-blocked','failed','interrupted'].includes(x.status))
   res.json({
     installed:await installedVersion(),staged:IS_MANAGED_PLATFORM?cloudReady:await listStaged(),history:IS_MANAGED_PLATFORM?cloudHistory:await readHistory(),snapshots:IS_MANAGED_PLATFORM?[]:await listSnapshots(),activeOperation,cloudStorage,
     runtime:{
@@ -275,6 +403,12 @@ function vercelApiUrl(pathName,teamId=''){
   if(teamId)u.searchParams.set('teamId',teamId)
   return u.toString()
 }
+router.get('/production-target',async(_req,res,next)=>{try{
+  if(!IS_MANAGED_PLATFORM)return res.json({ok:false,managed:false,repository:'',branch:'main',message:'Destino automático é usado apenas em Vercel/Render.'})
+  const target=await resolveProductionGitTarget()
+  res.status(target.ok?200:409).json({...target,managed:true})
+}catch(e){next(e)}})
+
 router.get('/deployment-check',async(req,res,next)=>{try{
   const repository=String(req.query.repository||'').trim()
   const branch=String(req.query.branch||'main').trim()||'main'
@@ -331,7 +465,23 @@ router.get('/deployment-check',async(req,res,next)=>{try{
       render={configured:true,ok:true,services:matches,serviceId:first?.id||'',repo:first?.repo||'',branch:first?.branch||'',message:matches.length?`${matches.length} serviço(s) Render vinculado(s) a este repositório/branch.`:'Render conectada, mas nenhum serviço vinculado a este repositório/branch foi identificado.'}
     }catch(e){render={...render,ok:false,message:e.message}}
   }
-  res.json({ok:github.writable,github,vercel,render})
+  let productionTarget=null
+  if(IS_MANAGED_PLATFORM){
+    productionTarget=await resolveProductionGitTarget()
+    if(productionTarget.ok){
+      const repoMatch=normalizeGithubRepository(repository).toLowerCase()===productionTarget.repository.toLowerCase()
+      const branchMatch=String(branch).toLowerCase()===String(productionTarget.branch||'main').toLowerCase()
+      github.productionTarget=productionTarget
+      github.targetMismatch=!repoMatch||!branchMatch
+      if(github.targetMismatch){
+        github.ok=false
+        github.message=`A produção está vinculada a ${productionTarget.repository} @ ${productionTarget.branch}. O atualizador não publicará em ${repository} @ ${branch}.`
+      }
+    }else if(productionTarget.conflict){
+      github.ok=false;github.targetMismatch=true;github.message=productionTarget.message
+    }
+  }
+  res.json({ok:github.writable&&!github.targetMismatch,github,vercel,render,productionTarget})
 }catch(e){next(e)}})
 
 router.post('/self-test',async(_req,res,next)=>{try{
@@ -472,8 +622,9 @@ router.post('/prepare',upload.single('package'),async(req,res,next)=>{try{
       {$set:{
         releaseId:meta.id,version:meta.version,fromVersion:(await installedVersion()).version,filename:req.file.originalname,packageType:meta.packageType||'full',
         packageSha256:meta.sha256,packageBytes:storage.bytes,bucket:storage.bucket,objectKey:storage.objectKey,storage:'r2',
-        changelog:meta.changelog||'',integrity:meta.integrity||{},status:'ready',githubStatus:'pending',error:'',
-        vercel:{status:'pending'},render:{status:'pending'},productionReady:false,
+        changelog:meta.changelog||'',integrity:meta.integrity||{},status:'ready',githubStatus:'pending',githubVerified:false,githubVerifiedAt:null,githubVerification:{},error:'',
+        productionTarget:{},trackingStartedAt:null,lastCheckedAt:null,trackingAttempts:0,stalledAt:null,interruptedAt:null,recovery:{},
+        vercel:{status:'pending'},render:{status:'pending'},productionReady:false,completedAt:null,
       }},
       {upsert:true,new:true,setDefaultsOnInsert:true},
     )
@@ -593,6 +744,9 @@ router.post('/publish-github-direct',upload.single('package'),async(req,res,next
   if(!['project','frontend-folder','frontend-root','backend-folder'].includes(publishMode))return res.status(400).json({erro:'Destino de publicação inválido.'})
   const token=await githubToken()
   if(!token)return res.status(400).json({erro:'GitHub não conectado. Configure-o em Integrações e APIs.'})
+  const target=await resolveProductionGitTarget()
+  if(!target.ok)return res.status(409).json({erro:target.message||'Destino de produção não identificado.',codigo:target.conflict?'UPDATE_TARGET_CONFLICT':'UPDATE_TARGET_UNKNOWN',productionTarget:target})
+  if(normalizeGithubRepository(repository).toLowerCase()!==target.repository.toLowerCase()||String(branch).toLowerCase()!==String(target.branch||'main').toLowerCase())return res.status(409).json({erro:`Destino bloqueado: a produção usa ${target.repository} @ ${target.branch}.`,codigo:'UPDATE_TARGET_MISMATCH',productionTarget:target})
   const id=`job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
   const job={
     id,type:'github-publish',stageId:meta.id,stagePath:packageRoot,
@@ -602,7 +756,8 @@ router.post('/publish-github-direct',upload.single('package'),async(req,res,next
     status:'queued',progress:0,createdAt:new Date().toISOString(),
   }
   const finalJob=await runGithubPublishInline(job,token)
-  res.status(200).json({message:'Publicação no GitHub concluída.',job:finalJob})
+  const githubVerification=await verifyGithubReleaseCommit({token,repository,branch,commitSha:finalJob.commitSha||'',version:meta.version})
+  res.status(200).json({message:'Publicação no GitHub concluída e verificada no destino de produção.',job:finalJob,githubVerification,productionTarget:target})
 }catch(e){next(e)}finally{
   if(req.file)await fs.rm(req.file.path,{force:true}).catch(()=>{})
   if(packageRoot)await fs.rm(packageRoot,{recursive:true,force:true}).catch(()=>{})
@@ -648,11 +803,23 @@ router.post('/:stageId/publish-github',async(req,res,next)=>{let tempZip=null,pa
   const token=await githubToken()
   if(!token)return res.status(400).json({erro:'GitHub não conectado. Configure-o em Integrações e APIs.'})
 
+  let managedTarget=null
+  if(IS_MANAGED_PLATFORM){
+    managedTarget=await resolveProductionGitTarget()
+    if(!managedTarget.ok){
+      return res.status(409).json({erro:managedTarget.message||'Não foi possível determinar o repositório de produção.',codigo:managedTarget.conflict?'UPDATE_TARGET_CONFLICT':'UPDATE_TARGET_UNKNOWN',productionTarget:managedTarget})
+    }
+    const requestedRepo=normalizeGithubRepository(repository)
+    if(requestedRepo.toLowerCase()!==managedTarget.repository.toLowerCase()||String(branch).toLowerCase()!==String(managedTarget.branch||'main').toLowerCase()){
+      return res.status(409).json({erro:`Destino bloqueado: a produção está vinculada a ${managedTarget.repository} @ ${managedTarget.branch}. O atualizador do AL não publicará em ${repository} @ ${branch}.`,codigo:'UPDATE_TARGET_MISMATCH',productionTarget:managedTarget})
+    }
+  }
+
   if(IS_MANAGED_PLATFORM){
     const release=await UpdateRelease.findOne({releaseId:stageId})
     if(!release)return res.status(404).json({erro:'Pacote persistente não encontrado no histórico de atualizações.'})
     if(release.packageType==='incremental')return res.status(409).json({erro:'Na produção Vercel/Render use o pacote completo da versão.'})
-    await UpdateRelease.updateOne({_id:release._id},{$set:{status:'publishing',githubStatus:'running',repository,branch,publishMode,error:''}})
+    await UpdateRelease.updateOne({_id:release._id},{$set:{status:'publishing',githubStatus:'running',githubVerified:false,githubVerifiedAt:null,githubVerification:{},productionTarget:managedTarget,repository,branch,publishMode,error:'',completedAt:null,stalledAt:null,interruptedAt:null,recovery:{}}})
     const tempDir=await fs.mkdtemp(path.join(os.tmpdir(),'alsistemas-r2-release-'))
     tempZip=path.join(tempDir,release.filename)
     await downloadUpdatePackage(release,tempZip)
@@ -670,11 +837,19 @@ router.post('/:stageId/publish-github',async(req,res,next)=>{let tempZip=null,pa
       status:'queued',progress:0,createdAt:new Date().toISOString(),sourceType:'r2',
     }
     const finalJob=await runGithubPublishInline(job,token)
+    let githubVerification
+    try{
+      githubVerification=await verifyGithubReleaseCommit({token,repository,branch,commitSha:finalJob.commitSha||'',version:release.version})
+    }catch(verifyError){
+      await UpdateRelease.updateOne({_id:release._id},{$set:{status:'failed',githubStatus:'verification-failed',githubVerified:false,githubVerification:{ok:false,error:verifyError.message,checkedAt:new Date()},commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',error:`O GitHub recebeu uma publicação, mas a verificação falhou: ${verifyError.message}`,completedAt:new Date()}})
+      throw new Error(`Publicação não confirmada no GitHub: ${verifyError.message}`)
+    }
     const renderKick=await maybeTriggerRenderCommit(finalJob.commitSha||'')
+    const now=new Date()
     const saved=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{
-      status:'deploying',githubStatus:'completed',repository,branch,publishMode,
+      status:'deploying',githubStatus:'completed',githubVerified:true,githubVerifiedAt:now,githubVerification,productionTarget:managedTarget,repository,branch,publishMode,
       commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',previousCommitSha,
-      publishedAt:new Date(),error:'',
+      publishedAt:now,trackingStartedAt:now,lastCheckedAt:null,trackingAttempts:0,stalledAt:null,interruptedAt:null,recovery:{},completedAt:null,error:'',
       ...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{}),
     }},{new:true})
     const refreshed=await refreshCloudRelease(saved)
@@ -714,6 +889,48 @@ router.get('/cloud-releases/:releaseId/status',async(req,res,next)=>{try{
   if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
   const refreshed=await refreshCloudRelease(release)
   res.json({release:refreshed})
+}catch(e){next(e)}})
+
+router.post('/cloud-releases/:releaseId/reconcile',async(req,res,next)=>{try{
+  if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Reconciliação cloud é usada somente em Render/Vercel.'})
+  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  const token=await githubToken()
+  let verification=release.githubVerification||{}
+  if(token&&release.commitSha&&release.repository){
+    try{verification=await verifyGithubReleaseCommit({token,repository:release.repository,branch:release.branch,commitSha:release.commitSha,version:release.version});await UpdateRelease.updateOne({_id:release._id},{$set:{githubVerified:true,githubVerifiedAt:new Date(),githubVerification:verification}})}
+    catch(e){verification={ok:false,error:e.message,checkedAt:new Date()};await UpdateRelease.updateOne({_id:release._id},{$set:{githubVerified:false,githubVerification:verification}})}
+  }
+  const current=await UpdateRelease.findById(release._id)
+  const refreshed=await refreshCloudRelease(current,{force:true})
+  res.json({message:'Estado da publicação reconciliado com GitHub, Vercel e Render.',release:refreshed,githubVerification:verification})
+}catch(e){next(e)}})
+
+router.post('/cloud-releases/:releaseId/retry-deploy',async(req,res,next)=>{try{
+  if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Retentativa cloud é usada somente em Render/Vercel.'})
+  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  if(!release.commitSha)return res.status(409).json({erro:'Esta release ainda não possui commit confirmado no GitHub. Publique o pacote novamente.'})
+  const target=await resolveProductionGitTarget()
+  if(!target.ok)return res.status(409).json({erro:target.message||'Destino de produção indisponível.',codigo:'UPDATE_TARGET_UNKNOWN',productionTarget:target})
+  if(normalizeGithubRepository(release.repository).toLowerCase()!==target.repository.toLowerCase())return res.status(409).json({erro:`O commit está em ${release.repository}, mas a produção usa ${target.repository}. Publique novamente o pacote do R2 no destino correto.`,codigo:'UPDATE_TARGET_MISMATCH',productionTarget:target})
+  const token=await githubToken()
+  if(!token)return res.status(400).json({erro:'GitHub não conectado.'})
+  const verification=await verifyGithubReleaseCommit({token,repository:release.repository,branch:release.branch,commitSha:release.commitSha,version:release.version})
+  const renderKick=await maybeTriggerRenderCommit(release.commitSha)
+  const now=new Date()
+  const reset=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{status:'deploying',error:'',productionReady:false,githubVerified:true,githubVerifiedAt:now,githubVerification:verification,productionTarget:target,trackingStartedAt:now,lastCheckedAt:null,trackingAttempts:0,stalledAt:null,interruptedAt:null,completedAt:null,recovery:{action:'retry-deploy',startedAt:now},...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{})}},{new:true})
+  const refreshed=await refreshCloudRelease(reset,{force:true})
+  res.json({message:renderKick?.triggered?'Render recebeu uma nova solicitação de deploy; Vercel e Render voltaram a ser acompanhados.':'Acompanhamento reiniciado. Vercel e Render serão reconsultados usando o commit já verificado.',release:refreshed,render:renderKick})
+}catch(e){next(e)}})
+
+router.post('/cloud-releases/:releaseId/interrupt',async(req,res,next)=>{try{
+  if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Interrupção cloud é usada somente em Render/Vercel.'})
+  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  const now=new Date()
+  const updated=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{status:'interrupted',productionReady:false,interruptedAt:now,completedAt:now,error:String(req.body?.reason||'Acompanhamento encerrado manualmente. O ZIP continua preservado no R2.'),recovery:{action:'manual-interrupt',at:now}}},{new:true})
+  res.json({message:'Acompanhamento encerrado. O pacote permanece no R2 e pode ser publicado novamente depois.',release:cloudReleaseView(updated)})
 }catch(e){next(e)}})
 
 router.get('/jobs/:jobId',async(req,res,next)=>{try{if(!/^job_[0-9]+_[a-f0-9]+$/.test(req.params.jobId))return res.status(400).json({erro:'Job inválido.'}); res.json({job:JSON.parse(await fs.readFile(path.join(JOB_DIR,`${req.params.jobId}.json`),'utf8'))})}catch(e){next(e)}})

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.104 — Recuperação do atualizador cloud e destino GitHub seguro
+
+- Corrigida a causa do estado infinito **Aguardando commit**: a publicação cloud agora detecta o repositório/branch realmente vinculados à Vercel e Render antes de enviar qualquer arquivo.
+- Em produção gerenciada, o repositório GitHub padrão global deixa de ser aceito silenciosamente como destino da atualização; se ele não for o repositório de produção, a publicação é bloqueada.
+- Depois do push, o AL verifica o SHA no GitHub, relê `al-sistemas.json` daquele commit e confirma a versão antes de iniciar o acompanhamento de Vercel/Render.
+- Releases em `publishing` sem commit recebem timeout e passam para **Publicação interrompida**, preservando o pacote no R2 para nova tentativa.
+- Deploys que não reconhecem o SHA ou ficam em construção além do prazo passam para **Ação necessária** em vez de permanecer indefinidamente em 0%.
+- O monitor ganha ações de recuperação: **Reconsultar**, **Tentar deploy novamente**, **Publicar novamente do R2** e **Encerrar acompanhamento**.
+- Se um commit estiver em um repositório diferente daquele usado pela produção, a release passa para **Destino incorreto** e explica a divergência em vez de continuar aguardando.
+- O pacote armazenado no R2 continua sendo a fonte de recuperação, evitando reenviar o ZIP após falhas de publicação/acompanhamento.
+- Diagnóstico GitHub passa a classificar falha exclusiva em `Upload Artifact`/APK como aviso de entrega do artefato quando o build em si concluiu.
+- Diagnóstico Render prioriza o serviço principal configurado e reduz falsos avisos de serviços antigos/desativados.
+- Atualizador local/VPS tenta `npm install` como recuperação quando `npm ci` falha especificamente por lockfile desatualizado/incompatível.
+- IA corrige o modelo Gemini detectado como indisponível no diagnóstico: configurações antigas em `gemini-2.5-flash` migram em tempo de execução para `gemini-3.5-flash-lite`; Gemini 3.x não recebe mais parâmetros de amostragem descontinuados.
+- OpenRouter força roteamento para modelos compatíveis também no fallback JSON, reduzindo respostas estruturadas inválidas no `openrouter/free`.
+- Frontend, backend, Setup, backup/exportação e manifesto sincronizados em **1.0.104**.
+
 ## 1.0.103 — Novo projeto GitHub, R2 corrigido e assistentes compactos
 
 - A página principal do GitHub ganha **Novo projeto GitHub**, independente de uma pasta local do módulo Projetos.

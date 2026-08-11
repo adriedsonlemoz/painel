@@ -1,19 +1,19 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.103",
+  "version": "1.0.104",
   "packageFormat": 2,
   "changelog": [
-    "GitHub ganha Novo projeto na página principal: um assistente centralizado cria o repositório, coleta dados do GitHub, recebe um ZIP, prepara os arquivos e só então libera o primeiro commit.",
-    "O novo assistente foi dividido em telas curtas para celular: Projeto → Detalhes → Arquivos → Revisão → Commit → Pronto, com R2 como armazenamento cloud recomendado e GridFS como alternativa persistente.",
-    "Novo projeto GitHub permite escolher conta pessoal ou organização, nome, visibilidade, descrição, homepage, Issues, Projects, Wiki e Discussions antes de criar o repositório vazio.",
-    "Uploads do novo projeto mostram progresso real; após a descompactação o AL exibe uma prévia dos arquivos, branch, pasta de destino e mensagem antes de qualquer commit.",
-    "R2 corrige a listagem de objetos enviados: navegador Cloudflare e Projetos passam a usar a API S3 compatível com paginação, mantendo fallback REST compatível com o formato atual da Cloudflare.",
-    "Projetos armazenados no R2 passam a ser fonte direta do commit e repositórios GitHub vazios podem receber o primeiro commit, com criação automática da branch escolhida.",
-    "Commit e sincronização do módulo Projetos deixam de depender de EventSource puro e passam a usar streaming autenticado por fetch/POST, preservando cookie e o fallback Bearer entre Vercel e Render.",
-    "O fluxo antigo GET/SSE permanece disponível para compatibilidade com Termux/VPS, enquanto o fluxo cloud usa o transporte autenticado novo.",
-    "Atualizador cloud passa a ser um assistente centralizado de uma tela por etapa: Atualização/R2 → GitHub → Vercel → Render; a etapa seguinte aparece automaticamente quando a atual termina.",
-    "O monitor do atualizador foi compactado para telas pequenas e deixa de empilhar mensagens de sucesso rotineiras; erros e avisos que exigem ação continuam destacados.",
-    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.103."
+    "Atualizador cloud corrige a causa do travamento em Aguardando commit: antes de publicar, detecta o repositório e a branch realmente ligados à Vercel/Render e bloqueia qualquer destino diferente.",
+    "Após publicar no GitHub, o AL confirma que o SHA existe no repositório de produção, relê o al-sistemas.json daquele commit e verifica se a versão publicada corresponde ao pacote antes de iniciar Vercel/Render.",
+    "Atualizações não ficam mais presas indefinidamente: publicação interrompida, commit não reconhecido ou deploy sem confirmação entram em estados de atenção com prazo finito e ações Reconsultar, Tentar deploy novamente, Publicar novamente do R2 e Encerrar acompanhamento.",
+    "Pacotes já armazenados no R2 permanecem reutilizáveis na recuperação, evitando novo upload quando a publicação ou o acompanhamento forem interrompidos.",
+    "Central detecta e explica quando uma release foi publicada no repositório errado em vez de continuar esperando Vercel/Render para sempre.",
+    "A publicação gerenciada deixa de usar o repositório padrão global de Integrações como destino implícito; em Vercel/Render o destino de produção fica travado no repositório detectado pelas APIs das plataformas.",
+    "Diagnóstico GitHub diferencia falha real de build de falha transitória no envio de artifact/APK: quando apenas Upload Artifact falha após o build, a Central classifica como aviso e orienta reexecutar o workflow.",
+    "Diagnóstico Render prioriza o serviço principal configurado e evita alertas causados por serviços/deployments antigos desativados.",
+    "Atualizador local/VPS ganha recuperação automática quando npm ci falha apenas porque package-lock está desatualizado, podendo recorrer a npm install sem remover o fluxo tradicional.",
+    "IA corrige incompatibilidade detectada no diagnóstico: configurações antigas em Gemini 2.5 Flash são migradas em tempo de execução para Gemini 3.5 Flash-Lite, e requisições Gemini 3.x deixam de enviar parâmetros de amostragem descontinuados.",
+    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.104."
   ],
   "updatePackages": {
     "full": true,

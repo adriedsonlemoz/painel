@@ -469,7 +469,7 @@ router.get('/sistema/metricas', async (_req, res, next) => {
       getCredential('openrouter', 'OPENROUTER_API_KEY'),
     ])
     const aiCandidates = [
-      { id:'gemini', nome:'Google Gemini', cfg:geminiCfg, modelo:geminiCfg?.metadata?.model || 'gemini-2.5-flash' },
+      { id:'gemini', nome:'Google Gemini', cfg:geminiCfg, modelo:(['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'].includes(geminiCfg?.metadata?.model)?'gemini-3.5-flash-lite':(geminiCfg?.metadata?.model || 'gemini-3.5-flash-lite')) },
       { id:'openrouter', nome:'OpenRouter', cfg:openrouterCfg, modelo:openrouterCfg?.metadata?.model || 'openrouter/free' },
     ].filter(x => (x.cfg?.value || x.cfg?.locked) && x.cfg?.metadata?.enabled !== false)
     aiCandidates.sort((a,b)=>Number(Boolean(b.cfg?.metadata?.primary))-Number(Boolean(a.cfg?.metadata?.primary)))

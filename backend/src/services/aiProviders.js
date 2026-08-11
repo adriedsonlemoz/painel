@@ -122,7 +122,7 @@ export const openRouterAdapter = {
     if (structuredMode === 'schema') {
       body.response_format = { type: 'json_schema', json_schema: { name: String(schemaName).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64), strict: true, schema } }
       body.provider = { require_parameters: true }
-    } else if (structuredMode === 'json') body.response_format = { type: 'json_object' }
+    } else if (structuredMode === 'json') { body.response_format = { type: 'json_object' }; body.provider = { require_parameters: true } }
     const headers = {
       Authorization: `Bearer ${cfg.value}`,
       'Content-Type': 'application/json',
@@ -178,7 +178,8 @@ export const geminiAdapter = {
       ...history.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: String(m.content ?? '') }] })),
       { role: 'user', parts: [{ text: question }] },
     ]
-    const generationConfig = { temperature: params.temperature, maxOutputTokens: params.maxTokens }
+    const generationConfig = { maxOutputTokens: params.maxTokens }
+    if(!/^gemini-3(?:\.|-)/i.test(String(cfg.model||'')))generationConfig.temperature=params.temperature
     if (structuredMode === 'schema') { generationConfig.responseMimeType = 'application/json'; generationConfig.responseJsonSchema = schema }
     else if (structuredMode === 'json') generationConfig.responseMimeType = 'application/json'
     const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.value }
@@ -197,7 +198,8 @@ export const geminiAdapter = {
   async stream({ cfg, systemPrompt, question, history = [], params = {}, timeoutMs, signal, onChunk }) {
     const contents = [...history.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:String(m.content??'')}]})),{role:'user',parts:[{text:question}]}]
     const headers = { 'Content-Type':'application/json', 'x-goog-api-key':cfg.value }
-    const body = { systemInstruction:{parts:[{text:systemPrompt}]}, contents, generationConfig:{temperature:params.temperature,maxOutputTokens:params.maxTokens} }
+    const generationConfig={maxOutputTokens:params.maxTokens}; if(!/^gemini-3(?:\.|-)/i.test(String(cfg.model||'')))generationConfig.temperature=params.temperature
+    const body = { systemInstruction:{parts:[{text:systemPrompt}]}, contents, generationConfig }
     const { res, cleanup } = await fetchRaw(`${endpointBase(cfg)}/models/${encodeURIComponent(cfg.model)}:streamGenerateContent?alt=sse`, { method:'POST', headers, body:JSON.stringify(body) }, timeoutMs, signal)
     let text='', usage={input_tokens:0,output_tokens:0}
     try {

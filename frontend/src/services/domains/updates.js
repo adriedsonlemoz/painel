@@ -34,9 +34,13 @@ export const updatesService = {
   rollback(id,config={}){ return api(`/admin/updates/rollback/${id}`,{method:'POST',body:JSON.stringify(config),timeoutMs:20000}) },
   recoverActive(){ return api('/admin/updates/recover-active',{method:'POST',timeoutMs:20000}) },
   githubRepos(){ return api('/admin/integracoes/github/repositories',{timeoutMs:20000}) },
+  productionTarget(){ return api('/admin/updates/production-target',{timeoutMs:30000}) },
   deploymentCheck(repository,branch='main'){ return api(`/admin/updates/deployment-check?repository=${encodeURIComponent(repository)}&branch=${encodeURIComponent(branch)}`,{timeoutMs:30000}) },
   publicarGitHub(id,config={}){ return api(`/admin/updates/${id}/publish-github`,{method:'POST',body:JSON.stringify(config),timeoutMs:240000}) },
   cloudReleaseStatus(id){ return api(`/admin/updates/cloud-releases/${encodeURIComponent(id)}/status`,{timeoutMs:30000}) },
+  reconcileCloudRelease(id){ return api(`/admin/updates/cloud-releases/${encodeURIComponent(id)}/reconcile`,{method:'POST',timeoutMs:60000}) },
+  retryCloudDeploy(id){ return api(`/admin/updates/cloud-releases/${encodeURIComponent(id)}/retry-deploy`,{method:'POST',timeoutMs:60000}) },
+  interruptCloudRelease(id,reason=''){ return api(`/admin/updates/cloud-releases/${encodeURIComponent(id)}/interrupt`,{method:'POST',body:JSON.stringify({reason}),timeoutMs:30000}) },
   publicarAtualGitHub(config={}){ return api('/admin/updates/publish-current-github',{method:'POST',body:JSON.stringify(config),timeoutMs:20000}) },
   async publicarGitHubDireto(file,config={}){
     const form=new FormData()

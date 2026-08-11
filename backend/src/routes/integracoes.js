@@ -31,6 +31,9 @@ async function audit(req, acao, detalhes={}) { try { await AuditLog.create({ usu
 router.get('/status', async (_req,res,next)=>{ try {
   const b=readBootstrap(); const integrations={}
   for (const id of Object.keys(defs)) integrations[id]=safe(await getCredential(id, defs[id]))
+  if(['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'].includes(String(integrations.gemini?.metadata?.model||''))){
+    integrations.gemini.metadata={...(integrations.gemini.metadata||{}),migratedFromModel:integrations.gemini.metadata.model,model:'gemini-3.5-flash-lite'}
+  }
   const mongoUri=b.MONGO_URI||process.env.MONGO_URI||''
   let mongoHost=null
   try { mongoHost=mongoUri?new URL(mongoUri.replace(/^mongodb\+srv:/,'https:').replace(/^mongodb:/,'http:')).host:null } catch {}
@@ -301,7 +304,8 @@ function normalizeAiMetadata(id, metadata={}){
   out.enabled=out.enabled!==false
   if(out.primary)out.enabled=true
   out.apiUrl=id==='gemini'?'https://generativelanguage.googleapis.com/v1beta':'https://openrouter.ai/api/v1'
-  out.model=String(out.model||(id==='gemini'?'gemini-2.5-flash':'openrouter/free')).trim()
+  out.model=String(out.model||(id==='gemini'?'gemini-3.5-flash-lite':'openrouter/free')).trim()
+  if(id==='gemini'&&['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'].includes(out.model))out.model='gemini-3.5-flash-lite'
   if(!out.model)throw new Error('Informe um modelo de IA.')
   out.systemInstructions=String(out.systemInstructions||'').slice(0,8000)
   out.privacy={
@@ -526,7 +530,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.103',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.104',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
