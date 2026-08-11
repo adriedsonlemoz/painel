@@ -1,396 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Edit2, Plus, Trash2, Merge, Shield, Star, Rss, Newspaper, X } from 'lucide-react'
 import { categoriasService } from '../../services/api'
+import { authFetch } from '../../services/domains/http.js'
+import ImageUpload from '../../components/ImageUpload'
 import ConfirmModal from '../../components/ConfirmModal'
 import toast from 'react-hot-toast'
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 
-// ─── Helpers ──────────────────────────────────────────────────
-function slugify(t) {
-  return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+const idOf=x=>String(x?._id||x?.id||'')
+const slugify=t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+const VAZIO={nome:'',slug:'',descricao:'',cor:'#1B5E3B',icone:'',ordem:0,destaque:false,ativa:true,categoria_pai_id:'',imagem_url:'',imagem_public_id:'',imagem_alt:'',seo_titulo:'',seo_descricao:''}
+
+function Modal({item,categorias,onClose,onSaved}){
+ const novo=!item
+ const [f,setF]=useState(item?{...VAZIO,...item,categoria_pai_id:idOf(item.categoria_pai_id)}:VAZIO)
+ const [busy,setBusy]=useState(false)
+ const set=(k,v)=>setF(x=>({...x,[k]:v}))
+ async function salvar(e){e.preventDefault();if(!f.nome.trim()||!f.slug.trim())return toast.error('Nome e slug são obrigatórios.');try{setBusy(true);const payload={...f,nome:f.nome.trim(),slug:f.slug.trim(),ordem:Number(f.ordem)||0,categoria_pai_id:f.categoria_pai_id||null,imagem_url:f.imagem_url||null,imagem_public_id:f.imagem_public_id||null,seo_titulo:f.seo_titulo||null,seo_descricao:f.seo_descricao||null};novo?await categoriasService.criar(payload):await categoriasService.editar(idOf(item),payload);toast.success(novo?'Categoria criada.':'Categoria atualizada.');onSaved()}catch(e){toast.error(e.message)}finally{setBusy(false)}}
+ return <div className="catx-overlay" onMouseDown={e=>e.target===e.currentTarget&&!busy&&onClose()}><div className="catx-modal"><div className="catx-head"><div><b>{novo?'Nova categoria':'Editar categoria'}</b><small>Organização editorial, visual, SEO e mídia.</small></div><button onClick={onClose}><X size={16}/></button></div><form onSubmit={salvar}>
+   <div className="catx-grid"><div><label className="adm-label">Nome *</label><input className="adm-input" value={f.nome} onChange={e=>{set('nome',e.target.value);if(novo)set('slug',slugify(e.target.value))}}/></div><div><label className="adm-label">Slug *</label><input className="adm-input adm-input-mono" value={f.slug} disabled={item?.protegida||item?.slug==='geral'} onChange={e=>set('slug',e.target.value)}/></div></div>
+   <div><label className="adm-label">Descrição</label><textarea className="adm-input" rows={2} maxLength={300} value={f.descricao||''} onChange={e=>set('descricao',e.target.value)} placeholder="Descrição editorial e da página da categoria"/></div>
+   <div className="catx-grid3"><div><label className="adm-label">Cor</label><input className="adm-input" type="color" value={f.cor||'#1B5E3B'} onChange={e=>set('cor',e.target.value)}/></div><div><label className="adm-label">Ícone</label><input className="adm-input" value={f.icone||''} onChange={e=>set('icone',e.target.value)} placeholder="Ex.: newspaper"/></div><div><label className="adm-label">Ordem</label><input className="adm-input" type="number" value={f.ordem??0} onChange={e=>set('ordem',e.target.value)}/></div></div>
+   <div><label className="adm-label">Categoria pai</label><select className="adm-input" value={f.categoria_pai_id||''} onChange={e=>set('categoria_pai_id',e.target.value)}><option value="">Nenhuma (nível principal)</option>{categorias.filter(c=>idOf(c)!==idOf(item)).map(c=><option key={idOf(c)} value={idOf(c)}>{c.nome}</option>)}</select></div>
+   <div className="catx-toggles"><label><input type="checkbox" checked={Boolean(f.ativa)} onChange={e=>set('ativa',e.target.checked)}/> Ativa</label><label><input type="checkbox" checked={Boolean(f.destaque)} onChange={e=>set('destaque',e.target.checked)}/> Em destaque</label></div>
+   <details className="catx-detail"><summary>Imagem e identidade</summary><div className="catx-pad"><ImageUpload tipo="categorias" value={f.imagem_url} publicId={f.imagem_public_id} onChange={r=>{setF(x=>({...x,imagem_url:r?.url||'',imagem_public_id:r?.public_id||'',imagem_alt:x.imagem_alt||x.nome}))}}/><div style={{marginTop:10}}><label className="adm-label">Texto alternativo</label><input className="adm-input" value={f.imagem_alt||''} onChange={e=>set('imagem_alt',e.target.value)}/></div></div></details>
+   <details className="catx-detail"><summary>SEO da categoria</summary><div className="catx-pad"><label className="adm-label">Título SEO</label><input className="adm-input" maxLength={120} value={f.seo_titulo||''} onChange={e=>set('seo_titulo',e.target.value)}/><label className="adm-label" style={{marginTop:10}}>Descrição SEO</label><textarea className="adm-input" rows={2} maxLength={180} value={f.seo_descricao||''} onChange={e=>set('seo_descricao',e.target.value)}/></div></details>
+   <div className="catx-actions"><button type="button" className="adm-btn adm-btn-secondary" onClick={onClose}>Cancelar</button><button className="adm-btn adm-btn-primary" disabled={busy}>{busy?'Salvando…':'Salvar'}</button></div>
+ </form></div></div>
 }
 
-// ─── SVG Icons ────────────────────────────────────────────────
-const IcoEdit = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-  </svg>
-)
-const IcoTrash = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-    <polyline points="3 6 5 6 21 6"/>
-    <path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
-  </svg>
-)
-const IcoTag = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="32" height="32">
-    <path d="M7 7h.01M7 3h5l7.586 7.586a2 2 0 010 2.828L14 19a2 2 0 01-2.828 0L3.586 11.414A2 2 0 013 10V5a2 2 0 012-2z"/>
-  </svg>
-)
+function MergeModal({item,categorias,onClose,onDone}){const [dest,setDest]=useState('');const [busy,setBusy]=useState(false);async function go(){if(!dest)return toast.error('Selecione a categoria de destino.');try{setBusy(true);const base=import.meta.env.VITE_API_URL||'/api';const r=await authFetch(`${base}/conteudo/categorias/${idOf(item)}/mesclar`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({destino_id:dest})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Falha ao mesclar');toast.success(`${d.noticias||0} notícia(s) e ${d.feeds||0} feed(s) movidos.`);categoriasService.invalidar?.();onDone()}catch(e){toast.error(e.message)}finally{setBusy(false)}}return <div className="catx-overlay"><div className="catx-modal catx-small"><div className="catx-head"><div><b>Mesclar “{item.nome}”</b><small>Todo o conteúdo será movido e a categoria atual removida.</small></div><button onClick={onClose}><X size={16}/></button></div><label className="adm-label">Mover tudo para</label><select className="adm-input" value={dest} onChange={e=>setDest(e.target.value)}><option value="">Selecione…</option>{categorias.filter(c=>idOf(c)!==idOf(item)).map(c=><option key={idOf(c)} value={idOf(c)}>{c.nome}</option>)}</select><div className="catx-actions"><button className="adm-btn adm-btn-secondary" onClick={onClose}>Cancelar</button><button className="adm-btn adm-btn-primary" disabled={busy} onClick={go}><Merge size={14}/> Mesclar</button></div></div></div>}
 
-// ─── Modal de Formulário ──────────────────────────────────────
-function CategoriaModal({ categoria, onSalvar, onFechar, salvando }) {
-  const isNovo = !categoria?.id
-  const [nome,     setNome]     = useState(categoria?.nome     || '')
-  const [slug,     setSlug]     = useState(categoria?.slug     || '')
-  const [descricao, setDescricao] = useState(categoria?.descricao || '')
-  const [autoSlug, setAutoSlug] = useState(isNovo)
-
-  const charCount = descricao.length
-  const charOk    = charCount === 0 || (charCount >= 120 && charCount <= 160)
-  const charWarn  = charCount > 0 && charCount < 120
-  const charOver  = charCount > 160
-
-  function handleNome(v) {
-    setNome(v)
-    if (autoSlug) setSlug(slugify(v))
-  }
-
-  function handleSubmit(e) {
-    e.preventDefault()
-    if (!nome.trim() || !slug.trim()) { toast.error('Nome e slug são obrigatórios'); return }
-    onSalvar({ nome: nome.trim(), slug: slug.trim(), descricao: descricao.trim() })
-  }
-
-  return (
-    <>
-      <style>{`
-        .cat-overlay {
-          position: fixed; inset: 0; background: rgba(0,0,0,.55);
-          z-index: 1000; display: flex; align-items: center; justify-content: center; padding: SPACE.xlpx;
-          animation: cat-fade-in .15s ease;
-        }
-        @keyframes cat-fade-in { from { opacity: 0 } to { opacity: 1 } }
-        .cat-modal {
-          background: var(--adm-surface); border: 1px solid var(--adm-border);
-          border-radius: 16px; width: 100%; max-width: 480px; padding: 28px 28px 24px;
-          box-shadow: 0 24px 64px rgba(0,0,0,.45);
-          animation: cat-slide-up .18s ease;
-        }
-        @keyframes cat-slide-up { from { transform: translateY(10px); opacity: 0 } to { transform: none; opacity: 1 } }
-        @media (max-width: 600px) {
-          .cat-overlay { align-items: center; justify-content: center; padding: 12px; }
-          .cat-modal   { border-radius: 20px; max-width: 100%; max-height: calc(100dvh - 24px); overflow-y: auto; padding: SPACE.xl3px 20px 24px; }
-        }
-      `}</style>
-
-      <div className="cat-overlay" role="dialog" aria-modal="true" aria-label={isNovo ? 'Nova categoria' : 'Editar categoria'}
-        onMouseDown={e => { if (e.target === e.currentTarget && !salvando) onFechar() }}>
-        <div className="cat-modal">
-
-          {/* Cabeçalho */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-            <div style={{ fontSize: FONT.lg, fontWeight: 700, color: 'var(--adm-text)' }}>
-              {isNovo ? '✦ Nova categoria' : 'Editar categoria'}
-            </div>
-            <button onClick={() => !salvando && onFechar()}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--adm-muted)', padding: 4, borderRadius: RADIUS.sm, lineHeight: 0 }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="16" height="16">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-
-          {/* Formulário */}
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-
-            {/* Nome */}
-            <div>
-              <label className="adm-label" htmlFor="cat-nome">Nome <span style={{ color: 'var(--adm-accent)' }}>*</span></label>
-              <input id="cat-nome" className="adm-input" placeholder="Ex: Política"
-                value={nome} onChange={e => handleNome(e.target.value)} maxLength={100} autoFocus />
-            </div>
-
-            {/* Slug */}
-            <div>
-              <label className="adm-label" htmlFor="cat-slug">Slug <span style={{ color: 'var(--adm-accent)' }}>*</span></label>
-              <input id="cat-slug" className="adm-input adm-input-mono" placeholder="politica"
-                value={slug} onChange={e => { setAutoSlug(false); setSlug(e.target.value) }} maxLength={100} />
-              <span style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginTop: 4, display: 'block' }}>
-                Endereço: <code style={{ fontFamily: 'var(--adm-mono)' }}>/categoria/{slug || '…'}</code>
-              </span>
-            </div>
-
-            {/* Descrição */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <label className="adm-label" htmlFor="cat-desc" style={{ marginBottom: 0 }}>
-                  Descrição <span style={{ fontWeight: 400, color: 'var(--adm-muted)', fontSize: FONT.sm }}>(SEO)</span>
-                </label>
-                {charCount > 0 && (
-                  <span style={{ fontSize: FONT.sm, fontWeight: 600,
-                    color: charOver ? C.red : charWarn ? C.amber : 'var(--adm-accent)' }}>
-                    {charCount}/160
-                  </span>
-                )}
-              </div>
-              <textarea id="cat-desc" className="adm-input" rows={3}
-                placeholder="Breve descrição da categoria — aparece em buscadores e no topo da página de listagem."
-                value={descricao} onChange={e => setDescricao(e.target.value)} maxLength={200}
-                style={{ resize: 'vertical', minHeight: 72 }} />
-              <span style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginTop: 4, display: 'block', lineHeight: 1.5 }}>
-                {charOver
-                  ? '⚠️ Acima de 160 caracteres — buscadores podem truncar'
-                  : charWarn
-                    ? '↑ Ideal: entre 120 e 160 caracteres para melhor SEO'
-                    : charCount === 0
-                      ? 'Usado como meta description na página da categoria'
-                      : '✓ Comprimento ideal para meta description'
-                }
-              </span>
-            </div>
-
-            {/* Ações */}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button type="button" onClick={() => !salvando && onFechar()} className="adm-btn adm-btn-ghost">
-                Cancelar
-              </button>
-              <button type="submit" disabled={salvando} className="adm-btn adm-btn-primary">
-                {salvando ? 'Salvando…' : isNovo ? 'Criar categoria' : 'Salvar alterações'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </>
-  )
+export default function AdminCategorias(){
+ const [items,setItems]=useState([]),[loading,setLoading]=useState(true),[modal,setModal]=useState(null),[merge,setMerge]=useState(null),[del,setDel]=useState(null)
+ async function load(){try{setLoading(true);setItems(await categoriasService.listar(true))}catch(e){toast.error(e.message)}finally{setLoading(false)}}useEffect(()=>{load()},[])
+ async function excluir(){try{await categoriasService.excluir(idOf(del));toast.success('Categoria excluída.');setDel(null);load()}catch(e){toast.error(e.message);setDel(null)}}
+ return <><style>{`
+ .catx-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.58);display:grid;place-items:center;padding:14px}.catx-modal{width:min(680px,100%);max-height:calc(100dvh - 28px);overflow:auto;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:16px;padding:20px}.catx-small{max-width:460px}.catx-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:18px}.catx-head>div{display:grid;gap:3px}.catx-head b{font-size:16px}.catx-head small{color:var(--adm-muted);font-size:11px}.catx-head button{border:0;background:none;color:var(--adm-muted);cursor:pointer}.catx-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.catx-grid3{display:grid;grid-template-columns:110px 1fr 90px;gap:10px}.catx-modal form{display:grid;gap:12px}.catx-toggles{display:flex;gap:18px;flex-wrap:wrap;font-size:12px}.catx-toggles label{display:flex;gap:6px;align-items:center}.catx-detail{border:1px solid var(--adm-border);border-radius:9px;overflow:hidden}.catx-detail summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700}.catx-pad{padding:0 12px 12px}.catx-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.catx-list{display:grid;gap:8px}.catx-row{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;padding:11px 12px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface)}.catx-dot{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:white;font-weight:800}.catx-info{min-width:0}.catx-title{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.catx-info small{display:block;color:var(--adm-muted);font-size:10px;margin-top:3px}.catx-counts{display:flex;gap:10px;font-size:9px;color:var(--adm-muted);margin-top:5px}.catx-counts span{display:flex;align-items:center;gap:3px}.catx-buttons{display:flex;gap:4px}.catx-badge{padding:2px 6px;border-radius:999px;background:var(--adm-surface2);font-size:8px;color:var(--adm-muted)}
+ @media(max-width:600px){.catx-grid,.catx-grid3{grid-template-columns:1fr}.catx-row{grid-template-columns:auto 1fr}.catx-buttons{grid-column:1/-1;justify-content:flex-end;border-top:1px solid var(--adm-border);padding-top:7px}.catx-modal{padding:15px;border-radius:13px}.catx-actions .adm-btn{flex:1;justify-content:center}}
+ `}</style>
+ <ConfirmModal aberto={Boolean(del)} titulo={`Excluir “${del?.nome||''}”?`} mensagem="Se houver conteúdo vinculado, use Mesclar para movê-lo antes." labelConfirmar="Excluir" onConfirmar={excluir} onCancelar={()=>setDel(null)}/>
+ {modal!==null&&<Modal item={modal||null} categorias={items} onClose={()=>setModal(null)} onSaved={()=>{setModal(null);load()}}/>}{merge&&<MergeModal item={merge} categorias={items} onClose={()=>setMerge(null)} onDone={()=>{setMerge(null);load()}}/>}
+ <div className="adm-page-header"><div><div className="adm-page-title">Categorias</div><div className="adm-page-sub">Estrutura editorial, hierarquia, SEO e identidade visual.</div></div><div className="adm-page-actions"><button className="adm-btn adm-btn-primary" onClick={()=>setModal(false)}><Plus size={15}/> Nova categoria</button></div></div>
+ {loading?<div className="adm-empty">Carregando…</div>:<div className="catx-list">{items.map(c=><div className="catx-row" key={idOf(c)}><div className="catx-dot" style={{background:c.cor||'#1B5E3B'}}>{c.icone?String(c.icone).slice(0,2).toUpperCase():String(c.nome||'?').slice(0,1).toUpperCase()}</div><div className="catx-info"><div className="catx-title"><b>{c.nome}</b>{(c.protegida||c.slug==='geral')&&<span className="catx-badge"><Shield size={8}/> protegida</span>}{c.destaque&&<span className="catx-badge"><Star size={8}/> destaque</span>}{c.ativa===false&&<span className="catx-badge">inativa</span>}</div><small>/{c.slug}{c.categoria_pai_id?.nome?` · dentro de ${c.categoria_pai_id.nome}`:''}</small><div className="catx-counts"><span><Newspaper size={10}/>{c.total_noticias||0} notícias</span><span><Rss size={10}/>{c.total_feeds_rss||0} feeds</span><span>ordem {c.ordem||0}</span></div></div><div className="catx-buttons"><button className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" onClick={()=>setModal(c)} title="Editar"><Edit2 size={14}/></button>{!(c.protegida||c.slug==='geral')&&<><button className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" onClick={()=>setMerge(c)} title="Mesclar"><Merge size={14}/></button><button className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm" onClick={()=>setDel(c)} title="Excluir"><Trash2 size={14}/></button></>}</div></div>)}{!items.length&&<div className="adm-empty">Nenhuma categoria.</div>}</div>}
+ </>
 }
-
-// ─── Componente Principal ──────────────────────────────────────
-export default function AdminCategorias() {
-  const [categorias,  setCategorias]  = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [salvando,    setSalvando]    = useState(false)
-  const [deletandoId, setDeletandoId] = useState(null)
-  const [modal,       setModal]       = useState(null)   // null | { categoria: null | objeto }
-  const [confirm,     setConfirm]     = useState({ aberto: false, cat: null, carregando: false })
-
-  async function carregar() {
-    try { setLoading(true); setCategorias(await categoriasService.listar()) }
-    catch (err) { toast.error(err.message) }
-    finally { setLoading(false) }
-  }
-  useEffect(() => { carregar() }, [])
-
-  async function handleSalvar(dados) {
-    try {
-      setSalvando(true)
-      if (modal?.categoria?.id) {
-        await categoriasService.editar(modal.categoria.id, dados)
-        toast.success('Categoria atualizada!')
-      } else {
-        await categoriasService.criar(dados)
-        toast.success('Categoria criada!')
-      }
-      setModal(null)
-      carregar()
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setSalvando(false)
-    }
-  }
-
-  async function confirmarExclusao() {
-    const cat = confirm.cat
-    setConfirm(c => ({ ...c, carregando: true }))
-    try {
-      setDeletandoId(cat.id)
-      await categoriasService.excluir(cat.id)
-      toast.success('Categoria excluída!')
-      setConfirm({ aberto: false, cat: null, carregando: false })
-      carregar()
-    } catch (err) {
-      toast.error(err.message)
-      setConfirm(c => ({ ...c, carregando: false }))
-    } finally {
-      setDeletandoId(null)
-    }
-  }
-
-  return (
-    <>
-      <style>{`
-        /* Botões de ação visíveis só no hover (desktop) */
-        .cat-actions { display: flex; align-items: center; gap: SPACE.xspx; }
-        @media (hover: hover) {
-          .cat-actions { opacity: 0; transition: opacity .15s; }
-          .adm-table tbody tr:hover .cat-actions { opacity: 1; }
-        }
-        /* Cards mobile */
-        @media (max-width: 640px) {
-          .cat-table-wrap { display: none !important; }
-          .cat-cards      { display: flex !important; }
-        }
-        @media (min-width: 641px) {
-          .cat-cards { display: none !important; }
-        }
-        .cat-cards {
-          flex-direction: column; gap: 10px; padding: 14px 16px;
-        }
-        .cat-card {
-          background: var(--adm-surface2);
-          border: 1px solid var(--adm-border);
-          border-radius: 10px;
-          padding: 14px 16px;
-        }
-      `}</style>
-
-      {/* Modal de criação/edição */}
-      {modal !== null && (
-        <CategoriaModal
-          categoria={modal.categoria}
-          onSalvar={handleSalvar}
-          onFechar={() => !salvando && setModal(null)}
-          salvando={salvando}
-        />
-      )}
-
-      {/* Modal de confirmação de exclusão */}
-      <ConfirmModal
-        aberto={confirm.aberto}
-        titulo={`Excluir "${confirm.cat?.nome}"?`}
-        mensagem="Só é possível excluir uma categoria sem notícias e sem feeds RSS vinculados."
-        labelConfirmar="Excluir"
-        carregando={confirm.carregando}
-        onConfirmar={confirmarExclusao}
-        onCancelar={() => setConfirm({ aberto: false, cat: null, carregando: false })}
-      />
-
-      {/* Cabeçalho da página */}
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Categorias</div>
-          <div className="adm-page-sub">
-            {categorias.length} cadastrada{categorias.length !== 1 ? 's' : ''}
-          </div>
-        </div>
-        <div className="adm-page-actions">
-          <button onClick={() => setModal({ categoria: null })} className="adm-btn adm-btn-primary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-            Nova categoria
-          </button>
-        </div>
-      </div>
-
-      <div className="adm-card">
-        <div className="adm-table-header">
-          <div className="adm-table-title">Todas as categorias</div>
-        </div>
-
-        {/* Estado de carregamento */}
-        {loading && (
-          <div className="adm-empty" role="status">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24"
-              className="adm-spin" style={{ margin: '0 auto', opacity: .5 }}>
-              <path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/>
-            </svg>
-          </div>
-        )}
-
-        {/* Estado vazio */}
-        {!loading && categorias.length === 0 && (
-          <div className="adm-empty">
-            <IcoTag />
-            <p>Nenhuma categoria cadastrada.<br/>
-              <button onClick={() => setModal({ categoria: null })}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--adm-accent)', fontWeight: 600, fontSize: FONT.md, padding: 0, marginTop: 4 }}>
-                Criar primeira categoria →
-              </button>
-            </p>
-          </div>
-        )}
-
-        {!loading && categorias.length > 0 && (
-          <>
-            {/* ── Desktop: tabela ── */}
-            <div className="adm-table-scroll cat-table-wrap">
-              <table className="adm-table" aria-label="Lista de categorias">
-                <thead>
-                  <tr>
-                    <th>Nome</th>
-                    <th>Slug</th>
-                    <th>Descrição SEO</th>
-                    <th style={{ width: 1, whiteSpace: 'nowrap' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categorias.map(cat => (
-                    <tr key={cat.id}>
-                      <td style={{ fontWeight: 500 }}>{cat.nome}</td>
-                      <td>
-                        <code style={{ fontFamily: 'var(--adm-mono)', fontSize: FONT.sm, color: 'var(--adm-muted)' }}>
-                          /{cat.slug}
-                        </code>
-                      </td>
-                      <td style={{ maxWidth: 260, color: 'var(--adm-muted)', fontSize: FONT.base }}>
-                        {cat.descricao
-                          ? <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.descricao}</span>
-                          : <span style={{ opacity: .4, fontStyle: 'italic' }}>Sem descrição</span>
-                        }
-                      </td>
-                      <td>
-                        <div className="cat-actions">
-                          <button onClick={() => setModal({ categoria: cat })}
-                            aria-label={`Editar ${cat.nome}`}
-                            className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
-                            <IcoEdit />
-                          </button>
-                          <button onClick={() => setConfirm({ aberto: true, cat, carregando: false })}
-                            disabled={deletandoId === cat.id}
-                            aria-label={`Excluir ${cat.nome}`}
-                            className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                            <IcoTrash />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* ── Mobile: cards ── */}
-            <div className="cat-cards">
-              {categorias.map(cat => (
-                <div key={cat.id} className="cat-card">
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: FONT.lg - 1, color: 'var(--adm-text)', marginBottom: 3 }}>
-                        {cat.nome}
-                      </div>
-                      <code style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', fontFamily: 'var(--adm-mono)' }}>
-                        /{cat.slug}
-                      </code>
-                      {cat.descricao && (
-                        <div style={{ fontSize: FONT.base, color: 'var(--adm-muted)', marginTop: 6, lineHeight: 1.5 }}>
-                          {cat.descricao}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: SPACE.sm, flexShrink: 0, paddingTop: 2 }}>
-                      <button onClick={() => setModal({ categoria: cat })}
-                        aria-label={`Editar ${cat.nome}`}
-                        className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
-                        <IcoEdit />
-                      </button>
-                      <button onClick={() => setConfirm({ aberto: true, cat, carregando: false })}
-                        disabled={deletandoId === cat.id}
-                        aria-label={`Excluir ${cat.nome}`}
-                        className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                        <IcoTrash />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </>
-  )
-}
-

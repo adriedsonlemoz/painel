@@ -361,6 +361,23 @@ function normalizarEventoPayload(body = {}) {
   if ('local' in body) payload.local = String(body.local || '').trim()
   if ('horario' in body) payload.horario = String(body.horario || '').trim()
   if ('ativo' in body) payload.ativo = Boolean(body.ativo)
+  if ('destaque' in body) payload.destaque = Boolean(body.destaque)
+  if ('arquivar_automaticamente' in body) payload.arquivar_automaticamente = Boolean(body.arquivar_automaticamente)
+  if ('categoria_id' in body) payload.categoria_id = body.categoria_id || null
+  for (const campo of ['endereco','mapa_url','organizador','telefone','site','ingresso_url','imagem_url','imagem_public_id','imagem_alt']) {
+    if (campo in body) payload[campo] = String(body[campo] || '').trim() || null
+  }
+  if ('preco' in body) payload.preco = body.preco === '' || body.preco == null ? null : Number(body.preco)
+  if ('horario_fim' in body) payload.horario_fim = String(body.horario_fim || '').trim()
+  if ('recorrencia' in body) {
+    const rec=String(body.recorrencia||'nenhuma').toLowerCase()
+    if(!['nenhuma','semanal','mensal','anual'].includes(rec)){const err=new Error('Recorrência inválida.');err.status=400;throw err}
+    payload.recorrencia=rec
+  }
+  if ('agendado_para' in body) {
+    if (!body.agendado_para) payload.agendado_para = null
+    else { const d=new Date(body.agendado_para); if(Number.isNaN(d.getTime())){const err=new Error('Agendamento inválido.');err.status=400;throw err} payload.agendado_para=d }
+  }
 
   if ('data' in body) {
     const data = new Date(body.data)
@@ -415,7 +432,7 @@ router.get('/eventos', async (req, res, next) => {
     const paginado = cursor !== undefined || req.query.limit !== undefined
     const lim = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20))
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-    const filtro = { ativo: true, data: { $gte: hoje } }
+    const filtro = { ativo: true, data: { $gte: hoje }, $or: [{ agendado_para: null }, { agendado_para: { $lte: new Date() } }] }
 
     if (cursor) {
       const cursorData = new Date(cursor)
@@ -448,6 +465,7 @@ router.get('/eventos/todos', autenticar, verificarPermissao('extras.gerenciar'),
 router.post('/eventos', autenticar, verificarPermissao('extras.gerenciar'), auditLog('eventos'), async (req, res, next) => {
   try {
     const payload = normalizarEventoPayload(req.body)
+    if (payload.agendado_para && new Date(payload.agendado_para) > new Date()) payload.ativo = false
     if (!payload.titulo || !payload.data) {
       return res.status(400).json({ erro: 'Título e data são obrigatórios.' })
     }
@@ -462,6 +480,7 @@ router.put('/eventos/:id', autenticar, verificarPermissao('extras.gerenciar'), a
       return res.status(400).json({ erro: 'Identificador de evento inválido.' })
     }
     const payload = normalizarEventoPayload(req.body)
+    if (payload.agendado_para && new Date(payload.agendado_para) > new Date()) payload.ativo = false
     if ('titulo' in payload && !payload.titulo) {
       return res.status(400).json({ erro: 'O título do evento não pode ficar vazio.' })
     }

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { rssService, categoriasService, fontesService } from '../services/api'
 import toast from 'react-hot-toast'
 
+function idOf(v){ return String(v?._id || v?.id || v || '') }
+
 export function useRss() {
   const [fontes, setFontes] = useState([])
   const [padrao, setPadrao] = useState([])
@@ -53,18 +55,20 @@ export function useRss() {
 
   async function excluirFonte(fonte) {
     try {
-      await rssService.excluirFonte(fonte.id)
+      await rssService.excluirFonte(idOf(fonte))
       toast.success('Feed removido; notícias importadas foram preservadas')
       await carregar()
     } catch (err) { toast.error(err.message || 'Erro ao excluir feed') }
   }
 
   async function importarFonte(fonte) {
-    setImportando(fonte.id); setResultados(null)
+    setImportando(idOf(fonte)); setResultados(null)
     try {
-      const r = await rssService.importarFonte(fonte.id)
+      const r = await rssService.importarFonte(idOf(fonte))
       setResultados(r)
-      toast.success(`${r.importadas || 0} notícia(s) importada(s)` + (r.ia_em_background ? ' · IA em processamento' : ''))
+      const extra = [r.imagens_em_background ? 'imagens indo para o R2' : '', r.ia_em_background ? 'IA em processamento' : ''].filter(Boolean).join(' · ')
+      if ((r.importadas || 0) > 0) toast.success(`${r.importadas} notícia(s) importada(s)${extra ? ` · ${extra}` : ''}`)
+      else toast(r.mensagem || `Nenhuma nova · ${r.duplicadas || 0} duplicada(s)`, { icon:'ℹ️' })
       await carregar()
     } catch (err) { toast.error('Erro na importação: ' + err.message) }
     finally { setImportando(null) }

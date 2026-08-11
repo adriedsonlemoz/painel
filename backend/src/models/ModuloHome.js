@@ -8,7 +8,8 @@ const moduloSchema = new mongoose.Schema({
   chave:  { type: String, required: true, unique: true },
   titulo: { type: String, required: true },
   ativo:  { type: Boolean, default: true },
-  ordem:  { type: Number, default: 0 },
+  ordem:{type:Number,default:0},
+  config:{type:mongoose.Schema.Types.Mixed,default:{}},
 }, { timestamps: { createdAt: 'criado_em' } })
 
 // #3 — Índice composto para listagem de módulos ativos ordenados

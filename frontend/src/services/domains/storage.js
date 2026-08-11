@@ -48,6 +48,12 @@ export const storageService = {
     return uploadComProgresso(`${BASE_URL}/upload/noticias`, 'imagem', file, onProgress)
   },
 
+  async uploadConteudo(file, tipo='midia', onProgress) {
+    validarImagem(file)
+    const safe = String(tipo || 'midia').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0,50) || 'midia'
+    return uploadComProgresso(`${BASE_URL}/upload/conteudo/${safe}`, 'imagem', file, onProgress)
+  },
+
   async remover(public_id) {
     if (!public_id) return
     await api('/upload', { method: 'DELETE', body: JSON.stringify({ public_id }) })

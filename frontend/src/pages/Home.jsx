@@ -618,6 +618,8 @@ export default function Home() {
   const destaqueImg     = destaques[0]?.imagem_url || noticiasUnicas[0]?.imagem_url || ''
   const emFiltro        = !!(modoTodas || catSlug || q || dataInicio || dataFim || (ordem && ordem !== 'recente'))
   const isAtivo         = chave => modulos[chave]?.ativo !== false
+  const moduloCfg       = chave => modulos[chave]?.config || {}
+  const moduloOrdem     = (chave, fallback) => Number.isFinite(Number(modulos[chave]?.ordem)) ? Number(modulos[chave].ordem) : fallback
 
   // Na Home normal, uma matéria ocupa apenas uma posição editorial.
   // Capa e Plantão deixam de reaparecer em Últimas Notícias/Destaques.
@@ -628,7 +630,12 @@ export default function Home() {
     ...capa.secundarios.map(noticiaId),
   ].filter(Boolean))
   const disponiveis = noticiasUnicas.filter(n => !idsJaExibidos.has(noticiaId(n)))
-  const ultimas = disponiveis.slice(0, 8)
+  const ultimasCfg = moduloCfg('ultimas_noticias')
+  const limiteUltimas = Math.max(1, Math.min(12, Number(ultimasCfg.limite) || 5))
+  const poolUltimas = ultimasCfg.modo === 'categoria' && ultimasCfg.categoria_id
+    ? disponiveis.filter(n => String(n.categoria_id?._id || n.categoria_id?.id || '') === String(ultimasCfg.categoria_id))
+    : disponiveis
+  const ultimas = poolUltimas.slice(0, limiteUltimas)
   const idsUltimas = new Set(ultimas.map(noticiaId))
   const destaquesRestantes = destaques.filter(n => !idsJaExibidos.has(noticiaId(n)) && !idsUltimas.has(noticiaId(n)))
   const idsDestaquesRestantes = new Set(destaquesRestantes.slice(0,3).map(noticiaId))
@@ -789,9 +796,9 @@ export default function Home() {
 
         {/* ── MODO NORMAL ── */}
         {!loading && !error && !emFiltro && noticiasUnicas.length > 0 && (
-          <>
+          <div className="flex flex-col gap-8">
             {isAtivo('ultimas_noticias') && (
-              <section id="noticias">
+              <section id="noticias" style={{order:moduloOrdem('ultimas_noticias',10)}}>
                 <div className="section-title mb-4">
                   <h2 className="section-title-text font-grotesk">
                     <Newspaper size={20} className="text-brand-500"/> Últimas Notícias
@@ -808,7 +815,7 @@ export default function Home() {
                 </div>
 
                 {ultimas.length > 0 ? (
-                  <BlocoEditorialUltimas noticias={ultimas.slice(0, 5)} />
+                  <BlocoEditorialUltimas noticias={ultimas} />
                 ) : (
                   <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-5 py-8 text-center">
                     <p className="font-grotesk text-sm text-gray-500">As notícias mais recentes já estão na capa acima.</p>
@@ -817,21 +824,21 @@ export default function Home() {
               </section>
             )}
 
-            <WeatherBlock data={portalContent.weather}/>
+            <div style={{order:20}}><WeatherBlock data={portalContent.weather}/></div>
 
             {isAtivo('noticias_externas') && ((portalContent.rssWorld?.items?.length || 0) > 0 || externas.length > 0) && (
-              <NoticiasExternas items={portalContent.rssWorld?.items || []} fallback={externas}/>
+              <div style={{order:moduloOrdem('noticias_externas',30)}}><NoticiasExternas items={portalContent.rssWorld?.items || []} fallback={externas}/></div>
             )}
 
-            <FootballBlock data={portalContent.football}/>
-            <HoroscopeBlock status={portalContent.horoscope}/>
+            <div style={{order:40}}><FootballBlock data={portalContent.football}/></div>
+            <div style={{order:50}}><HoroscopeBlock status={portalContent.horoscope}/></div>
 
-            <MaisLidas noticias={maisLidas} />
+            <div style={{order:60}}><MaisLidas noticias={maisLidas} /></div>
 
-            <BlocosPorCategoria noticias={categoriasDisponiveis} />
+            <div style={{order:70}}><BlocosPorCategoria noticias={categoriasDisponiveis} /></div>
 
-            {isAtivo('newsletter') && <NewsletterCTA/>}
-          </>
+            {isAtivo('newsletter') && <div style={{order:moduloOrdem('newsletter',80)}}><NewsletterCTA/></div>}
+          </div>
         )}
       </div>
     </div>

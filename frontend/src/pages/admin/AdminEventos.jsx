@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import { DSModal } from '../../components/admin/ui/DS'
 import { Calendar, CheckCircle2, Clock, Edit2, Eye, EyeOff, MapPin, Plus, Save, Tag, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ConfirmModal from '../../components/ConfirmModal'
 import { useEventos } from '../../hooks/useEventos'
+import { categoriasService } from '../../services/api'
+import ImageUpload from '../../components/ImageUpload'
 
 const CORES = ['#1B5E3B','#1565C0','#C62828','#6A1B9A','#E65100','#F57F17','#00695C','#E91E63']
 const TIPO_ENTRADA_LABELS = { gratuito: 'Gratuito', pago: 'Pago', doacoes: 'Aceita doações' }
@@ -30,10 +32,13 @@ function EventoForm({ evento, onSave, onCancel }) {
   const [form, setForm] = useState(evento ? {
     titulo: evento.titulo || '', descricao: evento.descricao || '', data: toInputDate(evento.data),
     horario: evento.horario || '', local: evento.local || '', cor: evento.cor || '#1B5E3B',
-    ativo: evento.ativo !== false, tipoEntrada: evento.tipoEntrada || 'gratuito',
+    ativo: evento.ativo !== false, tipoEntrada: evento.tipoEntrada || 'gratuito', destaque:Boolean(evento.destaque), categoria_id:String(evento.categoria_id?._id||evento.categoria_id||''),
+    imagem_url:evento.imagem_url||'', imagem_public_id:evento.imagem_public_id||'', imagem_alt:evento.imagem_alt||'', endereco:evento.endereco||'', mapa_url:evento.mapa_url||'', organizador:evento.organizador||'', telefone:evento.telefone||'', site:evento.site||'', ingresso_url:evento.ingresso_url||'', preco:evento.preco??'', horario_fim:evento.horario_fim||'', recorrencia:evento.recorrencia||'nenhuma', agendado_para:evento.agendado_para?new Date(evento.agendado_para).toISOString().slice(0,16):'', arquivar_automaticamente:evento.arquivar_automaticamente!==false,
   } : {
-    titulo: '', descricao: '', data: '', horario: '', local: '', cor: '#1B5E3B', ativo: true, tipoEntrada: 'gratuito',
+    titulo: '', descricao: '', data: '', horario: '', local: '', cor: '#1B5E3B', ativo: true, tipoEntrada: 'gratuito', destaque:false, categoria_id:'', imagem_url:'', imagem_public_id:'', imagem_alt:'', endereco:'', mapa_url:'', organizador:'', telefone:'', site:'', ingresso_url:'', preco:'', horario_fim:'', recorrencia:'nenhuma', agendado_para:'', arquivar_automaticamente:true,
   })
+  const [categorias,setCategorias]=useState([])
+  useEffect(()=>{categoriasService.listar().then(setCategorias).catch(()=>{})},[])
 
   function atualizar(campo, valor) { setForm(f => ({ ...f, [campo]: valor })) }
 
@@ -43,7 +48,7 @@ function EventoForm({ evento, onSave, onCancel }) {
     if (!form.data) return toast.error('Informe a data do evento')
     try {
       setSalvando(true)
-      await onSave({ ...form, titulo: form.titulo.trim(), data: new Date(`${form.data}T12:00:00`) })
+      await onSave({ ...form, titulo: form.titulo.trim(), data: new Date(`${form.data}T12:00:00`), categoria_id:form.categoria_id||null, preco:form.preco===''?null:Number(form.preco), agendado_para:form.agendado_para?new Date(form.agendado_para).toISOString():null })
     } finally { setSalvando(false) }
   }
 
@@ -59,6 +64,7 @@ function EventoForm({ evento, onSave, onCancel }) {
           <div className="adm-field"><label className="adm-label">Título *</label><input className="adm-input" value={form.titulo} maxLength={140} placeholder="Ex.: Festival de Inverno" onChange={e => atualizar('titulo', e.target.value)} /></div>
           <div className="adm-field"><label className="adm-label">Descrição</label><textarea className="adm-input" rows={6} maxLength={3000} value={form.descricao} placeholder="Conte o que vai acontecer, atrações e informações importantes..." onChange={e => atualizar('descricao', e.target.value)} style={{ resize:'vertical' }}/><div style={{ marginTop:5, textAlign:'right', fontSize:FONT.sm, color:'var(--adm-muted)' }}>{form.descricao.length}/3000</div></div>
           <div className="adm-field"><label className="adm-label"><MapPin size={13}/> Local</label><input className="adm-input" value={form.local} maxLength={180} placeholder="Praça, endereço ou espaço do evento" onChange={e => atualizar('local', e.target.value)} /></div>
+          <details className="adm-card" style={{padding:0,overflow:'hidden'}}><summary style={{padding:12,cursor:'pointer',fontWeight:700,fontSize:12}}>Capa e endereço</summary><div style={{padding:'0 12px 12px',display:'grid',gap:10}}><ImageUpload tipo="eventos" value={form.imagem_url} publicId={form.imagem_public_id} onChange={r=>setForm(f=>({...f,imagem_url:r?.url||'',imagem_public_id:r?.public_id||'',imagem_alt:f.imagem_alt||f.titulo}))}/>{form.imagem_url&&<div><label className="adm-label">Texto alternativo</label><input className="adm-input" value={form.imagem_alt} onChange={e=>atualizar('imagem_alt',e.target.value)}/></div>}<div><label className="adm-label">Endereço completo</label><input className="adm-input" value={form.endereco} onChange={e=>atualizar('endereco',e.target.value)} placeholder="Rua, número, bairro, cidade"/></div><div><label className="adm-label">Link do mapa</label><input className="adm-input" type="url" value={form.mapa_url} onChange={e=>atualizar('mapa_url',e.target.value)} placeholder="https://…"/></div></div></details>
         </div>
 
         <div style={{ display:'flex', flexDirection:'column', gap:SPACE.xl }}>
@@ -75,6 +81,15 @@ function EventoForm({ evento, onSave, onCancel }) {
             <span style={{ width:38,height:22,borderRadius:20,padding:3,display:'flex',justifyContent:form.ativo?'flex-end':'flex-start',background:form.ativo?'var(--adm-accent)':'var(--adm-border2)' }}><span style={{ width:16,height:16,borderRadius:'50%',background:'#fff' }}/></span>
             <span><strong style={{ display:'block', fontSize:FONT.md }}>{form.ativo ? 'Publicado na agenda' : 'Oculto da agenda'}</strong><small style={{ color:'var(--adm-muted)' }}>{form.ativo ? 'Visitantes podem visualizar este evento.' : 'O evento permanece salvo apenas no painel.'}</small></span>
           </button>
+
+          <details className="adm-card" style={{padding:0,overflow:'hidden'}}><summary style={{padding:12,cursor:'pointer',fontWeight:700,fontSize:12}}>Publicação e detalhes avançados</summary><div style={{padding:'0 12px 12px',display:'grid',gap:10}}>
+            <div className="adm-field"><label className="adm-label">Categoria</label><select className="adm-input" value={form.categoria_id} onChange={e=>atualizar('categoria_id',e.target.value)}><option value="">Sem categoria</option>{categorias.filter(c=>c.ativa!==false).map(c=><option key={c.id||c._id} value={c.id||c._id}>{c.nome}</option>)}</select></div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}><div><label className="adm-label">Fim</label><input type="time" className="adm-input" value={form.horario_fim} onChange={e=>atualizar('horario_fim',e.target.value)}/></div><div><label className="adm-label">Recorrência</label><select className="adm-input" value={form.recorrencia} onChange={e=>atualizar('recorrencia',e.target.value)}><option value="nenhuma">Não repetir</option><option value="semanal">Semanal</option><option value="mensal">Mensal</option><option value="anual">Anual</option></select></div></div>
+            <div><label className="adm-label">Organizador</label><input className="adm-input" value={form.organizador} onChange={e=>atualizar('organizador',e.target.value)}/></div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}><div><label className="adm-label">Telefone</label><input className="adm-input" value={form.telefone} onChange={e=>atualizar('telefone',e.target.value)}/></div><div><label className="adm-label">Preço</label><input className="adm-input" type="number" min="0" step="0.01" value={form.preco} onChange={e=>atualizar('preco',e.target.value)}/></div></div>
+            <div><label className="adm-label">Site</label><input type="url" className="adm-input" value={form.site} onChange={e=>atualizar('site',e.target.value)}/></div><div><label className="adm-label">Ingresso / inscrição</label><input type="url" className="adm-input" value={form.ingresso_url} onChange={e=>atualizar('ingresso_url',e.target.value)}/></div>
+            <div><label className="adm-label">Agendar publicação</label><input type="datetime-local" className="adm-input" value={form.agendado_para} onChange={e=>atualizar('agendado_para',e.target.value)}/></div>
+            <label style={{display:'flex',gap:7,fontSize:11}}><input type="checkbox" checked={form.destaque} onChange={e=>atualizar('destaque',e.target.checked)}/> Evento em destaque</label><label style={{display:'flex',gap:7,fontSize:11}}><input type="checkbox" checked={form.arquivar_automaticamente} onChange={e=>atualizar('arquivar_automaticamente',e.target.checked)}/> Arquivar automaticamente após a data</label>
+          </div></details>
 
           <div style={{ padding:16, border:'1px solid var(--adm-border)', borderRadius:RADIUS.xl, background:'var(--adm-surface2)' }}>
             <div style={{ fontSize:FONT.sm, color:'var(--adm-muted)', fontWeight:800, textTransform:'uppercase', letterSpacing:.8, marginBottom:10 }}>Prévia</div>

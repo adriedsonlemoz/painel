@@ -352,7 +352,7 @@ router.post('/ai/editorial', autenticar, async (req,res) => {
     if (!categorias.length) {
       const geral = await Categoria.findOneAndUpdate(
         { slug:'geral' },
-        { $setOnInsert:{ nome:'Geral', slug:'geral', cor:'#607D8B', descricao:'Notícias gerais do portal.' } },
+        { $setOnInsert:{ nome:'Geral', slug:'geral', cor:'#607D8B', descricao:'Notícias gerais do portal.' }, $set:{ protegida:true, ativa:true } },
         { upsert:true, new:true, setDefaultsOnInsert:true }
       )
       categorias=[geral.nome]

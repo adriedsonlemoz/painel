@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { extname } from 'node:path'
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { getCloudflareConfig } from '../utils/cloudflareConfig.js'
 import { fetchRemoteBuffer } from '../utils/remoteFetch.js'
 import slugify from 'slugify'
@@ -132,7 +132,8 @@ export async function uploadNewsImage(file, options = {}) {
   const client = clientFrom(cfg)
   const ext = extensionFor(file)
   const folder = String(options.folder || 'capas').replace(/[^a-zA-Z0-9/_-]+/g, '-').replace(/^\/+|\/+$/g, '') || 'capas'
-  const key = `alsistemas/noticias/${folder}/${monthPrefix()}/${randomUUID()}${ext}`
+  const root = options.root === 'conteudo' ? 'conteudo' : 'noticias'
+  const key = `alsistemas/${root}/${folder}/${monthPrefix()}/${randomUUID()}${ext}`
   const contentType = file.mimetype || 'application/octet-stream'
 
   await client.send(new PutObjectCommand({
@@ -163,6 +164,11 @@ export async function uploadNewsImage(file, options = {}) {
   }
 }
 
+export async function uploadContentImage(file, kind = 'midia') {
+  const safeKind = String(kind || 'midia').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 50) || 'midia'
+  return uploadNewsImage(file, { root: 'conteudo', folder: safeKind, purpose: `content-${safeKind}` })
+}
+
 export async function getR2Object(bucket, key) {
   const cfg = await getR2MediaConfig()
   if (clean(bucket) !== cfg.r2Bucket) {
@@ -172,7 +178,7 @@ export async function getR2Object(bucket, key) {
     throw err
   }
   const safeKey = clean(key)
-  if (!safeKey.startsWith('alsistemas/noticias/')) {
+  if (!safeKey.startsWith('alsistemas/noticias/') && !safeKey.startsWith('alsistemas/conteudo/')) {
     const err = new Error('Objeto R2 não autorizado para mídia pública.')
     err.code = 'R2_OBJECT_NOT_ALLOWED'
     err.status = 404
@@ -185,7 +191,7 @@ export async function getR2Object(bucket, key) {
 export async function deleteR2Object(bucket, key) {
   const cfg = await getR2MediaConfig()
   const safeKey = clean(key)
-  if (clean(bucket) !== cfg.r2Bucket || !safeKey.startsWith('alsistemas/noticias/')) {
+  if (clean(bucket) !== cfg.r2Bucket || (!safeKey.startsWith('alsistemas/noticias/') && !safeKey.startsWith('alsistemas/conteudo/'))) {
     const err = new Error('Objeto R2 não autorizado para remoção pelo módulo Notícias.')
     err.code = 'R2_OBJECT_NOT_ALLOWED'
     err.status = 403
@@ -224,4 +230,38 @@ export async function uploadRssNewsImage(url, { fonteNome = 'rss', titulo = '' }
   const proxyPath = `/api/upload/r2/${encodeURIComponent(out.bucket)}/${out.key.split('/').map(encodeURIComponent).join('/')}`
   const backendBase = clean(process.env.AL_PUBLIC_BACKEND_URL || process.env.RENDER_EXTERNAL_URL).replace(/\/+$/, '')
   return { ...out, public_url: out.public_url || (backendBase ? `${backendBase}${proxyPath}` : proxyPath), source_url: remote.finalUrl, title: titulo }
+}
+
+
+export async function listR2MediaObjects({ limit = 1000 } = {}) {
+  const cfg = await getR2MediaConfig()
+  const client = clientFrom(cfg)
+  const prefixes = ['alsistemas/noticias/', 'alsistemas/conteudo/']
+  const out = []
+  for (const Prefix of prefixes) {
+    let ContinuationToken
+    do {
+      const page = await client.send(new ListObjectsV2Command({
+        Bucket: cfg.r2Bucket,
+        Prefix,
+        ContinuationToken,
+        MaxKeys: Math.min(1000, Math.max(1, limit - out.length)),
+      }))
+      for (const item of page.Contents || []) {
+        if (!item.Key) continue
+        out.push({
+          key: item.Key,
+          public_id: encodeR2PublicId(cfg.r2Bucket, item.Key),
+          url: configuredPublicUrl(cfg, item.Key),
+          size: Number(item.Size || 0),
+          atualizado_em: item.LastModified || null,
+          storage: 'r2',
+        })
+        if (out.length >= limit) break
+      }
+      ContinuationToken = out.length >= limit ? null : page.NextContinuationToken
+    } while (ContinuationToken)
+    if (out.length >= limit) break
+  }
+  return out
 }

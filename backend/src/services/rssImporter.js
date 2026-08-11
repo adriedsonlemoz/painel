@@ -210,39 +210,35 @@ async function resolveLegacyCategoria(rssFonte) {
   }
   const geral = await Categoria.findOneAndUpdate(
     { slug: 'geral' },
-    { $setOnInsert: { nome: 'Geral', slug: 'geral', cor: '#607D8B', descricao: 'Notícias gerais do portal.' } },
+    { $setOnInsert: { nome: 'Geral', slug: 'geral', cor: '#607D8B', descricao: 'Notícias gerais do portal.' }, $set: { protegida: true, ativa: true } },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   )
   await RssFonte.findByIdAndUpdate(rssFonte._id, { categoria_id: geral._id })
   return geral
 }
 
-async function mirrorImagesToR2(docs, rssFonte, fonteDoc) {
-  if (!rssFonte.copiar_imagem_r2 || !docs.some(d => d.imagem_url)) return
+async function mirrorImagesToR2(insertedDocs, rssFonte, fonteDoc) {
+  if (!rssFonte.copiar_imagem_r2 || !insertedDocs.some(d => d.imagem_url)) return
   try { await getR2MediaConfig() } catch (err) {
     logger.info({ fonte: rssFonte.nome, motivo: err.code || err.message }, 'RSS: R2 indisponível; imagens permanecerão externas')
     return
   }
-  const queue = docs.filter(d => d.imagem_url)
+  // A notícia já foi persistida antes desta etapa. Assim uma imagem lenta nunca
+  // faz o botão “Importar” parecer travado; o R2 é enriquecimento em background.
+  const queue = insertedDocs.filter(d => d.imagem_url).map(d => ({ id:d._id, titulo:d.titulo, url:d.imagem_url }))
   let cursor = 0
   const worker = async () => {
     while (cursor < queue.length) {
-      const doc = queue[cursor++]
-      const originalUrl = doc.imagem_url
+      const item = queue[cursor++]
       try {
-        const img = await uploadRssNewsImage(originalUrl, { fonteNome: fonteDoc.nome, titulo: doc.titulo })
-        doc.imagem_url = img.public_url
-        doc.imagem_public_id = img.public_id
-        doc.imagem_storage = 'r2'
-        doc.imagem_key = img.key
-        doc.imagem_mime = img.mime
-        doc.imagem_tamanho = img.size
-        doc.imagem_largura = img.width || null
-        doc.imagem_altura = img.height || null
-        doc.imagem_nome_original = img.original_name
-        doc.imagem_fonte_url = originalUrl
+        const img = await uploadRssNewsImage(item.url, { fonteNome: fonteDoc.nome, titulo: item.titulo })
+        await Noticia.findByIdAndUpdate(item.id, { $set:{
+          imagem_url:img.public_url, imagem_public_id:img.public_id, imagem_storage:'r2', imagem_key:img.key,
+          imagem_mime:img.mime, imagem_tamanho:img.size, imagem_largura:img.width || null,
+          imagem_altura:img.height || null, imagem_nome_original:img.original_name, imagem_fonte_url:item.url,
+        } })
       } catch (err) {
-        logger.warn({ fonte: rssFonte.nome, imagem: originalUrl, err: err.message }, 'RSS: falha ao copiar capa para R2; URL externa preservada')
+        logger.warn({ fonte:rssFonte.nome, imagem:item.url, err:err.message }, 'RSS: falha ao copiar capa para R2; URL externa preservada')
       }
     }
   }
@@ -318,7 +314,6 @@ export async function importarFonte(rssFonte) {
   }
   if (docsUnicos.length) { const sem = await removerSemelhantes(docsUnicos); docsUnicos = sem.docs; duplicadas += sem.semelhantes }
 
-  if (docsUnicos.length) await mirrorImagesToR2(docsUnicos, rssFonte, fonteDoc)
 
   let importadas = 0; let ignoradas = errosConversao.length + duplicadas; const errosBulk = []; let insertedDocs = []
   if (docsUnicos.length) {
@@ -345,11 +340,14 @@ export async function importarFonte(rssFonte) {
     desativada_automaticamente: false, motivo_desativacao: null, $inc: { total_importadas: importadas },
   })
 
+  if (rssFonte.copiar_imagem_r2 && insertedDocs.length) {
+    setImmediate(() => mirrorImagesToR2(insertedDocs, rssFonte, fonteDoc).catch(err => logger.warn({ ...ctx, err:err.message }, 'RSS: cópia de imagens pós-importação falhou')))
+  }
   if (rssFonte.ia_ativa && insertedDocs.length) {
     setImmediate(() => processarIaDepoisDaImportacao(insertedDocs, rssFonte, fonteDoc, categoriaDoc).catch(err => logger.warn({ ...ctx, err: err.message }, 'RSS: IA pós-importação falhou')))
   }
   logger.info({ ...ctx, importadas, duplicadas, ignoradas, iaEmBackground: Boolean(rssFonte.ia_ativa && insertedDocs.length) }, 'RSS importado')
-  return { importadas, duplicadas, ignoradas, erros: [...errosConversao, ...errosBulk], total: slice.length, duracao_ms: duracao, ia_em_background: Boolean(rssFonte.ia_ativa && insertedDocs.length) }
+  return { importadas, duplicadas, ignoradas, erros: [...errosConversao, ...errosBulk], total: slice.length, duracao_ms: duracao, ia_em_background:Boolean(rssFonte.ia_ativa && insertedDocs.length), imagens_em_background:Boolean(rssFonte.copiar_imagem_r2 && insertedDocs.some(d=>d.imagem_url)) }
 }
 
 export async function importarTodasFontes(concorrencia = 3, respeitarIntervalo = false) {

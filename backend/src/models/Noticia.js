@@ -110,10 +110,10 @@ const noticiaSchema = new mongoose.Schema(
 
     // ── Autoria e origem ──────────────────────────────────────────────────────
 
-    autor: {
-      type:    String,
-      default: null,
-    },
+    autor: { type:String, default:null },
+    responsavel_id:{ type:mongoose.Schema.Types.ObjectId, ref:'Usuario', default:null, index:true },
+    revisor_id:{ type:mongoose.Schema.Types.ObjectId, ref:'Usuario', default:null, index:true },
+    comentarios_internos:{ type:[{ usuario_id:{type:mongoose.Schema.Types.ObjectId,ref:'Usuario'}, nome:{type:String,default:''}, texto:{type:String,required:true,maxlength:2000}, criado_em:{type:Date,default:Date.now} }], default:[] },
 
     /** Referência ao document Fonte (tabela de origens: "Agência Brasil" etc.) */
     fonte_id: {
@@ -211,8 +211,12 @@ const noticiaSchema = new mongoose.Schema(
 
     // ── SEO ───────────────────────────────────────────────────────────────────
 
-    seo_titulo:    { type: String, default: null, maxlength: 120 },
-    seo_descricao: { type: String, default: null, maxlength: 180 },
+    seo_titulo:    { type:String, default:null, maxlength:120 },
+    seo_descricao: { type:String, default:null, maxlength:180 },
+    canonical_url:{ type:String, default:null },
+    og_imagem_url:{ type:String, default:null },
+    seo_noindex:{ type:Boolean, default:false },
+    autosave_em:{ type:Date, default:null },
   },
   {
     timestamps: { createdAt: 'criado_em', updatedAt: 'atualizado_em' },

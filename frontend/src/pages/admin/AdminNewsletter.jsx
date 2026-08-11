@@ -1,136 +1,31 @@
-import { useState, useEffect, useCallback } from 'react'
-import { newsletterService } from '../../services/api'
-import { formatarData } from '../../utils/formatters'
+import { useCallback, useEffect, useState } from 'react'
+import { Download, Mail, Plus, Send, Clock, Users, X, Eye } from 'lucide-react'
+import { newsletterService, noticiasService } from '../../services/api'
+import { BASE_URL, authFetch } from '../../services/domains/http.js'
 import ConfirmModal from '../../components/ConfirmModal'
 import toast from 'react-hot-toast'
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 
-export default function AdminNewsletter() {
-  const [assinantes,   setAssinantes]   = useState([])
-  const [total,        setTotal]        = useState(0)
-  const [loading,      setLoading]      = useState(true)
-  const [filtroAtivo,  setFiltroAtivo]  = useState('todos')
-  const [busca,        setBusca]        = useState('')
-  const [confirm, setConfirm] = useState({ aberto:false, assinante:null, carregando:false })
+const idOf=x=>String(x?._id||x?.id||'')
+function CampanhaModal({campanha,noticias,onClose,onDone}){const novo=!campanha,[f,setF]=useState(campanha?{titulo:campanha.titulo||'',assunto:campanha.assunto||'',preheader:campanha.preheader||'',noticia_ids:(campanha.noticia_ids||[]).map(idOf),html:campanha.html||'',texto:campanha.texto||''}:{titulo:'',assunto:'',preheader:'',noticia_ids:[],html:'',texto:''}),[busy,setBusy]=useState(false),[preview,setPreview]=useState(false);const set=(k,v)=>setF(x=>({...x,[k]:v}));async function save(){if(!f.titulo.trim()||!f.assunto.trim())return toast.error('Título interno e assunto são obrigatórios.');try{setBusy(true);novo?await newsletterService.criarCampanha(f):await newsletterService.editarCampanha(idOf(campanha),f);toast.success('Campanha salva.');onDone()}catch(e){toast.error(e.message)}finally{setBusy(false)}}const selected=noticias.filter(n=>f.noticia_ids.includes(idOf(n)));return <div className="nlx-overlay"><div className="nlx-modal"><div className="nlx-head"><div><b>{novo?'Nova campanha':'Editar campanha'}</b><small>Selecione notícias publicadas, revise e envie um teste antes do disparo.</small></div><button onClick={onClose}><X size={16}/></button></div><div className="nlx-grid"><div><label className="adm-label">Nome interno *</label><input className="adm-input" value={f.titulo} onChange={e=>set('titulo',e.target.value)} placeholder="Boletim da manhã"/></div><div><label className="adm-label">Assunto do email *</label><input className="adm-input" value={f.assunto} onChange={e=>set('assunto',e.target.value)}/></div></div><div><label className="adm-label">Preheader</label><input className="adm-input" value={f.preheader} onChange={e=>set('preheader',e.target.value)} placeholder="Texto curto exibido ao lado do assunto"/></div><div><label className="adm-label">Notícias publicadas</label><div className="nlx-news">{noticias.map(n=><label key={idOf(n)}><input type="checkbox" checked={f.noticia_ids.includes(idOf(n))} onChange={e=>set('noticia_ids',e.target.checked?[...f.noticia_ids,idOf(n)]:f.noticia_ids.filter(x=>x!==idOf(n)))}/><span><b>{n.titulo}</b><small>{n.resumo||'Sem resumo'}</small></span></label>)}</div></div><details className="nlx-detail"><summary>Conteúdo personalizado (opcional)</summary><div><label className="adm-label">HTML</label><textarea className="adm-input adm-input-mono" rows={6} value={f.html} onChange={e=>set('html',e.target.value)} placeholder="Vazio = template automático com as notícias selecionadas"/><label className="adm-label" style={{marginTop:8}}>Texto simples</label><textarea className="adm-input" rows={3} value={f.texto} onChange={e=>set('texto',e.target.value)}/></div></details><button type="button" className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>setPreview(v=>!v)}><Eye size={14}/> {preview?'Ocultar prévia':'Prévia'}</button>{preview&&<div className="nlx-preview"><h2>{f.assunto||'Assunto da campanha'}</h2>{f.preheader&&<p>{f.preheader}</p>}{selected.map(n=><article key={idOf(n)}><b>{n.titulo}</b><p>{n.resumo}</p></article>)}{!selected.length&&<small>Selecione pelo menos uma notícia para o template automático.</small>}</div>}<div className="nlx-actions"><button className="adm-btn adm-btn-secondary" onClick={onClose}>Cancelar</button><button className="adm-btn adm-btn-primary" disabled={busy} onClick={save}>{busy?'Salvando…':'Salvar campanha'}</button></div></div></div>}
 
-  const carregar = useCallback(async () => {
-    try {
-      setLoading(true)
-      const params = {}
-      if (filtroAtivo === 'ativos')   params.ativo = true
-      if (filtroAtivo === 'inativos') params.ativo = false
-      const data = await newsletterService.listarAssinantes(params)
-      setAssinantes(data.assinantes); setTotal(data.total)
-    } catch (err) { toast.error(err.message) }
-    finally { setLoading(false) }
-  }, [filtroAtivo])
-
-  useEffect(() => { carregar() }, [carregar])
-
-  async function confirmarRemocao() {
-    const a = confirm.assinante
-    setConfirm(c => ({...c, carregando:true}))
-    try {
-      await newsletterService.removerAssinante(a.id)
-      toast.success('Removido.'); setConfirm({aberto:false,assinante:null,carregando:false}); carregar()
-    } catch (e) { toast.error(e.message); setConfirm(c => ({...c,carregando:false})) }
-  }
-
-  async function toggleStatus(a) {
-    try { await newsletterService.alterarStatus(a.id, !a.ativo); toast.success(a.ativo?'Desativado.':'Reativado.'); carregar() }
-    catch (e) { toast.error(e.message) }
-  }
-
-  function exportarCSV() {
-    const ativos = assinantes.filter(a => a.ativo)
-    const linhas = ['Nome,Email,Data'].concat(ativos.map(a => `"${a.nome||''}","${a.email}","${formatarData(a.inscrito_em)}"`))
-    const blob = new Blob([linhas.join('\n')], { type:'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const l = document.createElement('a'); l.href=url; l.download=`newsletter-${new Date().toISOString().slice(0,10)}.csv`; l.click()
-    setTimeout(() => URL.revokeObjectURL(url), 100); toast.success(`${ativos.length} assinantes exportados.`)
-  }
-
-  const ativos   = assinantes.filter(a => a.ativo).length
-  const inativos = assinantes.filter(a => !a.ativo).length
-  const filtrados = busca.trim() ? assinantes.filter(a => a.email.includes(busca) || (a.nome||'').toLowerCase().includes(busca.toLowerCase())) : assinantes
-
-  return (
-    <>
-      <ConfirmModal aberto={confirm.aberto} titulo={`Remover "${confirm.assinante?.email}"?`}
-        mensagem="O assinante será removido permanentemente. Ação irreversível."
-        labelConfirmar="Remover" carregando={confirm.carregando}
-        onConfirmar={confirmarRemocao} onCancelar={() => setConfirm({aberto:false,assinante:null,carregando:false})}/>
-
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Newsletter</div>
-          <div className="adm-page-sub">{total} assinante{total!==1?'s':''} no total</div>
-        </div>
-        <div className="adm-page-actions">
-          <button onClick={exportarCSV} disabled={ativos===0} className="adm-btn adm-btn-secondary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Exportar CSV
-          </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="newsletter-stats-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: SPACE.lg, marginBottom: SPACE.xl2, maxWidth: 480 }}>
-        {[{label:'Total',valor:total,color:'var(--adm-text)'},{label:'Ativos',valor:ativos,color:'var(--adm-accent)'},{label:'Inativos',valor:inativos,color:'var(--adm-muted)'}].map(({label,valor,color}) => (
-          <div key={label} className="adm-stat-card" style={{ textAlign:'center', padding: '14px 16px' }}>
-            <div className="adm-stat-label">{label}</div>
-            <div className="adm-stat-value" style={{ color, fontSize: 20 }}>{valor}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="adm-card">
-        <div className="adm-table-header">
-          <div className="adm-search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input type="search" placeholder="Filtrar por email..." value={busca} onChange={e => setBusca(e.target.value)} aria-label="Filtrar"/>
-          </div>
-          <div style={{ display:'flex', gap: 2, background:'var(--adm-surface2)', border:'1px solid var(--adm-border)', borderRadius: RADIUS.sm, padding: 3 }}>
-            {['todos','ativos','inativos'].map(v => (
-              <button key={v} onClick={() => setFiltroAtivo(v)} aria-pressed={filtroAtivo===v}
-                className={`adm-btn adm-btn-sm${filtroAtivo===v ? ' adm-btn-primary' : ' adm-btn-ghost'}`}
-                style={{ textTransform:'capitalize' }}>{v}</button>
-            ))}
-          </div>
-        </div>
-
-        {loading && <div className="adm-empty" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24" className="adm-spin" style={{margin:'0 auto',opacity:.5}}><path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/></svg></div>}
-        {!loading && filtrados.length === 0 && <div className="adm-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><p>Nenhum assinante.</p></div>}
-        {!loading && filtrados.length > 0 && (
-          <table className="adm-table newsletter-table" aria-label="Lista de assinantes">
-            <thead><tr><th>Assinante</th><th>Email</th><th>Status</th><th>Inscrito em</th><th></th></tr></thead>
-            <tbody>
-              {filtrados.map(a => (
-                <tr key={a.id}>
-                  <td style={{ fontWeight: 500 }}>{a.nome || '—'}</td>
-                  <td style={{ fontFamily:'var(--adm-mono)', fontSize: FONT.base, color:'var(--adm-muted)' }}>{a.email}</td>
-                  <td><span className={`adm-badge ${a.ativo ? 'adm-badge-green' : 'adm-badge-gray'}`}>{a.ativo?'Ativo':'Inativo'}</span></td>
-                  <td style={{ color:'var(--adm-muted)', fontSize: FONT.base, whiteSpace:'nowrap' }}>{formatarData(a.inscrito_em)}</td>
-                  <td>
-                    <div className="adm-td-actions">
-                      <button onClick={() => toggleStatus(a)} aria-label={a.ativo?`Desativar ${a.email}`:`Reativar ${a.email}`}
-                        className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
-                        {a.ativo
-                          ? <svg viewBox="0 0 24 24" fill="none" stroke="var(--adm-accent)" strokeWidth="2" width="14" height="14"><path d="M9 12l2 2 4-4"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                          : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><circle cx="12" cy="12" r="10"/></svg>}
-                      </button>
-                      <button onClick={() => setConfirm({aberto:true,assinante:a,carregando:false})}
-                        aria-label={`Remover ${a.email}`} className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </>
-  )
+export default function AdminNewsletter(){
+ const[tab,setTab]=useState('campanhas'),[subs,setSubs]=useState([]),[stats,setStats]=useState({total:0,ativos:0,inativos:0,pendentes:0}),[loading,setLoading]=useState(true),[filtro,setFiltro]=useState('todos'),[q,setQ]=useState(''),[campanhas,setCampanhas]=useState([]),[noticias,setNoticias]=useState([]),[modal,setModal]=useState(null),[teste,setTeste]=useState(null),[emailTeste,setEmailTeste]=useState(''),[agendar,setAgendar]=useState(null),[quando,setQuando]=useState(''),[del,setDel]=useState(null)
+ const loadSubs=useCallback(async()=>{try{setLoading(true);const d=await newsletterService.listarAssinantes({limit:200,ativo:filtro==='todos'?undefined:filtro==='ativos',q});setSubs(d.assinantes||[]);setStats(d.estatisticas||stats)}catch(e){toast.error(e.message)}finally{setLoading(false)}},[filtro,q])
+ async function loadCampaigns(){try{const [c,n]=await Promise.all([newsletterService.listarCampanhas(),noticiasService.listar({status:'publicado',limit:200})]);setCampanhas(Array.isArray(c)?c:[]);setNoticias(n.noticias||n||[])}catch(e){toast.error(e.message)}}
+ useEffect(()=>{loadSubs();loadCampaigns()},[]);useEffect(()=>{if(tab==='assinantes')loadSubs()},[tab,filtro])
+ async function exportCsv(){try{const r=await authFetch(`${BASE_URL}/newsletter/assinantes/exportar.csv`,{credentials:'include'});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.erro||'Falha ao exportar')}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`newsletter-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),500);toast.success('CSV completo exportado.')}catch(e){toast.error(e.message)}}
+ async function sendTest(){try{await newsletterService.enviarTeste(idOf(teste),emailTeste);toast.success('Email de teste enviado.');setTeste(null)}catch(e){toast.error(e.message)}}
+ async function sendNow(c){if(!confirm(`Enviar “${c.assunto}” agora para os assinantes ativos?`))return;try{const d=await newsletterService.enviar(idOf(c));toast.success(d.mensagem||'Envio iniciado.');loadCampaigns()}catch(e){toast.error(e.message)}}
+ async function schedule(){if(!quando)return toast.error('Escolha data e hora.');try{const d=await newsletterService.enviar(idOf(agendar),new Date(quando).toISOString());toast.success(d.mensagem||'Campanha agendada.');setAgendar(null);setQuando('');loadCampaigns()}catch(e){toast.error(e.message)}}
+ async function toggle(a){try{await newsletterService.alterarStatus(idOf(a),!a.ativo);loadSubs()}catch(e){toast.error(e.message)}}
+ async function removeSub(){try{await newsletterService.removerAssinante(idOf(del));setDel(null);loadSubs()}catch(e){toast.error(e.message)}}
+ return <><style>{`.nlx-tabs{display:flex;gap:4px;margin-bottom:14px}.nlx-tabs button{border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-muted);padding:7px 11px;border-radius:8px;font-size:11px;font-weight:700}.nlx-tabs button.active{background:var(--adm-accent);color:#fff;border-color:var(--adm-accent)}.nlx-campaigns{display:grid;gap:8px}.nlx-card{display:grid;grid-template-columns:1fr auto;gap:10px;padding:12px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface)}.nlx-card small{display:block;color:var(--adm-muted);font-size:10px;margin-top:4px}.nlx-card-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.nlx-status{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;font-size:8px;background:var(--adm-surface2);color:var(--adm-muted)}.nlx-overlay{position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,.58);display:grid;place-items:center;padding:14px}.nlx-modal{width:min(760px,100%);max-height:calc(100dvh - 28px);overflow:auto;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:16px;padding:20px;display:grid;gap:12px}.nlx-head{display:flex;justify-content:space-between;gap:10px}.nlx-head>div{display:grid;gap:3px}.nlx-head small{font-size:10px;color:var(--adm-muted)}.nlx-head button{border:0;background:none;color:var(--adm-muted)}.nlx-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.nlx-news{max-height:230px;overflow:auto;border:1px solid var(--adm-border);border-radius:9px}.nlx-news label{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid var(--adm-border);font-size:10px}.nlx-news small{display:block;color:var(--adm-muted);margin-top:2px}.nlx-detail{border:1px solid var(--adm-border);border-radius:9px}.nlx-detail summary{padding:9px 11px;font-size:10px;font-weight:700;cursor:pointer}.nlx-detail>div{padding:0 11px 11px}.nlx-preview{padding:12px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2);max-height:300px;overflow:auto}.nlx-preview h2{font-size:16px}.nlx-preview article{border-top:1px solid var(--adm-border);padding:8px 0}.nlx-preview article p{font-size:10px;color:var(--adm-muted);margin:3px 0}.nlx-actions{display:flex;justify-content:flex-end;gap:8px}.nlx-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}.nlx-stat{padding:11px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface)}.nlx-stat b{display:block;font-size:18px}.nlx-stat small{color:var(--adm-muted)}.nlx-subs{display:grid;gap:6px}.nlx-sub{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 11px;border:1px solid var(--adm-border);border-radius:9px}.nlx-sub small{display:block;color:var(--adm-muted);font-size:9px}.nlx-filters{display:flex;gap:7px;margin-bottom:10px}.nlx-filters input{flex:1}@media(max-width:640px){.nlx-grid{grid-template-columns:1fr}.nlx-stats{grid-template-columns:repeat(2,1fr)}.nlx-card{grid-template-columns:1fr}.nlx-card-actions{border-top:1px solid var(--adm-border);padding-top:7px}.nlx-modal{padding:14px}.nlx-actions .adm-btn{flex:1;justify-content:center}}`}</style>
+ <ConfirmModal aberto={Boolean(del)} titulo={`Remover ${del?.email||''}?`} mensagem="O assinante será removido permanentemente." labelConfirmar="Remover" onConfirmar={removeSub} onCancelar={()=>setDel(null)}/>
+ {modal!==null&&<CampanhaModal campanha={modal||null} noticias={noticias} onClose={()=>setModal(null)} onDone={()=>{setModal(null);loadCampaigns()}}/>}
+ {teste&&<div className="nlx-overlay"><div className="nlx-modal" style={{maxWidth:440}}><div className="nlx-head"><div><b>Enviar teste</b><small>O assunto recebe o prefixo [TESTE].</small></div><button onClick={()=>setTeste(null)}><X size={16}/></button></div><input className="adm-input" type="email" placeholder="seu@email.com" value={emailTeste} onChange={e=>setEmailTeste(e.target.value)}/><div className="nlx-actions"><button className="adm-btn adm-btn-secondary" onClick={()=>setTeste(null)}>Cancelar</button><button className="adm-btn adm-btn-primary" onClick={sendTest}><Send size={14}/> Enviar teste</button></div></div></div>}
+ {agendar&&<div className="nlx-overlay"><div className="nlx-modal" style={{maxWidth:440}}><div className="nlx-head"><div><b>Agendar campanha</b><small>O backend verifica campanhas pendentes a cada minuto.</small></div><button onClick={()=>setAgendar(null)}><X size={16}/></button></div><input className="adm-input" type="datetime-local" value={quando} onChange={e=>setQuando(e.target.value)}/><div className="nlx-actions"><button className="adm-btn adm-btn-secondary" onClick={()=>setAgendar(null)}>Cancelar</button><button className="adm-btn adm-btn-primary" onClick={schedule}><Clock size={14}/> Agendar</button></div></div></div>}
+ <div className="adm-page-header"><div><div className="adm-page-title">Newsletter</div><div className="adm-page-sub">Campanhas editoriais, testes, agendamento e assinantes.</div></div><div className="adm-page-actions">{tab==='campanhas'?<button className="adm-btn adm-btn-primary" onClick={()=>setModal(false)}><Plus size={15}/> Nova campanha</button>:<button className="adm-btn adm-btn-secondary" onClick={exportCsv}><Download size={15}/> Exportar todos</button>}</div></div>
+ <div className="nlx-tabs"><button className={tab==='campanhas'?'active':''} onClick={()=>setTab('campanhas')}><Mail size={12}/> Campanhas</button><button className={tab==='assinantes'?'active':''} onClick={()=>setTab('assinantes')}><Users size={12}/> Assinantes</button></div>
+ {tab==='campanhas'?<div className="nlx-campaigns">{campanhas.map(c=><div className="nlx-card" key={idOf(c)}><div><b>{c.titulo}</b><span className="nlx-status">{c.status}</span><small>{c.assunto} · {(c.noticia_ids||[]).length} notícia(s){c.agendada_para?` · ${new Date(c.agendada_para).toLocaleString('pt-BR')}`:''}</small>{c.status==='enviada'&&<small>{c.total_enviados||0} enviados · {c.total_falhas||0} falhas</small>}{c.ultimo_erro&&<small style={{color:'var(--adm-red)'}}>{c.ultimo_erro}</small>}</div><div className="nlx-card-actions">{['rascunho','agendada'].includes(c.status)&&<button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={()=>setModal(c)}>Editar</button>}<button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>{setTeste(c);setEmailTeste('')}}>Teste</button>{c.status==='rascunho'&&<><button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>{setAgendar(c);setQuando('')}}><Clock size={12}/> Agendar</button><button className="adm-btn adm-btn-primary adm-btn-sm" onClick={()=>sendNow(c)}><Send size={12}/> Enviar</button></>}{c.status==='agendada'&&<button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={async()=>{await newsletterService.cancelarAgendamento(idOf(c));loadCampaigns()}}>Cancelar agendamento</button>}</div></div>)}{!campanhas.length&&<div className="adm-empty">Nenhuma campanha. Crie uma para distribuir as notícias publicadas.</div>}</div>:<><div className="nlx-stats">{[['Total',stats.total],['Ativos',stats.ativos],['Pendentes',stats.pendentes],['Inativos',stats.inativos]].map(([l,v])=><div className="nlx-stat" key={l}><b>{v||0}</b><small>{l}</small></div>)}</div><div className="nlx-filters"><input className="adm-input" value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&loadSubs()} placeholder="Buscar por nome ou email"/><select className="adm-input" style={{maxWidth:130}} value={filtro} onChange={e=>setFiltro(e.target.value)}><option value="todos">Todos</option><option value="ativos">Ativos</option><option value="inativos">Inativos</option></select><button className="adm-btn adm-btn-secondary" onClick={loadSubs}>Buscar</button></div>{loading?<div className="adm-empty">Carregando…</div>:<div className="nlx-subs">{subs.map(a=><div className="nlx-sub" key={idOf(a)}><div><b>{a.nome||a.email}</b><small>{a.email} · {a.confirmado===false?'confirmação pendente':a.ativo?'ativo':'inativo'}</small></div><div className="nlx-card-actions"><button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={()=>toggle(a)}>{a.ativo?'Desativar':'Reativar'}</button><button className="adm-btn adm-btn-danger adm-btn-sm" onClick={()=>setDel(a)}>Remover</button></div></div>)}{!subs.length&&<div className="adm-empty">Nenhum assinante.</div>}</div>}</>}
+ </>
 }

@@ -13,7 +13,7 @@ function dimensoes(file) {
   })
 }
 
-export default function ImageUpload({ value, publicId, metadata = {}, onChange }) {
+export default function ImageUpload({ value, publicId, metadata = {}, onChange, tipo = 'noticia' }) {
   const [progresso, setProgresso] = useState(0)
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef(null)
@@ -25,7 +25,7 @@ export default function ImageUpload({ value, publicId, metadata = {}, onChange }
       setUploading(true)
       setProgresso(0)
       const dims = await dimensoes(file)
-      const resultado = await storageService.uploadNoticia(file, setProgresso)
+      const resultado = tipo === 'noticia' ? await storageService.uploadNoticia(file, setProgresso) : await storageService.uploadConteudo(file, tipo, setProgresso)
       onChange({
         ...resultado,
         largura: dims.largura,
@@ -87,7 +87,7 @@ export default function ImageUpload({ value, publicId, metadata = {}, onChange }
           ) : (
             <>
               <span className="news-image-icon"><ImageIcon size={21}/></span>
-              <b><Upload size={14}/> Adicionar imagem de capa</b>
+              <b><Upload size={14}/> Adicionar imagem</b>
               <small>JPG, PNG ou WebP · até 5 MB</small>
             </>
           )}

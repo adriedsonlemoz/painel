@@ -18,6 +18,9 @@ const AssinanteSchema = new mongoose.Schema({
     type:    Boolean,
     default: true,
   },
+  confirmado:{type:Boolean,default:true,index:true},
+  token_confirmacao:{type:String,default:()=>Math.random().toString(36).slice(2)+Date.now().toString(36)},
+  confirmado_em:{type:Date,default:Date.now},
   token_cancelamento: {
     type:    String,
     default: () => Math.random().toString(36).slice(2) + Date.now().toString(36),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Calendar, Clock, Tag, Globe, Star, Share2, Check, Eye, ArrowRight, UserRound } from 'lucide-react'
 import { useNoticia } from '../hooks/useNoticias'
 import { formatarData, formatarDataRelativa } from '../utils/formatters'
@@ -17,8 +17,8 @@ function useSEO({ noticia, cfg }) {
     const tituloBase = noticia.seo_titulo || noticia.titulo
     const fullTitle = tituloBase.includes(siteName) ? tituloBase : `${tituloBase} | ${siteName}`
     const descricao = noticia.seo_descricao || noticia.resumo || noticia.conteudo?.replace(/[#*>\-\[\]]/g, '').slice(0, 160).trim()
-    const imagem = noticia.imagem_url || cfg.site_imagem || ''
-    const canonical = `${window.location.origin}/noticia/${noticia.slug || noticia._id || noticia.id}`
+    const imagem = noticia.og_imagem_url || noticia.imagem_url || cfg.site_imagem || ''
+    const canonical = noticia.canonical_url || `${window.location.origin}/noticia/${noticia.slug || noticia._id || noticia.id}`
 
     document.title = fullTitle
     const setMeta = (name, content, isProp = false) => {
@@ -34,7 +34,7 @@ function useSEO({ noticia, cfg }) {
       el.href = href
     }
     setMeta('description', descricao)
-    setMeta('robots', 'index, follow, max-image-preview:large')
+    setMeta('robots', noticia.seo_noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large')
     setMeta('og:title', fullTitle, true); setMeta('og:description', descricao, true)
     setMeta('og:image', imagem, true); setMeta('og:url', canonical, true); setMeta('og:type', 'article', true); setMeta('og:site_name', siteName, true)
     setMeta('article:published_time', noticia.publicado_em || noticia.criado_em, true)
@@ -165,11 +165,17 @@ function renderConteudo(texto, { htmlSeguro = false } = {}) {
 
 export default function NoticiaDetalhe() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { noticia, loading, error } = useNoticia(id)
   const [cfg, setCfg] = useState({})
   const [relacionadas, setRelacionadas] = useState([])
   const tempoLeitura = calcularTempoLeitura(noticia?.conteudo)
 
+  useEffect(() => {
+    if (noticia?.redirect && noticia?.redirecionar_para) {
+      navigate(noticia.redirecionar_para, { replace: true })
+    }
+  }, [noticia, navigate])
   useEffect(() => { configuracoesService.listar().then(setCfg).catch(() => {}) }, [])
   useEffect(() => {
     const slug = noticia?.categoria_id?.slug

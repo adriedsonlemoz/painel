@@ -20,11 +20,27 @@ const auth = [autenticar]
 const authEdit = [autenticar, verificarPermissao('noticias.criar')]
 
 const RSS_FONTES_PADRAO = [
-  { nome: 'CNN Brasil — Últimas', fonte_nome: 'CNN Brasil', categoria_sugerida: 'Geral', url: 'https://www.cnnbrasil.com.br/feed/', destaque: 'Feed geral com atualização frequente.' },
-  { nome: 'CNN Brasil — Política', fonte_nome: 'CNN Brasil', categoria_sugerida: 'Política', url: 'https://www.cnnbrasil.com.br/tudo-sobre/politica/feed/', destaque: 'Política e assuntos públicos.' },
-  { nome: 'CNN Brasil — Economia', fonte_nome: 'CNN Brasil', categoria_sugerida: 'Economia', url: 'https://www.cnnbrasil.com.br/tudo-sobre/economia/feed/', destaque: 'Economia, mercado e negócios.' },
-  { nome: 'Folha — Em Cima da Hora', fonte_nome: 'Folha de S.Paulo', categoria_sugerida: 'Geral', url: 'https://feeds.folha.uol.com.br/emcimadahora/rss091.xml', destaque: 'Feed amplo e atualizado da Folha de S.Paulo.' },
+  { nome: 'Agência Brasil — Últimas', fonte_nome: 'Agência Brasil', categoria_sugerida: 'Geral', url: 'https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml', destaque: 'Últimas notícias da Agência Brasil.' },
+  { nome: 'CNN Brasil — Últimas', fonte_nome: 'CNN Brasil', categoria_sugerida: 'Geral', url: 'https://www.cnnbrasil.com.br/feed/', destaque: 'Feed geral da CNN Brasil.' },
 ]
+
+const feedHealthCache = new Map()
+const FEED_HEALTH_TTL = 10 * 60_000
+
+async function testarFeedPadrao(feed) {
+  const cached = feedHealthCache.get(feed.url)
+  if (cached && Date.now() - cached.at < FEED_HEALTH_TTL) return cached.value
+  try {
+    const items = await parseFeed(feed.url)
+    const value = items.length ? { ...feed, funcionando:true, total_itens:items.length, verificado_em:new Date().toISOString() } : null
+    feedHealthCache.set(feed.url, { at:Date.now(), value })
+    return value
+  } catch (err) {
+    logger.warn({ url:feed.url, err:err.message }, 'RSS sugerido indisponível; ocultado da lista')
+    feedHealthCache.set(feed.url, { at:Date.now(), value:null })
+    return null
+  }
+}
 
 async function validarFeedAntesDeSalvar(url) {
   const items = await parseFeed(url)
@@ -44,7 +60,32 @@ async function validarAssociacoes(fonteId, categoriaId) {
   return { fonte, categoria }
 }
 
-router.get('/fontes/padrao', ...auth, (_req, res) => res.json(RSS_FONTES_PADRAO))
+async function resolverAssociacoes({ fonte_id, categoria_id, fonte_nome, categoria_nome, url }) {
+  let fonte = mongoose.isValidObjectId(fonte_id) ? await Fonte.findById(fonte_id) : null
+  let categoria = mongoose.isValidObjectId(categoria_id) ? await Categoria.findById(categoria_id) : null
+  const padrao = RSS_FONTES_PADRAO.find(p => p.url === String(url || '').trim())
+  const nomeFonte = String(fonte_nome || padrao?.fonte_nome || '').trim()
+  const nomeCategoria = String(categoria_nome || padrao?.categoria_sugerida || 'Geral').trim() || 'Geral'
+  if (!fonte && nomeFonte) {
+    fonte = await Fonte.findOne({ nome:new RegExp(`^${nomeFonte.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
+    if (!fonte) fonte = await Fonte.create({ nome:nomeFonte, url:null, ativo:true })
+  }
+  if (!categoria && nomeCategoria) {
+    const slug = nomeCategoria.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'geral'
+    categoria = await Categoria.findOne({ $or:[{slug},{nome:new RegExp(`^${nomeCategoria.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,'i')}] })
+    if (!categoria) categoria = await Categoria.create({ nome:nomeCategoria, slug, descricao:'', cor:'#607D8B' })
+  }
+  if (!fonte) throw new Error('Selecione ou crie uma Fonte editorial válida')
+  if (!categoria) throw new Error('Selecione ou crie uma Categoria padrão válida')
+  return { fonte, categoria }
+}
+
+router.get('/fontes/padrao', ...auth, async (_req, res, next) => {
+  try {
+    const checked = await Promise.all(RSS_FONTES_PADRAO.map(testarFeedPadrao))
+    res.json(checked.filter(Boolean))
+  } catch (err) { next(err) }
+})
 
 router.get('/fontes', ...auth, async (_req, res, next) => {
   try {
@@ -59,15 +100,15 @@ router.get('/fontes', ...auth, async (_req, res, next) => {
 router.post('/fontes', ...authEdit, async (req, res, next) => {
   try {
     const {
-      nome, url, fonte_id, categoria_id, ativa, max_items, auto_update, intervalo_min,
+      nome, url, fonte_id, categoria_id, fonte_nome, categoria_nome, ativa, max_items, auto_update, intervalo_min,
       ia_ativa, ia_resumo, ia_tags, ia_categoria, ia_titulo, ia_max_itens,
       copiar_imagem_r2, padrao,
     } = req.body
     if (!nome?.trim()) return res.status(400).json({ erro: 'Nome do feed é obrigatório' })
     if (!url?.trim()) return res.status(400).json({ erro: 'URL do feed é obrigatória' })
-    try { await validarAssociacoes(fonte_id, categoria_id) } catch (e) { return res.status(400).json({ erro: e.message }) }
-
     const cleanUrl = url.trim()
+    let associacoes
+    try { associacoes = await resolverAssociacoes({ fonte_id, categoria_id, fonte_nome, categoria_nome, url:cleanUrl }) } catch (e) { return res.status(400).json({ erro: e.message }) }
     if (await RssFonte.exists({ url: cleanUrl })) return res.status(409).json({ erro: 'Já existe um feed com essa URL' })
     try { await validarFeedAntesDeSalvar(cleanUrl) } catch (err) {
       return res.status(422).json({ erro: `Não foi possível cadastrar este feed: ${err.message}` })
@@ -75,7 +116,7 @@ router.post('/fontes', ...authEdit, async (req, res, next) => {
 
     const isPadrao = Boolean(padrao && RSS_FONTES_PADRAO.some(p => p.url === cleanUrl))
     const fonte = await RssFonte.create({
-      nome: nome.trim(), url: cleanUrl, fonte_id, categoria_id,
+      nome: nome.trim(), url: cleanUrl, fonte_id:associacoes.fonte._id, categoria_id:associacoes.categoria._id,
       ativa: ativa !== false,
       max_items: Math.max(1, Math.min(100, Number(max_items) || 10)),
       auto_update: Boolean(auto_update), intervalo_min: Math.max(5, Number(intervalo_min) || 60),
@@ -148,7 +189,14 @@ router.post('/fontes/:id/importar', ...authEdit, async (req, res, next) => {
     if (!fonte) return res.status(404).json({ erro: 'Feed não encontrado' })
     logger.info({ fonte: fonte.nome, usuario: req.usuario?.email }, 'Importação RSS manual iniciada')
     const resultado = await importarFonte(fonte)
-    res.json({ mensagem: 'Importação concluída', fonte: fonte.nome, ...resultado })
+    const mensagem = resultado.importadas > 0
+      ? `${resultado.importadas} nova(s) notícia(s) importada(s).`
+      : resultado.duplicadas > 0
+        ? `Nenhuma notícia nova: ${resultado.duplicadas} item(ns) já estavam no conteúdo.`
+        : resultado.total === 0
+          ? 'O feed respondeu, mas não trouxe itens importáveis.'
+          : 'A importação terminou sem novas notícias. Abra os detalhes para ver os itens ignorados.'
+    res.json({ mensagem, fonte: fonte.nome, ...resultado })
   } catch (err) { logger.error({ err: err.message, fonteId: req.params.id }, 'Erro na importação RSS manual'); next(err) }
 })
 

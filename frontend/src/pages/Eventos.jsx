@@ -92,6 +92,7 @@ function EventoModal({ evento, onClose }) {
     >
       <div className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-w-xl sm:rounded-3xl">
         <div className="h-1.5 flex-shrink-0" style={{ backgroundColor: cor }} />
+        {evento.imagem_url && <img src={evento.imagem_url} alt={evento.imagem_alt || evento.titulo} className="h-44 w-full flex-shrink-0 object-cover sm:h-52" />}
         <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-14 w-14 flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-gray-50">
@@ -124,6 +125,13 @@ function EventoModal({ evento, onClose }) {
           )}
 
           {evento.descricao && <p className="mt-5 whitespace-pre-line text-sm leading-7 text-gray-600">{evento.descricao}</p>}
+          {(evento.endereco || evento.organizador || evento.preco != null || evento.site || evento.ingresso_url || evento.telefone) && <div className="mt-5 grid gap-2 rounded-2xl border border-gray-100 p-4 text-sm text-gray-600">
+            {evento.endereco && <div><b>Endereço:</b> {evento.endereco}</div>}
+            {evento.organizador && <div><b>Organizador:</b> {evento.organizador}</div>}
+            {evento.telefone && <div><b>Contato:</b> {evento.telefone}</div>}
+            {evento.preco != null && <div><b>Preço:</b> {Number(evento.preco)===0?'Gratuito':Number(evento.preco).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</div>}
+            <div className="flex flex-wrap gap-2 pt-1">{evento.mapa_url&&<a href={evento.mapa_url} target="_blank" rel="noreferrer" className="btn-secondary text-xs">Ver mapa</a>}{evento.site&&<a href={evento.site} target="_blank" rel="noreferrer" className="btn-secondary text-xs">Site</a>}{evento.ingresso_url&&<a href={evento.ingresso_url} target="_blank" rel="noreferrer" className="btn-brand text-xs">Ingressos</a>}</div>
+          </div>}
 
           <div className="mt-6 flex items-start gap-2 border-t border-gray-100 pt-4 text-xs text-gray-400">
             <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
@@ -191,6 +199,12 @@ export default function Eventos() {
   }, [])
 
   useEffect(() => { carregar() }, [carregar])
+  useEffect(() => {
+    if (!eventos.length) return undefined
+    const script=document.createElement('script');script.type='application/ld+json';script.id='eventos-jsonld'
+    script.textContent=JSON.stringify({'@context':'https://schema.org','@graph':eventos.slice(0,50).map(e=>({'@type':'Event',name:e.titulo,description:e.descricao||undefined,startDate:`${String(e.data||'').slice(0,10)}${e.horario?`T${e.horario}:00`:''}`,endDate:e.horario_fim?`${String(e.data||'').slice(0,10)}T${e.horario_fim}:00`:undefined,eventStatus:'https://schema.org/EventScheduled',eventAttendanceMode:'https://schema.org/OfflineEventAttendanceMode',location:e.local||e.endereco?{'@type':'Place',name:e.local||e.endereco,address:e.endereco||e.local}:undefined,image:e.imagem_url?[e.imagem_url]:undefined,organizer:e.organizador?{'@type':'Organization',name:e.organizador,url:e.site||undefined}:undefined,offers:e.ingresso_url||e.preco!=null?{'@type':'Offer',url:e.ingresso_url||e.site||undefined,price:e.preco??0,priceCurrency:'BRL'}:undefined}))})
+    document.head.appendChild(script);return()=>script.remove()
+  }, [eventos])
 
   const grupos = useMemo(() => {
     return eventos.reduce((acc, evento) => {

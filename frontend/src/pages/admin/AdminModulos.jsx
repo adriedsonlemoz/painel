@@ -5,7 +5,7 @@ import {
   Save, Loader2, Plus, Trash2,
   Eye, EyeOff, ExternalLink, Settings, Image,
   Layout, Star, Newspaper, Heart, Bus, CalendarDays,
-  Globe, Tag, ChevronDown, ChevronRight
+  Globe, Tag, ChevronDown, ChevronRight, GripVertical, Monitor, Smartphone
 } from 'lucide-react'
 import {
   configuracoesService,
@@ -13,9 +13,11 @@ import {
   noticiasExternasService,
   topicosService,
   noticiasService,
+  categoriasService,
 } from '../../services/api'
 import toast from 'react-hot-toast'
 import ConfirmModal from '../../components/ConfirmModal'
+import ImageUpload from '../../components/ImageUpload'
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
 
 // ─── Mapeamento de nomes de módulos ──────────────────────────
@@ -42,7 +44,6 @@ function SecaoHero({ cfg, onChange }) {
     { key: 'hero_titulo_linha1', label: 'Título linha 1', placeholder: 'Nossa cidade,' },
     { key: 'hero_titulo_linha2', label: 'Título linha 2 (itálico)', placeholder: 'nossa história.' },
     { key: 'hero_subtitulo', label: 'Subtítulo', placeholder: 'Seu portal de notícias...' },
-    { key: 'hero_imagem_url', label: 'URL da imagem de fundo', placeholder: 'https://... (deixe vazio para gradiente)' },
     { key: 'hero_btn1_label', label: 'Botão 1 — Texto', placeholder: 'Últimas Notícias' },
     { key: 'hero_btn1_link', label: 'Botão 1 — Link', placeholder: '/#noticias' },
     { key: 'hero_btn2_label', label: 'Botão 2 — Texto', placeholder: 'Curiosidades' },
@@ -54,6 +55,10 @@ function SecaoHero({ cfg, onChange }) {
       <div style={{ marginBottom: 20 }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--adm-text)', marginBottom: 4 }}>Configurações do Hero</h3>
         <p style={{ fontSize: 13, color: 'var(--adm-muted)' }}>Personalize a seção principal da home</p>
+      </div>
+      <div className="adm-field" style={{marginBottom:16}}>
+        <label className="adm-label">Imagem do Hero · Cloudflare R2</label>
+        <ImageUpload tipo="home" value={cfg.hero_imagem_url || ''} publicId={cfg.hero_imagem_public_id || ''} onChange={img=>{onChange('hero_imagem_url',img?.url||'');onChange('hero_imagem_public_id',img?.public_id||'')}} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
         {fields.map(f => (
@@ -552,6 +557,61 @@ function SecaoModulos({ modulos, onToggle }) {
   )
 }
 
+
+// ─── Compositor visual da Home ───────────────────────────────
+function SecaoCompositor({ onSync }) {
+  const [itens,setItens]=useState([])
+  const [categorias,setCategorias]=useState([])
+  const [loading,setLoading]=useState(true)
+  const [saving,setSaving]=useState(false)
+  const [preview,setPreview]=useState('mobile')
+  const [dragIndex,setDragIndex]=useState(null)
+
+  useEffect(()=>{
+    Promise.all([modulosService.listarCompositor(),categoriasService.listar()])
+      .then(([m,c])=>{setItens((m||[]).map((x,i)=>({...x,id:x.id||x._id,ordem:Number(x.ordem??i),config:{modo:'automatico',limite:5,...(x.config||{})}})));setCategorias(c||[])})
+      .catch(e=>toast.error(e.message)).finally(()=>setLoading(false))
+  },[])
+
+  function patch(i,patch){setItens(xs=>xs.map((x,j)=>j===i?{...x,...patch}:x))}
+  function patchCfg(i,key,value){setItens(xs=>xs.map((x,j)=>j===i?{...x,config:{...(x.config||{}),[key]:value}}:x))}
+  function drop(to){
+    if(dragIndex===null||dragIndex===to)return setDragIndex(null)
+    setItens(xs=>{const next=[...xs];const [m]=next.splice(dragIndex,1);next.splice(to,0,m);return next.map((x,i)=>({...x,ordem:i}))})
+    setDragIndex(null)
+  }
+  async function salvar(){
+    setSaving(true)
+    try{
+      await modulosService.salvarCompositor(itens.map((x,i)=>({id:x.id||x._id,ordem:i,config:x.config||{}})))
+      await Promise.all(itens.map(x=>modulosService.atualizar(x.id||x._id,{ativo:x.ativo,config:x.config||{},ordem:x.ordem})))
+      toast.success('Compositor da Home salvo')
+      onSync?.(itens)
+    }catch(e){toast.error(e.message)}finally{setSaving(false)}
+  }
+  if(loading)return <div className="adm-card"><div className="adm-empty">Carregando compositor…</div></div>
+  return <div className="home-composer">
+    <div className="adm-card composer-top">
+      <div><b>Compositor editorial</b><small>Arraste os blocos, escolha a origem do conteúdo e veja a ordem antes de publicar.</small></div>
+      <div className="composer-actions"><button className={`adm-btn adm-btn-sm ${preview==='mobile'?'adm-btn-primary':''}`} onClick={()=>setPreview('mobile')}><Smartphone size={14}/> Mobile</button><button className={`adm-btn adm-btn-sm ${preview==='desktop'?'adm-btn-primary':''}`} onClick={()=>setPreview('desktop')}><Monitor size={14}/> Desktop</button><button className="adm-btn adm-btn-primary" disabled={saving} onClick={salvar}>{saving?<Loader2 size={14} className="adm-spin"/>:<Save size={14}/>} Salvar composição</button></div>
+    </div>
+    <div className={`composer-layout ${preview}`}>
+      <div className="composer-list">
+        {itens.map((m,i)=><article key={m.id||m._id||m.chave} className={`composer-item ${m.ativo===false?'off':''}`} draggable onDragStart={()=>setDragIndex(i)} onDragOver={e=>e.preventDefault()} onDrop={()=>drop(i)}>
+          <div className="composer-item-head"><GripVertical size={17}/><div><b>{MODULO_LABELS[m.chave]||m.titulo}</b><small>{m.chave}</small></div><button className="adm-btn adm-btn-sm" onClick={()=>patch(i,{ativo:m.ativo===false})}>{m.ativo===false?<EyeOff size={13}/>:<Eye size={13}/>} {m.ativo===false?'Oculto':'Visível'}</button></div>
+          <div className="composer-fields">
+            <label>Modo<select className="adm-input" value={m.config?.modo||'automatico'} onChange={e=>patchCfg(i,'modo',e.target.value)}><option value="automatico">Automático</option><option value="categoria">Por categoria</option><option value="manual">Manual</option></select></label>
+            <label>Categoria<select className="adm-input" disabled={(m.config?.modo||'automatico')!=='categoria'} value={m.config?.categoria_id||''} onChange={e=>patchCfg(i,'categoria_id',e.target.value)}><option value="">Todas</option>{categorias.map(c=><option key={c.id||c._id} value={c.id||c._id}>{c.nome}</option>)}</select></label>
+            <label>Quantidade<input className="adm-input" type="number" min="1" max="20" value={m.config?.limite||5} onChange={e=>patchCfg(i,'limite',Math.max(1,Math.min(20,Number(e.target.value)||1)))}/></label>
+          </div>
+        </article>)}
+      </div>
+      <aside className="composer-preview"><div className="preview-bar">Prévia estrutural · {preview==='mobile'?'celular':'desktop'}</div>{itens.filter(x=>x.ativo!==false).map((m,i)=><div className="preview-block" key={m.id||m._id||i}><span>{i+1}</span><b>{MODULO_LABELS[m.chave]||m.titulo}</b><small>{m.config?.modo==='categoria'?'Categoria selecionada':m.config?.modo==='manual'?'Conteúdo manual':'Automático'} · {m.config?.limite||5} itens</small></div>)}</aside>
+    </div>
+    <style>{`.composer-top{padding:14px;display:flex;justify-content:space-between;gap:12px;align-items:center}.composer-top b{display:block;font-size:14px}.composer-top small,.composer-item small{display:block;color:var(--adm-muted);font-size:10px;margin-top:3px}.composer-actions{display:flex;gap:6px;flex-wrap:wrap}.composer-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,.6fr);gap:12px;margin-top:12px}.composer-list{display:grid;gap:8px}.composer-item{border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:12px;padding:10px;cursor:grab}.composer-item.off{opacity:.55}.composer-item-head{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px}.composer-item-head>b{font-size:12px}.composer-fields{display:grid;grid-template-columns:1fr 1.4fr .65fr;gap:7px;margin-top:9px}.composer-fields label{font-size:9px;font-weight:800;color:var(--adm-muted);display:grid;gap:3px}.composer-fields .adm-input{min-height:34px;font-size:11px}.composer-preview{border:1px solid var(--adm-border);background:var(--adm-surface2);border-radius:16px;padding:10px;align-self:start;position:sticky;top:12px}.composer-layout.mobile .composer-preview{max-width:360px;justify-self:center;width:100%}.preview-bar{text-align:center;font-size:9px;font-weight:800;color:var(--adm-muted);padding:5px}.preview-block{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:9px;padding:8px;margin-top:6px;display:grid;grid-template-columns:22px 1fr;column-gap:6px}.preview-block span{grid-row:1/3;width:22px;height:22px;border-radius:7px;background:var(--adm-surface2);display:grid;place-items:center;font-size:9px;font-weight:900}.preview-block b{font-size:10px}.preview-block small{font-size:8px;color:var(--adm-muted)}@media(max-width:760px){.composer-top{align-items:flex-start;flex-direction:column}.composer-layout{grid-template-columns:1fr}.composer-preview{position:static;order:-1}.composer-fields{grid-template-columns:1fr 1fr 72px}.composer-actions{width:100%;overflow:auto;flex-wrap:nowrap}.composer-actions .adm-btn{white-space:nowrap}}`}</style>
+  </div>
+}
+
 // ─── Admin Módulos — Página principal ─────────────────────────
 export default function AdminModulos() {
   const [cfg, setCfg] = useState({})
@@ -559,7 +619,7 @@ export default function AdminModulos() {
   const [modulos, setModulos] = useState([])
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
-  const [aba, setAba] = useState('hero')
+  const [aba, setAba] = useState('compositor')
 
   const isDirty = useMemo(
     () => JSON.stringify(cfg) !== JSON.stringify(cfgEdit),
@@ -608,6 +668,7 @@ export default function AdminModulos() {
   }
 
   const ABAS = [
+    { key: 'compositor', label: 'Compositor', icon: <Layout size={15} /> },
     { key: 'capa', label: 'Capa', icon: <Newspaper size={15} /> },
     { key: 'hero', label: 'Hero legado', icon: <Image size={15} /> },
     { key: 'topicos', label: 'Tópicos', icon: <Layout size={15} /> },
@@ -665,6 +726,7 @@ export default function AdminModulos() {
       </div>
 
       {/* Conteúdo */}
+      {aba === 'compositor' && <SecaoCompositor onSync={setModulos} />}
       {aba === 'capa' && <SecaoCapa cfg={cfgEdit} onChange={onCfgChange} />}
       {aba === 'hero' && <SecaoHero cfg={cfgEdit} onChange={onCfgChange} />}
       {aba === 'topicos' && <SecaoTopicos />}

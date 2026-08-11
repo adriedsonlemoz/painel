@@ -178,7 +178,7 @@ export function extrairCampos(body) {
     titulo, resumo, conteudo, autor, tags, seo_titulo, seo_descricao,
     imagem_url, imagem_public_id, imagem_legenda, imagem_alt, imagem_credito, imagem_fonte_url,
     imagem_storage, imagem_key, imagem_mime, imagem_tamanho, imagem_largura, imagem_altura, imagem_nome_original,
-    categoria_id, fonte_id, destaque, urgente, urgente_ate,
+    categoria_id, fonte_id, responsavel_id, revisor_id, canonical_url, og_imagem_url, seo_noindex, destaque, urgente, urgente_ate,
     galeria, status, agendado_para,
   } = body
 
@@ -209,6 +209,11 @@ export function extrairCampos(body) {
     agendado_para:    agendado_para ? new Date(agendado_para) : null,
     categoria_id:     categoria_id     || null,
     fonte_id:         fonte_id         || null,
+    responsavel_id:   responsavel_id   || null,
+    revisor_id:       revisor_id       || null,
+    canonical_url:    canonical_url?.trim() || null,
+    seo_noindex:      Boolean(seo_noindex),
+    og_imagem_url:    og_imagem_url?.trim() || null,
     ...(Array.isArray(galeria) ? { galeria } : {}),
     status,
   }

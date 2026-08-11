@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.120 — Conteúdo editorial completo e RSS corrigido
+- Corrige o erro de RSS em que Fonte/Categoria existentes chegavam como `_id` e o formulário enviava valores vazios. A API também passa a devolver `id` explícito para Categorias e Fontes.
+- Cadastro de feed sugerido pode criar/vincular automaticamente a Fonte editorial e a Categoria padrão quando ainda não existem.
+- A lista de RSS sugeridos é validada ao vivo antes de aparecer e mantém apenas feeds gerais confiáveis na lista-base.
+- Importação RSS salva primeiro os rascunhos e deixa cópia de imagens para R2 e IA em background, reduzindo a sensação de travamento.
+- Nova/Editar Notícia recebe seções minimizáveis, atalhos de seção, autosave, histórico/restauração, responsáveis, revisor e comentários internos.
+- Assistente editorial ganha ações lado a lado para revisão, lead, completar campos, títulos, SEO, classificação, enxugar texto, melhorar conteúdo e itens para checagem humana.
+- Categorias e Fontes passam a ter metadados editoriais completos, imagens/logos no R2, contadores e mesclagem segura.
+- Biblioteca de Mídia centraliza arquivos usados pelo Conteúdo, aceita uploads R2 e identifica/remove objetos órfãos com confirmação.
+- Eventos recebem capa R2, categoria, endereço/mapa, organizador, contato, ingresso, preço, horário final, recorrência, destaque, agendamento, arquivamento automático e JSON-LD `Event`.
+- Newsletter evolui para campanhas com seleção de notícias, prévia, teste, agendamento, envio via Resend e exportação global dos assinantes.
+- Home e Módulos ganham compositor visual com drag-and-drop, origem por categoria, quantidade, visibilidade, prévia mobile/desktop e Hero armazenado no R2.
+- SEO editorial passa a respeitar canonical, imagem OG e noindex; alterações de slug preservam URLs antigas por redirecionamento. Categorias usam seus próprios campos SEO/OG.
+- Central de Qualidade detecta conteúdo sem imagem/fonte/alt, plantão vencido, SEO incompleto, RSS com erro/origem inválida, possível mojibake e duplicatas.
+- Métricas editoriais passam a mostrar desempenho por categoria, fonte e feed RSS, origem manual/RSS, buscas internas, newsletter e notícias sem views.
+
 ## 1.0.119 — Primeiro envio para repositório GitHub vazio
 - Corrige o fluxo **GitHub → Publicar projeto** quando o repositório escolhido ainda não possui nenhum commit.
 - Respostas `409 Git Repository is empty.` passam a ser reconhecidas como repositório novo, sem abortar a publicação.

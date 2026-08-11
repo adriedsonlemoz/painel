@@ -40,6 +40,7 @@ import { metricasMiddleware }  from './middleware/metricas.js'
 // Isso evita dois schedulers paralelos e garante que o painel admin reflita o estado real.
 import { iniciarRssJob, pararRssJob } from './jobs/rssJob.js'
 import Noticia from './models/Noticia.js'
+import { Evento } from './models/Evento.js'
 
 // Não deixar consultas aguardarem ~10 s no buffer quando o Atlas ainda está conectando.
 // A API responde 503 imediatamente e o frontend pode tentar novamente.
@@ -89,6 +90,7 @@ import securityRoutes    from './routes/security.js'
 import integracoesRoutes from './routes/integracoes.js'
 import updatesRoutes     from './routes/updates.js'
 import portalContentRoutes from './routes/portalContent.js'
+import contentAdminRoutes from './routes/contentAdmin.js'
 import { tratarErros }  from './middleware/erros.js'
 import { STATE_DIR } from './services/systemUpdateService.js'
 import { recoverInterruptedUpdates } from './update/recoveryManager.js'
@@ -258,7 +260,8 @@ app.use('/api/setup',          setupRoutes)
 app.use('/api/admin/backup',   backupRoutes)
 app.use('/api/admin/usuarios', usuariosRoutes)
 app.use('/api/admin/infraestrutura', infraestruturaRoutes)
-app.use('/api/admin/rss',      rssAdminRoutes)               // #RSS
+app.use('/api/admin/rss',      rssAdminRoutes)
+app.use('/api/conteudo',        contentAdminRoutes)               // #RSS
 app.use('/api/admin/arquivos', arquivosRoutes)               // Editor de arquivos de config
 // ── Sprint 3: Novas rotas — nada existente alterado ───────────
 app.use('/api/projetos', projetosRoutes)                     // Projetos Locais
@@ -314,6 +317,7 @@ async function iniciar() {
   let mongoRetryTimer = null
   let rssIniciado = false
   let noticiasTimer = null
+  let eventosTimer = null
 
   const promoverNoticiasAgendadas = async () => {
     if (mongoose.connection.readyState !== 1) return
@@ -326,6 +330,28 @@ async function iniciar() {
       if (resultado.modifiedCount) logger.info({ total: resultado.modifiedCount }, 'Notícias agendadas publicadas')
     } catch (err) {
       logger.warn({ err: err.message }, 'Falha ao promover notícias agendadas')
+    }
+  }
+
+  const manterEventos = async () => {
+    if (mongoose.connection.readyState !== 1) return
+    const agora = new Date()
+    const hoje = new Date(agora); hoje.setHours(0, 0, 0, 0)
+    try {
+      const [publicados, arquivados] = await Promise.all([
+        Evento.updateMany(
+          { ativo: false, agendado_para: { $ne: null, $lte: agora } },
+          { $set: { ativo: true, publicado_em: agora }, $unset: { agendado_para: 1 } },
+        ),
+        Evento.updateMany(
+          { ativo: true, arquivar_automaticamente: true, data: { $lt: hoje } },
+          { $set: { ativo: false } },
+        ),
+      ])
+      if (publicados.modifiedCount) logger.info({ total: publicados.modifiedCount }, 'Eventos agendados publicados')
+      if (arquivados.modifiedCount) logger.info({ total: arquivados.modifiedCount }, 'Eventos passados arquivados automaticamente')
+    } catch (err) {
+      logger.warn({ err: err.message }, 'Falha na manutenção automática de eventos')
     }
   }
 
@@ -346,6 +372,11 @@ async function iniciar() {
         void promoverNoticiasAgendadas()
         noticiasTimer = setInterval(() => void promoverNoticiasAgendadas(), 30000)
         noticiasTimer.unref?.()
+      }
+      if (!eventosTimer) {
+        void manterEventos()
+        eventosTimer = setInterval(() => void manterEventos(), 60000)
+        eventosTimer.unref?.()
       }
     } catch (mongoErr) {
       if (String(mongoErr.message || '').includes('MongoDB não configurado')) {
@@ -379,6 +410,7 @@ async function iniciar() {
     encerrando = true
     if (mongoRetryTimer) clearTimeout(mongoRetryTimer)
     if (noticiasTimer) clearInterval(noticiasTimer)
+    if (eventosTimer) clearInterval(eventosTimer)
     clearInterval(recoveryTimer)
     logger.info({ sinal }, 'Desligando servidor...')
     pararRssJob()

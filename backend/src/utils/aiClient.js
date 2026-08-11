@@ -374,6 +374,25 @@ const EDITORIAL_SCHEMAS = {
       alteracoes:{type:'array',items:{type:'string'},maxItems:6},
     }, required:['conteudo_sugerido','alteracoes'], additionalProperties:false,
   },
+  lead: {
+    type:'object', properties:{
+      resumo:{type:'string'}, abertura_sugerida:{type:'string'},
+      justificativa:{type:'string'},
+    }, required:['resumo','abertura_sugerida','justificativa'], additionalProperties:false,
+  },
+  enxugar: {
+    type:'object', properties:{
+      conteudo_sugerido:{type:'string'},
+      alteracoes:{type:'array',items:{type:'string'},maxItems:6},
+      trechos_redundantes:{type:'array',items:{type:'string'},maxItems:6},
+    }, required:['conteudo_sugerido','alteracoes','trechos_redundantes'], additionalProperties:false,
+  },
+  checagem: {
+    type:'object', properties:{
+      itens_checar:{type:'array',items:{type:'object',properties:{trecho:{type:'string'},motivo:{type:'string'},prioridade:{type:'string',enum:['baixa','media','alta']}},required:['trecho','motivo','prioridade'],additionalProperties:false},maxItems:10},
+      alerta_publicacao:{type:'string'},
+    }, required:['itens_checar','alerta_publicacao'], additionalProperties:false,
+  },
   rss: {
     type:'object', properties:{
       titulo:{type:'string'}, resumo:{type:'string'}, categoria:{type:'string'},
@@ -389,7 +408,10 @@ const EDITORIAL_TASK_HINTS = {
   seo:'Gere título SEO de até 60 caracteres e descrição SEO de até 160 caracteres, fiéis ao conteúdo.',
   categoria:'Escolha obrigatoriamente uma das categorias fornecidas e sugira até 8 tags úteis.',
   completar:'Complete resumo, SEO, categoria e tags. Escolha obrigatoriamente uma das categorias fornecidas.',
-  melhorar:'Reescreva somente o corpo da notícia para melhorar clareza, gramática e fluidez, preservando integralmente fatos, nomes, números, datas e fontes.',
+  melhorar:'Reescreva somente o corpo da notícia para melhorar clareza, gramática, estrutura e fluidez, preservando integralmente fatos, nomes, números, datas e fontes. Não acrescente informação externa.',
+  lead:'Crie um lead/resumo curto e uma abertura jornalística forte, ambos fiéis ao texto e sem acrescentar fatos. O resumo deve ter no máximo 300 caracteres.',
+  enxugar:'Produza uma versão mais concisa do corpo, removendo repetição e excesso de palavras sem eliminar fatos, contexto, nomes, números, datas ou atribuições importantes.',
+  checagem:'Liste somente afirmações do texto que merecem conferência humana antes da publicação, como números, datas, cargos, citações, alegações fortes ou atribuições. Não tente verificar usando conhecimento externo.',
   rss:'Enriqueça o item importado sem inventar fatos: título conservador, resumo curto, categoria existente e tags.',
 }
 

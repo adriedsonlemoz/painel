@@ -4,7 +4,7 @@ import { autenticar } from '../middleware/auth.js'
 import mongoose from 'mongoose'
 import { upload, uploadMidia, gridfsMediaBucket } from '../middleware/upload.js'
 import { cloudinary } from '../config/index.js'
-import { uploadNewsImage, getR2Object, deleteR2ByPublicId } from '../services/r2MediaStorage.js'
+import { uploadNewsImage, uploadContentImage, getR2Object, deleteR2ByPublicId } from '../services/r2MediaStorage.js'
 
 const router = Router()
 
@@ -43,6 +43,22 @@ router.post('/noticias', autenticar, uploadLimiter, upload.single('imagem'), asy
       altura: resultado.height || null,
       original_name: resultado.original_name,
     })
+  } catch (err) { next(err) }
+})
+
+
+// POST /api/upload/conteudo/:tipo — biblioteca/editorial (categorias, fontes, eventos e mídia geral).
+router.post('/conteudo/:tipo', autenticar, uploadLimiter, upload.single('imagem'), async (req, res, next) => {
+  if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
+  try {
+    const permitido = new Set(['image/jpeg', 'image/png', 'image/webp'])
+    if (!permitido.has(String(req.file.mimetype || '').toLowerCase())) return res.status(415).json({ erro: 'Use JPG, PNG ou WebP.' })
+    const tipo = String(req.params.tipo || 'midia').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 50) || 'midia'
+    const resultado = await uploadContentImage(req.file, tipo)
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()
+    const proxyPath = `/api/upload/r2/${encodeURIComponent(resultado.bucket)}/${resultado.key.split('/').map(encodeURIComponent).join('/')}`
+    const url = resultado.public_url || `${proto}://${req.get('host')}${proxyPath}`
+    res.json({ url, public_id: resultado.public_id, storage:'r2', bucket:resultado.bucket, key:resultado.key, mime:resultado.mime, size:resultado.size, largura:resultado.width||null, altura:resultado.height||null, original_name:resultado.original_name })
   } catch (err) { next(err) }
 })
 

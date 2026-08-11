@@ -60,6 +60,9 @@ const AdminNewsletter  = lazyWithRetry(() => import('./pages/admin/AdminNewslett
 const AdminSEO         = lazyWithRetry(() => import('./pages/admin/AdminSEO'))
 const AdminRssImport   = lazyWithRetry(() => import('./pages/admin/AdminRssImport'))
 const AdminFontes      = lazyWithRetry(() => import('./pages/admin/AdminFontes'))
+const AdminMidia       = lazyWithRetry(() => import('./pages/admin/AdminMidia'))
+const AdminConteudoQualidade = lazyWithRetry(() => import('./pages/admin/AdminConteudoQualidade'))
+const AdminConteudoMetricas = lazyWithRetry(() => import('./pages/admin/AdminConteudoMetricas'))
 
 // ── Sprint 3: Integrações ──────────────────────────────────────
 const AdminGitHub      = lazyWithRetry(() => import('./pages/admin/AdminGitHub'))
@@ -296,6 +299,9 @@ export default function App() {
         <Route path="seo"            element={<S><AdminSEO /></S>} />
         <Route path="rss-import"     element={<S><AdminRssImport /></S>} />
         <Route path="fontes"         element={<S><AdminFontes /></S>} />
+        <Route path="midia"          element={<S><AdminMidia /></S>} />
+        <Route path="conteudo-qualidade" element={<S><AdminConteudoQualidade /></S>} />
+        <Route path="conteudo-metricas" element={<S><AdminConteudoMetricas /></S>} />
 
         {/* Sprint 3: Integrações */}
         <Route path="github"    element={<S><AdminGitHub /></S>} />

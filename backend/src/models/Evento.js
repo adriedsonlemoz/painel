@@ -63,7 +63,10 @@ const eventoSchema = new mongoose.Schema(
       enum: ['gratuito', 'pago', 'doacoes'],
       default: 'gratuito',
     },
-    ativo: { type: Boolean, default: true },
+    ativo:{type:Boolean,default:true}, destaque:{type:Boolean,default:false}, categoria_id:{type:mongoose.Schema.Types.ObjectId,ref:'Categoria',default:null},
+    imagem_url:{type:String,default:null}, imagem_public_id:{type:String,default:null}, imagem_alt:{type:String,default:''},
+    endereco:{type:String,default:'',maxlength:300}, mapa_url:{type:String,default:null}, organizador:{type:String,default:'',maxlength:180}, telefone:{type:String,default:'',maxlength:40}, site:{type:String,default:null}, ingresso_url:{type:String,default:null}, preco:{type:Number,default:null,min:0}, horario_fim:{type:String,default:''},
+    recorrencia:{type:String,enum:['nenhuma','semanal','mensal','anual'],default:'nenhuma'}, publicado_em:{type:Date,default:null}, agendado_para:{type:Date,default:null,index:true}, arquivar_automaticamente:{type:Boolean,default:true},
   },
   {
     timestamps: { createdAt: 'criado_em', updatedAt: 'atualizado_em' },

@@ -4,13 +4,13 @@ import { authFetch } from '../../services/domains/http.js'
 
 const INTEGRATIONS_BASE=`${import.meta.env.VITE_API_URL||'/api'}/admin/integracoes`
 const API=(path,options={})=>authFetch(`${INTEGRATIONS_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.erro||'Falha na operação');return d})
-const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter'],['api_ninjas','API Ninjas · Horóscopo'],['api_football','API-Football · Futebol']]
+const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter'],['api_ninjas','API Ninjas · Horóscopo'],['api_football','API-Football · Futebol'],['resend','Resend · Newsletter']]
 const AI_PROVIDERS=['gemini','openrouter']
 const API_DEFAULTS={gemini:'https://generativelanguage.googleapis.com/v1beta',openrouter:'https://openrouter.ai/api/v1'}
 const GEMINI_CURRENT_MODEL='gemini-3.5-flash-lite'
 const normalizeAiModel=(id,model)=>id==='gemini'&&['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'].includes(String(model||''))?GEMINI_CURRENT_MODEL:(model||(id==='gemini'?GEMINI_CURRENT_MODEL:'openrouter/free'))
 const formatCooldown=ms=>{const s=Math.max(1,Math.ceil(Number(ms||0)/1000));return s>=120?`${Math.ceil(s/60)} min`:`${s} s`}
-const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',r2Endpoint:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Responda em português do Brasil e siga o objetivo específico de cada módulo.',privacy:{githubLogs:true,vercelLogs:true,renderLogs:true,rssContent:true,readme:true,editorial:true,mongoDocuments:false},profiles:{},translatePtBr:true,leagueIds:'',maxMatches:6,showInternational:true,liveCacheSeconds:300}}
+const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',r2Endpoint:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Responda em português do Brasil e siga o objetivo específico de cada módulo.',privacy:{githubLogs:true,vercelLogs:true,renderLogs:true,rssContent:true,readme:true,editorial:true,mongoDocuments:false},profiles:{},translatePtBr:true,leagueIds:'',maxMatches:6,showInternational:true,liveCacheSeconds:300,from:'',replyTo:''}}
 
 const integrationHelp={
  mongodb:{
@@ -85,6 +85,11 @@ const integrationHelp={
   links:[['Documentação oficial API-Football','https://www.api-football.com/documentation-v3']],
   expected:'API key enviada no header x-apisports-key',
  },
+ resend:{
+  title:'Resend — envio da Newsletter', text:'Envia confirmações, testes e campanhas do módulo Newsletter.',
+  steps:['Crie uma API Key no Resend.','Verifique seu domínio de envio.','Cole a chave e informe o remetente em metadata (ex.: Portal <noticias@seudominio.com>).','Use Testar antes de enviar campanhas.'],
+  links:[['Abrir Resend','https://resend.com/api-keys'],['Domínios','https://resend.com/domains']], expected:'re_... + remetente verificado',
+ },
  custom:{
   title:'Provedor personalizado',
   text:'Use uma API própria ou compatível com autenticação Bearer. Como cada serviço é diferente, consulte a documentação oficial do provedor escolhido.',
@@ -140,6 +145,7 @@ export default function AdminIntegracoes(){
     <IntegrationCard id="openrouter" name="OpenRouter" description="Provedor alternativo de IA com acesso unificado a vários modelos." status={status?.integrations?.openrouter} onOpen={openIntegration}/>
     <IntegrationCard id="api_ninjas" name="Horóscopo" description="API Ninjas para o horóscopo diário exibido no portal." status={status?.integrations?.api_ninjas} onOpen={openIntegration}/>
     <IntegrationCard id="api_football" name="Futebol" description="API-Football para jogos ao vivo e partidas do dia." status={status?.integrations?.api_football} onOpen={openIntegration}/>
+    <IntegrationCard id="resend" name="Resend" description="Envio de confirmação e campanhas da Newsletter." status={status?.integrations?.resend} onOpen={openIntegration}/>
    </div>
   </section>
 
@@ -156,6 +162,7 @@ export default function AdminIntegracoes(){
      :tab==='vercel'?<VercelConnector current={current} form={form} setForm={setForm}/>
      :AI_PROVIDERS.includes(tab)?<AIWizard provider={tab} form={form} setForm={setForm} current={current}/>
      :['api_ninjas','api_football'].includes(tab)?<PortalApiConnector provider={tab} current={current} form={form} setForm={setForm}/>
+     :tab==='resend'?<ResendConnector current={current} form={form} setForm={setForm}/>
      :<><SecretField label="API Secret" value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a credencial'}/>{tab==='cloudinary'&&<><Field label="Cloud Name" value={form.metadata.cloudName} onChange={v=>setForm({...form,metadata:{...form.metadata,cloudName:v}})} placeholder="ex.: meu-cloud"/><Field label="API Key" value={form.metadata.apiKey} onChange={v=>setForm({...form,metadata:{...form.metadata,apiKey:v}})} placeholder="API Key do Console"/></>}</>}
     <div className="modal-actions">
      {tab!=='github'&&<><button className="primary" onClick={save} disabled={busy}>{busy?'Salvando…':tab==='mongodb'?'Salvar e reconectar':'Salvar'}</button><button onClick={test} disabled={busy}>Testar</button></>}
@@ -259,6 +266,11 @@ function IntegrationInstructions({info}){
   {info.expected&&<div style={{marginTop:9,fontSize:12,color:'var(--adm-muted)'}}><b>Formato/dados esperados:</b> <code>{info.expected}</code></div>}
   {!!info.links?.length&&<div className="integration-help-links" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>{info.links.map(([label,url])=><a key={url} href={url} target="_blank" rel="noreferrer" style={{display:'inline-block',padding:'7px 9px',borderRadius:8,border:'1px solid var(--adm-border)',background:'var(--adm-bg)',color:'var(--adm-accent)',fontWeight:700,textDecoration:'none'}}>{label} ↗</a>)}</div>}
  </div>
+}
+
+function ResendConnector({current,form,setForm}){
+ const setMeta=(k,v)=>setForm(f=>({...f,metadata:{...(f.metadata||{}),[k]:v}}))
+ return <div><SecretField label="Resend API Key" value={form.secret} onChange={v=>setForm(f=>({...f,secret:v}))} placeholder={current?.configured?'Digite somente para substituir':'re_...'}/><Field label="Remetente verificado" value={form.metadata.from||''} onChange={v=>setMeta('from',v)} placeholder="Portal <noticias@seudominio.com>"/><Field label="Responder para (opcional)" value={form.metadata.replyTo||''} onChange={v=>setMeta('replyTo',v)} placeholder="redacao@seudominio.com"/><div className="ai-note">Campanhas só são enviadas quando a chave e o remetente verificado estiverem configurados.</div></div>
 }
 
 function PortalApiConnector({provider,current,form,setForm}){

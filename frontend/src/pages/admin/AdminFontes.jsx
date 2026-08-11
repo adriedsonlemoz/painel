@@ -1,144 +1,30 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Edit2, Plus, Trash2, Merge, Rss, Newspaper, Globe2, X } from 'lucide-react'
 import { fontesService } from '../../services/api'
+import { authFetch } from '../../services/domains/http.js'
+import ImageUpload from '../../components/ImageUpload'
 import ConfirmModal from '../../components/ConfirmModal'
 import toast from 'react-hot-toast'
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal } from '../../components/admin/ui/DS'
 
-function FormInline({ inicial, onSalvar, onCancelar, salvando }) {
-  const [nome, setNome] = useState(inicial?.nome||'')
-  const [url,  setUrl]  = useState(inicial?.url||'')
-  function handleSubmit(e) {
-    e.preventDefault()
-    if (!nome.trim()) { toast.error('Nome é obrigatório'); return }
-    onSalvar({ nome: nome.trim(), url: url.trim() })
-  }
-  return (
-    <form onSubmit={handleSubmit} style={{ display:'flex', gap: 10, flexWrap:'wrap', alignItems:'flex-end' }}
-      className="adm-form-inline-row">
-      <div style={{ flex:1, minWidth: 140 }}>
-        <label className="adm-label" htmlFor="fonte-nome">Nome</label>
-        <input id="fonte-nome" className="adm-input" placeholder="Ex: G1"
-          value={nome} onChange={e => setNome(e.target.value)} maxLength={100}/>
-      </div>
-      <div style={{ flex:1, minWidth: 180 }}>
-        <label className="adm-label" htmlFor="fonte-url">URL (opcional)</label>
-        <input id="fonte-url" className="adm-input" type="text" placeholder="https://g1.globo.com"
-          value={url} onChange={e => setUrl(e.target.value)}/>
-      </div>
-      <div style={{ display:'flex', gap: SPACE.md, paddingBottom: 1 }} className="adm-form-inline-actions">
-        <button type="submit" disabled={salvando} className="adm-btn adm-btn-primary adm-btn-sm">
-          {salvando ? 'Salvando...' : 'Salvar'}
-        </button>
-        <button type="button" onClick={onCancelar} className="adm-btn adm-btn-ghost adm-btn-sm">Cancelar</button>
-      </div>
-    </form>
-  )
+const idOf=x=>String(x?._id||x?.id||'')
+const VAZIO={nome:'',url:'',dominio:'',nome_curto:'',descricao:'',credito_padrao:'',ativo:true,logo_url:'',logo_public_id:'',logo_alt:''}
+
+function Modal({item,onClose,onSaved}){
+ const novo=!item,[f,setF]=useState(item?{...VAZIO,...item}:VAZIO),[busy,setBusy]=useState(false)
+ const set=(k,v)=>setF(x=>({...x,[k]:v}))
+ async function salvar(e){e.preventDefault();if(!f.nome.trim())return toast.error('Nome é obrigatório.');try{setBusy(true);const payload={...f,nome:f.nome.trim(),url:f.url.trim()||null,dominio:f.dominio.trim()||null,logo_url:f.logo_url||null,logo_public_id:f.logo_public_id||null};novo?await fontesService.criar(payload):await fontesService.editar(idOf(item),payload);toast.success(novo?'Fonte criada.':'Fonte atualizada.');onSaved()}catch(e){toast.error(e.message)}finally{setBusy(false)}}
+ return <div className="srcx-overlay" onMouseDown={e=>e.target===e.currentTarget&&!busy&&onClose()}><div className="srcx-modal"><div className="srcx-head"><div><b>{novo?'Nova fonte editorial':'Editar fonte editorial'}</b><small>Identidade usada por Notícias e pelos feeds RSS vinculados.</small></div><button onClick={onClose}><X size={16}/></button></div><form onSubmit={salvar}>
+  <div className="srcx-grid"><div><label className="adm-label">Nome *</label><input autoFocus className="adm-input" value={f.nome} onChange={e=>set('nome',e.target.value)} placeholder="Agência Brasil"/></div><div><label className="adm-label">Nome curto</label><input className="adm-input" value={f.nome_curto||''} onChange={e=>set('nome_curto',e.target.value)} placeholder="Agência Brasil"/></div></div>
+  <div className="srcx-grid"><div><label className="adm-label">Site</label><input type="url" className="adm-input" value={f.url||''} onChange={e=>set('url',e.target.value)} placeholder="https://…"/></div><div><label className="adm-label">Domínio</label><input className="adm-input" value={f.dominio||''} onChange={e=>set('dominio',e.target.value)} placeholder="Preenchido pelo site se vazio"/></div></div>
+  <div><label className="adm-label">Descrição</label><textarea rows={2} className="adm-input" value={f.descricao||''} onChange={e=>set('descricao',e.target.value)} placeholder="Informação interna sobre o veículo/fonte"/></div>
+  <div><label className="adm-label">Crédito padrão</label><input className="adm-input" value={f.credito_padrao||''} onChange={e=>set('credito_padrao',e.target.value)} placeholder="Ex.: Agência Brasil"/></div>
+  <label className="srcx-check"><input type="checkbox" checked={Boolean(f.ativo)} onChange={e=>set('ativo',e.target.checked)}/> Fonte ativa e disponível nos formulários</label>
+  <details className="srcx-detail"><summary>Logo da fonte</summary><div className="srcx-pad"><ImageUpload tipo="fontes" value={f.logo_url} publicId={f.logo_public_id} onChange={r=>setF(x=>({...x,logo_url:r?.url||'',logo_public_id:r?.public_id||'',logo_alt:x.logo_alt||`Logo ${x.nome}`}))}/><div style={{marginTop:10}}><label className="adm-label">Texto alternativo</label><input className="adm-input" value={f.logo_alt||''} onChange={e=>set('logo_alt',e.target.value)}/></div></div></details>
+  <div className="srcx-actions"><button type="button" className="adm-btn adm-btn-secondary" onClick={onClose}>Cancelar</button><button className="adm-btn adm-btn-primary" disabled={busy}>{busy?'Salvando…':'Salvar'}</button></div>
+ </form></div></div>
 }
+function MergeModal({item,items,onClose,onDone}){const[dest,setDest]=useState(''),[busy,setBusy]=useState(false);async function go(){if(!dest)return toast.error('Selecione a fonte de destino.');try{setBusy(true);const base=import.meta.env.VITE_API_URL||'/api',r=await authFetch(`${base}/conteudo/fontes/${idOf(item)}/mesclar`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({destino_id:dest})}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Falha ao mesclar');toast.success(`${d.noticias||0} notícia(s) e ${d.feeds||0} feed(s) reassociados.`);onDone()}catch(e){toast.error(e.message)}finally{setBusy(false)}}return <div className="srcx-overlay"><div className="srcx-modal srcx-small"><div className="srcx-head"><div><b>Mesclar “{item.nome}”</b><small>Notícias e feeds passam para a fonte escolhida.</small></div><button onClick={onClose}><X size={16}/></button></div><select className="adm-input" value={dest} onChange={e=>setDest(e.target.value)}><option value="">Selecione o destino…</option>{items.filter(x=>idOf(x)!==idOf(item)).map(x=><option key={idOf(x)} value={idOf(x)}>{x.nome}</option>)}</select><div className="srcx-actions"><button className="adm-btn adm-btn-secondary" onClick={onClose}>Cancelar</button><button className="adm-btn adm-btn-primary" disabled={busy} onClick={go}><Merge size={14}/> Mesclar</button></div></div></div>}
 
-export default function AdminFontes() {
-  const [fontes,      setFontes]      = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [adicionando, setAdicionando] = useState(false)
-  const [editandoId,  setEditandoId]  = useState(null)
-  const [salvando,    setSalvando]    = useState(false)
-  const [deletandoId, setDeletandoId] = useState(null)
-  const [confirm, setConfirm] = useState({ aberto:false, fonte:null, carregando:false })
-
-  async function carregar() {
-    try { setLoading(true); setFontes(await fontesService.listar()) }
-    catch (err) { toast.error(err.message) } finally { setLoading(false) }
-  }
-  useEffect(() => { carregar() }, [])
-
-  async function handleCriar(d) {
-    try { setSalvando(true); await fontesService.criar(d); toast.success('Fonte criada!'); setAdicionando(false); carregar() }
-    catch (e) { toast.error(e.message) } finally { setSalvando(false) }
-  }
-  async function handleEditar(id, d) {
-    try { setSalvando(true); await fontesService.editar(id,d); toast.success('Fonte atualizada!'); setEditandoId(null); carregar() }
-    catch (e) { toast.error(e.message) } finally { setSalvando(false) }
-  }
-  const fonteEditando = fontes.find(f => f.id === editandoId) || null
-
-  async function confirmarExclusao() {
-    const fonte = confirm.fonte
-    setConfirm(c => ({...c, carregando: true}))
-    try {
-      setDeletandoId(fonte.id); await fontesService.excluir(fonte.id)
-      toast.success('Fonte excluída!'); setConfirm({aberto:false,fonte:null,carregando:false}); carregar()
-    } catch (e) { toast.error(e.message); setConfirm(c => ({...c,carregando:false})) }
-    finally { setDeletandoId(null) }
-  }
-
-  return (
-    <>
-      <ConfirmModal aberto={confirm.aberto} titulo={`Excluir "${confirm.fonte?.nome}"?`}
-        mensagem="Só é possível excluir uma fonte sem notícias e sem feeds RSS vinculados."
-        labelConfirmar="Excluir" carregando={confirm.carregando}
-        onConfirmar={confirmarExclusao} onCancelar={() => setConfirm({aberto:false,fonte:null,carregando:false})}/>
-
-      <DSModal open={adicionando} onClose={() => setAdicionando(false)} title="Nova fonte" size="sm">
-        <FormInline onSalvar={handleCriar} onCancelar={() => setAdicionando(false)} salvando={salvando}/>
-      </DSModal>
-      <DSModal open={!!fonteEditando} onClose={() => setEditandoId(null)} title={`Editar fonte${fonteEditando ? ` — ${fonteEditando.nome}` : ''}`} size="sm">
-        {fonteEditando && <FormInline inicial={fonteEditando} onSalvar={d => handleEditar(fonteEditando.id,d)} onCancelar={() => setEditandoId(null)} salvando={salvando}/>} 
-      </DSModal>
-
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Fontes</div>
-          <div className="adm-page-sub">{fontes.length} fonte{fontes.length!==1?'s':''}</div>
-        </div>
-        <div className="adm-page-actions">
-          {!adicionando && (
-            <button onClick={() => { setAdicionando(true); setEditandoId(null) }} className="adm-btn adm-btn-primary">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
-              Nova fonte
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="adm-card">
-        <div className="adm-table-header">
-          <div className="adm-table-title">Todas as fontes</div>
-        </div>
-        {loading && <div className="adm-empty" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24" className="adm-spin" style={{margin:'0 auto',opacity:.5}}><path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/></svg></div>}
-        {!loading && fontes.length === 0 && <div className="adm-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg><p>Nenhuma fonte cadastrada.</p></div>}
-        {!loading && fontes.length > 0 && (
-          <div className="adm-table-scroll">
-          <table className="adm-table" aria-label="Lista de fontes">
-            <thead><tr><th>Nome</th><th>URL</th><th></th></tr></thead>
-            <tbody>
-              {fontes.map(fonte => (
-                <tr key={fonte.id}>
-                  <td><span style={{ fontWeight: 500 }}>{fonte.nome}</span></td>
-                  <td>
-                    {fonte.url
-                      ? <a href={fonte.url} target="_blank" rel="noopener noreferrer" style={{ color:'var(--adm-accent)', fontSize: FONT.base }}>{fonte.url}</a>
-                      : <span style={{ color:'var(--adm-muted)', fontSize: FONT.base }}>—</span>}
-                  </td>
-                  <td>
-                    <div className="adm-td-actions">
-                      <button onClick={() => { setEditandoId(fonte.id); setAdicionando(false) }}
-                        aria-label={`Editar ${fonte.nome}`} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                      </button>
-                      <button onClick={() => setConfirm({aberto:true,fonte,carregando:false})}
-                        disabled={deletandoId===fonte.id} aria-label={`Excluir ${fonte.nome}`}
-                        className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
-    </>
-  )
-}
+export default function AdminFontes(){const[items,setItems]=useState([]),[loading,setLoading]=useState(true),[modal,setModal]=useState(null),[merge,setMerge]=useState(null),[del,setDel]=useState(null);async function load(){try{setLoading(true);setItems(await fontesService.listar())}catch(e){toast.error(e.message)}finally{setLoading(false)}}useEffect(()=>{load()},[]);async function excluir(){try{await fontesService.excluir(idOf(del));toast.success('Fonte excluída.');setDel(null);load()}catch(e){toast.error(e.message);setDel(null)}}return <><style>{`
+.srcx-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.58);display:grid;place-items:center;padding:14px}.srcx-modal{width:min(650px,100%);max-height:calc(100dvh - 28px);overflow:auto;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:16px;padding:20px}.srcx-small{max-width:450px}.srcx-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:18px}.srcx-head>div{display:grid;gap:3px}.srcx-head b{font-size:16px}.srcx-head small{font-size:11px;color:var(--adm-muted)}.srcx-head button{border:0;background:none;color:var(--adm-muted);cursor:pointer}.srcx-modal form{display:grid;gap:12px}.srcx-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.srcx-check{display:flex;align-items:center;gap:7px;font-size:12px}.srcx-detail{border:1px solid var(--adm-border);border-radius:9px;overflow:hidden}.srcx-detail summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700}.srcx-pad{padding:0 12px 12px}.srcx-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}.srcx-list{display:grid;gap:8px}.srcx-row{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;padding:11px 12px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface)}.srcx-logo{width:38px;height:38px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2);display:grid;place-items:center;overflow:hidden;color:var(--adm-accent)}.srcx-logo img{width:100%;height:100%;object-fit:cover}.srcx-info{min-width:0}.srcx-title{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.srcx-title span{font-size:8px;padding:2px 6px;border-radius:999px;background:var(--adm-surface2);color:var(--adm-muted)}.srcx-info small{display:block;color:var(--adm-muted);font-size:10px;margin-top:3px}.srcx-counts{display:flex;gap:10px;font-size:9px;color:var(--adm-muted);margin-top:5px}.srcx-counts span{display:flex;align-items:center;gap:3px}.srcx-buttons{display:flex;gap:4px}@media(max-width:600px){.srcx-grid{grid-template-columns:1fr}.srcx-row{grid-template-columns:auto 1fr}.srcx-buttons{grid-column:1/-1;justify-content:flex-end;border-top:1px solid var(--adm-border);padding-top:7px}.srcx-modal{padding:15px}.srcx-actions .adm-btn{flex:1;justify-content:center}}
+`}</style><ConfirmModal aberto={Boolean(del)} titulo={`Excluir “${del?.nome||''}”?`} mensagem="Se a fonte estiver em uso, use Mesclar para reassociar notícias e feeds." labelConfirmar="Excluir" onConfirmar={excluir} onCancelar={()=>setDel(null)}/>{modal!==null&&<Modal item={modal||null} onClose={()=>setModal(null)} onSaved={()=>{setModal(null);load()}}/>}{merge&&<MergeModal item={merge} items={items} onClose={()=>setMerge(null)} onDone={()=>{setMerge(null);load()}}/>}<div className="adm-page-header"><div><div className="adm-page-title">Fontes editoriais</div><div className="adm-page-sub">Um cadastro único para notícias, créditos e feeds RSS.</div></div><div className="adm-page-actions"><button className="adm-btn adm-btn-primary" onClick={()=>setModal(false)}><Plus size={15}/> Nova fonte</button></div></div>{loading?<div className="adm-empty">Carregando…</div>:<div className="srcx-list">{items.map(f=><div className="srcx-row" key={idOf(f)}><div className="srcx-logo">{f.logo_url?<img src={f.logo_url} alt=""/>:<Globe2 size={18}/>}</div><div className="srcx-info"><div className="srcx-title"><b>{f.nome}</b>{f.ativo===false&&<span>inativa</span>}</div><small>{f.dominio||f.url||'Sem site'}{f.credito_padrao?` · crédito: ${f.credito_padrao}`:''}</small><div className="srcx-counts"><span><Newspaper size={10}/>{f.total_noticias||0} notícias</span><span><Rss size={10}/>{f.total_feeds_rss||0} feeds</span></div></div><div className="srcx-buttons"><button className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" onClick={()=>setModal(f)}><Edit2 size={14}/></button><button className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" onClick={()=>setMerge(f)}><Merge size={14}/></button><button className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm" onClick={()=>setDel(f)}><Trash2 size={14}/></button></div></div>)}{!items.length&&<div className="adm-empty">Nenhuma fonte editorial.</div>}</div>}</>}

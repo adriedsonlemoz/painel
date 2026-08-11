@@ -10,8 +10,8 @@ function MetaCategoria({ categoria }) {
   useEffect(() => {
     if (!categoria) return
     const oldTitle = document.title
-    document.title = `${categoria.nome} — Notícias`
-    const desc = categoria.descricao || `Últimas notícias de ${categoria.nome}.`
+    document.title = categoria.seo_titulo || `${categoria.nome} — Notícias`
+    const desc = categoria.seo_descricao || categoria.descricao || `Últimas notícias de ${categoria.nome}.`
     let meta = document.querySelector('meta[name="description"]')
     if (!meta) { meta = document.createElement('meta'); meta.name = 'description'; document.head.appendChild(meta) }
     const oldDesc = meta.content
@@ -19,7 +19,10 @@ function MetaCategoria({ categoria }) {
     let canonical = document.querySelector('link[rel="canonical"]')
     if (!canonical) { canonical = document.createElement('link'); canonical.rel = 'canonical'; document.head.appendChild(canonical) }
     canonical.href = `${window.location.origin}/categoria/${categoria.slug}`
-    return () => { document.title = oldTitle; meta.content = oldDesc }
+    const og=[]
+    const setOg=(prop,value)=>{if(!value)return;let el=document.querySelector(`meta[property="${prop}"]`);if(!el){el=document.createElement('meta');el.setAttribute('property',prop);document.head.appendChild(el)};og.push([el,el.content]);el.content=value}
+    setOg('og:title',document.title);setOg('og:description',desc);setOg('og:url',canonical.href);setOg('og:image',categoria.imagem_url)
+    return () => { document.title = oldTitle; meta.content = oldDesc; og.forEach(([el,v])=>{el.content=v||''}) }
   }, [categoria])
   return null
 }

@@ -15,7 +15,7 @@ import { getAiUsageSummary } from '../services/aiTelemetry.js'
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
 const EXPORT_MASK='****************'
-const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY' }
+const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY', resend:'RESEND_API_KEY' }
 const safe = (d) => ({
   configured:Boolean(d?.value)||Boolean(d?.locked),
   usable:Boolean(d?.value),
@@ -441,6 +441,10 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
     result.mensagem='API-Football conectada • placares e jogos disponíveis.'
   } else if(id==='openrouter'){
     result=await testarProvedorIA({id,secret:c.value,metadata:c.metadata})
+  } else if(id==='resend'){
+    const r=await fetch('https://api.resend.com/domains',{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
+    const body=await r.json().catch(()=>({}));if(!r.ok)throw new Error(body.message||`Resend respondeu ${r.status}`)
+    result.mensagem=`Resend conectado${c.metadata?.from?` • remetente ${c.metadata.from}`:''}.`
   } else {
     const meta=c.metadata||{}
     const url=meta.apiUrl
@@ -504,7 +508,7 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
       add('API_FOOTBALL_MAX_MATCHES',String(c.metadata?.maxMatches||6),c.source)
       add('API_FOOTBALL_LIVE_CACHE_SECONDS',String(c.metadata?.liveCacheSeconds||300),c.source)
       add('API_FOOTBALL_SHOW_INTERNATIONAL',String(c.metadata?.showInternational!==false),c.source)
-    }else add(envName,c.value,c.source)
+    }else if(id==='resend'){add('RESEND_API_KEY',c.value,c.source);add('NEWSLETTER_FROM',c.metadata?.from||'',c.source);add('NEWSLETTER_REPLY_TO',c.metadata?.replyTo||'',c.source)}else add(envName,c.value,c.source)
   }
   return rows
 }
@@ -530,7 +534,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.119',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.120',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
