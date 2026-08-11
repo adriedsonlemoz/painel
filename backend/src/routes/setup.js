@@ -170,6 +170,7 @@ async function executarSeed(
   let cats = [], catMap = {}
   if (incluir('categorias')) {
     const catDefs = [
+      { nome: 'Geral',           slug: 'geral',           cor: '#607D8B' },
       { nome: 'Política',        slug: 'politica',        cor: '#1565C0' },
       { nome: 'Saúde',           slug: 'saude',           cor: '#2E7D32' },
       { nome: 'Educação',        slug: 'educacao',        cor: '#6A1B9A' },
@@ -571,7 +572,7 @@ router.post('/', async (req, res, next) => {
     writeBootstrap({
       INSTALL_COMPLETED: true,
       INSTALL_COMPLETED_AT: new Date().toISOString(),
-      INSTALL_VERSION: '1.0.107',
+      INSTALL_VERSION: '1.0.117',
     })
     await markInstallationCompleted().catch(()=>null)
 

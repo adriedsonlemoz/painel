@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.0.117 — Editor de notícias integrado ao Conteúdo e Cloudflare R2
+
+- Tela **Nova/Editar notícia** redesenhada para ocupar menos espaço no celular: status compacto, identificação direta e um único conjunto de ações por tamanho de tela.
+- **Categoria passa a ser obrigatória** para notícias do portal. Uma migração cria **Geral** e classifica automaticamente notícias antigas que estavam sem categoria.
+- Categoria e Fonte ficam ligadas aos respectivos gerenciadores, com criação rápida sem sair do editor e proteção contra exclusão enquanto estiverem em uso.
+- Importações RSS sem categoria passam a usar **Geral**, mantendo o módulo Conteúdo consistente.
+- Imagens de capa passam a ser enviadas especificamente ao **Cloudflare R2**, usando as credenciais e o bucket definidos em **Integrações e APIs**, sem configuração duplicada no editor.
+- O R2 organiza as capas pelo prefixo `alsistemas/noticias/capas/AAAA/MM/`; quando não há URL pública de bucket, o backend fornece uma rota pública de leitura restrita às imagens de notícias.
+- Capa ganha metadados editoriais e técnicos: texto alternativo, legenda, crédito, link da fonte, storage, chave R2, MIME, tamanho, dimensões e nome original.
+- Trocar ou remover uma capa de uma notícia salva também remove o arquivo persistido anterior, evitando acúmulo desnecessário.
+- Editor Markdown foi compactado e modernizado, com barra de ferramentas rolável no celular, H2/H3, listas, citação, link, separador, prévia e contagem de palavras/caracteres.
+- Assistente editorial de IA foi separado por tarefa: revisão não altera campos; completar sugere resumo/SEO/categoria/tags; títulos podem ser aplicados individualmente; melhoria de texto retorna um corpo revisado antes da substituição.
+- IA recebe a categoria e a fonte atuais como contexto, mas a fonte é somente leitura e nunca é criada ou trocada automaticamente.
+- Portal público usa o novo texto alternativo da imagem e exibe legenda/crédito com link da fonte quando informado.
+- Frontend, backend, Setup, backup/exportação e manifesto sincronizados em **1.0.117**.
+
+## 1.0.116 — Notícias mais compactas e profissionais
+
+- Página **Notícias** simplificada para priorizar a lista de conteúdo.
+- Removido o bloco redundante de abas **Notícias / Categorias / Fontes** da página; Categorias e Fontes continuam acessíveis pelas rotas próprias do painel.
+- Removido o segundo botão **Nova notícia**: agora existe apenas um no cabeçalho.
+- Busca, status e categoria foram agrupados em uma barra de filtros compacta.
+- No celular, os cards ficaram menores e com hierarquia visual mais clara: título, status/categoria, data/views e ações principais.
+- **Editar** e **Publicar/Despublicar** ficam visíveis; **Ver no site** e **Excluir** ficam no menu de três pontos.
+- Frontend, backend, Setup, backup/exportação e manifesto sincronizados em **1.0.116**.
+
+## 1.0.115 — Resumo final compacto da atualização
+
+- Ao terminar uma atualização, o modal troca automaticamente do acompanhamento detalhado para um resumo compacto.
+- A tela final mostra apenas a versão anterior → nova versão, as mudanças da versão e o botão **Fechar**.
+- Porcentagem, barra de progresso, etapas, Job ID, tempo total e relatório técnico não aparecem mais após a conclusão.
+- O changelog do pacote acompanha o job para permanecer disponível no resumo mesmo depois que o pacote preparado é consumido.
+- Frontend, backend, Setup, backup/exportação e manifesto sincronizados em **1.0.115**.
+
+## 1.0.114 — Central de erros simplificada
+
+- Central do repositório (GitHub) no celular: cards em 2 colunas com ícone ao lado do texto, fonte maior (título ~13.5px, descrição ~10.5px) em vez do grid apertado de 3 colunas com texto minúsculo.
+- Central de Atualizações no celular: ícones dos quadrados maiores e com mais espaçamento interno.
+
+## 1.0.109 — Menu lateral com acordeão de verdade e ajustes finos
+
+- No celular, tocar em Conteúdo/Portal/Publicação/Sistema no menu lateral agora expande as opções ali mesmo (sanfona), em vez de navegar para a central em cards.
+- Ordem do menu (celular e desktop): Dashboard primeiro, depois os grupos, e Atualizações / Erros e logs por último.
+- Cards das centrais no celular voltam ao layout ícone + texto lado a lado, com espaçamento mais enxuto.
+
+## 1.0.108 — Cards das centrais maiores no mobile
+
+- Nas centrais do celular (Conteúdo, Portal, Publicação, Sistema), os cards passam a ter layout vertical em quadrados, ocupando 2x2 na tela, com ícone e texto (título e descrição) maiores e mais legíveis.
+
 ## 1.0.107 — Menu do Admin em painel sanfona
 
 - Os grupos Conteúdo, Portal, Publicação e Sistema do menu do Admin agora expandem em um painel logo abaixo da barra ao serem clicados, empurrando o conteúdo da página para baixo — substitui o dropdown flutuante centralizado usado até a 1.0.106.

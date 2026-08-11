@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import Fonte from '../models/Fonte.js'
+import Noticia from '../models/Noticia.js'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { regraFonte, validar } from '../middleware/validacoes.js'
@@ -40,6 +41,13 @@ router.put('/:id', autenticar, verificarPermissao('fontes.gerenciar'), regraFont
 // DELETE /api/fontes/:id — autenticado
 router.delete('/:id', autenticar, verificarPermissao('fontes.gerenciar'), async (req, res, next) => {
   try {
+    const noticias = await Noticia.countDocuments({ fonte_id: req.params.id })
+    if (noticias) {
+      return res.status(409).json({
+        erro: `Fonte em uso por ${noticias} notícia(s). Troque a fonte dessas notícias antes de excluir.`,
+        uso: { noticias },
+      })
+    }
     const fonte = await Fonte.findByIdAndDelete(req.params.id)
     if (!fonte) return res.status(404).json({ erro: 'Fonte não encontrada' })
     res.json({ mensagem: 'Fonte excluída' })

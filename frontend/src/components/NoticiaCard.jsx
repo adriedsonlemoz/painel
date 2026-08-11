@@ -46,7 +46,7 @@ export function NoticiaCardV({ noticia, fullWidth = false }) {
         <div className="relative overflow-hidden bg-gray-100 flex-shrink-0"
           style={{ aspectRatio: '16/10' }}>
           {noticia.imagem_url ? (
-            <img src={noticia.imagem_url} alt={noticia.titulo}
+            <img src={noticia.imagem_url} alt={noticia.imagem_alt || noticia.titulo}
               loading="lazy"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
           ) : (
@@ -91,7 +91,7 @@ export function NoticiaCardH({ noticia }) {
       <div className="card h-full flex flex-col">
         <div className="relative h-36 overflow-hidden bg-gray-100 flex-shrink-0">
           {noticia.imagem_url ? (
-            <img src={noticia.imagem_url} alt={noticia.titulo}
+            <img src={noticia.imagem_url} alt={noticia.imagem_alt || noticia.titulo}
               loading="lazy"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
           ) : (
@@ -130,7 +130,7 @@ export function NoticiaCardLista({ noticia }) {
       {/* Thumb */}
       <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
         {noticia.imagem_url ? (
-          <img src={noticia.imagem_url} alt={noticia.titulo}
+          <img src={noticia.imagem_url} alt={noticia.imagem_alt || noticia.titulo}
               loading="lazy"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
         ) : (
@@ -171,7 +171,7 @@ export function NoticiaCardItem({ noticia }) {
       {/* Thumb */}
       <div className="w-20 h-16 sm:w-24 sm:h-20 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
         {noticia.imagem_url ? (
-          <img src={noticia.imagem_url} alt={noticia.titulo} loading="lazy"
+          <img src={noticia.imagem_url} alt={noticia.imagem_alt || noticia.titulo} loading="lazy"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-50 to-gray-100">

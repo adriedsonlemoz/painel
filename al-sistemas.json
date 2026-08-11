@@ -1,11 +1,16 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.107",
+  "version": "1.0.117",
   "packageFormat": 2,
   "changelog": [
-    "Menu do Admin: os grupos Conteúdo, Portal, Publicação e Sistema agora abrem em um painel sanfona logo abaixo da barra ao clicar, empurrando o conteúdo da página para baixo — substitui o dropdown flutuante centralizado da versão anterior.",
-    "Dashboard, Atualizações e Erros e logs continuam soltos no nível raiz do menu, fora de qualquer grupo/submenu.",
-    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.107."
+    "Editor Nova/Editar notícia redesenhado e compactado para celular.",
+    "Categoria obrigatória, com migração de notícias antigas sem categoria para Geral e RSS integrado ao mesmo fluxo.",
+    "Categoria e Fonte integradas aos seus gerenciadores, com criação rápida e proteção contra exclusão em uso.",
+    "Capas de notícias agora usam Cloudflare R2 pela configuração central de Integrações e APIs, organizadas em alsistemas/noticias/capas/AAAA/MM/.",
+    "Imagem ganha texto alternativo, legenda, crédito, link de fonte e metadados técnicos; capas substituídas são limpas do storage.",
+    "Editor Markdown modernizado e mais compacto no mobile.",
+    "Assistente editorial de IA separado por tarefas e com aplicação seletiva das sugestões.",
+    "Frontend, backend, Setup, backup/exportação e manifesto sincronizados em 1.0.117."
   ],
   "updatePackages": {
     "full": true,

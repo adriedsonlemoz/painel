@@ -885,6 +885,7 @@ export async function createJob(stageId, options = {}) {
   const id = `job_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`
   const job = {
     id, type: 'update', stageId, fromVersion: current.version, toVersion: meta.version, packageType:meta.packageType||'full', baseVersion:meta.baseVersion||null, stageIntegrity:integrity,
+    changelog: meta.changelog || '',
     createdAt: new Date().toISOString(), status: 'queued',
     restart: {
       strategy: options.restartStrategy || process.env.AL_UPDATE_RESTART_STRATEGY || (IS_TERMUX ? 'termux' : 'none'),

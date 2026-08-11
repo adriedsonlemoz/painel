@@ -338,6 +338,18 @@ export async function importarFonte(rssFonte, opts = {}) {
     logger.info({ ...ctx, fonteId: fonteDoc._id }, '🆕 Fonte criada automaticamente')
   }
 
+  // Toda notícia importada também pertence a uma categoria do módulo Conteúdo.
+  // Fontes RSS antigas sem categoria caem em “Geral”; a IA pode reclassificar depois.
+  let categoriaResolvida = opts.categoria_id ?? rssFonte.categoria_id ?? null
+  if (!categoriaResolvida) {
+    const geral = await Categoria.findOneAndUpdate(
+      { slug: 'geral' },
+      { $setOnInsert: { nome: 'Geral', slug: 'geral', cor: '#607D8B', descricao: 'Notícias gerais do portal.' } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    )
+    categoriaResolvida = geral._id
+  }
+
   // ── 2. Parse do feed ───────────────────────────────────────────────────────
   let rawItems
   try {
@@ -376,7 +388,7 @@ export async function importarFonte(rssFonte, opts = {}) {
       const doc = buildDoc(item, {
         fonteRssId:  rssFonte._id,
         fonteId:     fonteDoc._id,
-        categoriaId: opts.categoria_id ?? rssFonte.categoria_id ?? null,
+        categoriaId: categoriaResolvida,
       })
       if (doc) {
         docs.push(doc)

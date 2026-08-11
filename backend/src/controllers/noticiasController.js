@@ -17,9 +17,12 @@
  */
 
 import Noticia           from '../models/Noticia.js'
+import Categoria         from '../models/Categoria.js'
+import Fonte             from '../models/Fonte.js'
 import mongoose          from 'mongoose'
 import { cloudinary }    from '../config/index.js'
 import { gridfsMediaBucket } from '../middleware/upload.js'
+import { deleteR2ByPublicId } from '../services/r2MediaStorage.js'
 import { viewJaContabilizada } from '../utils/cache.js'
 import {
   popular,
@@ -124,10 +127,22 @@ export async function buscarUm(req, res, next) {
   } catch (err) { next(err) }
 }
 
+async function validarReferenciasConteudo(campos) {
+  if (!campos.categoria_id || !(await Categoria.exists({ _id: campos.categoria_id }))) {
+    return 'A categoria selecionada não existe mais. Atualize a lista e escolha outra.'
+  }
+  if (campos.fonte_id && !(await Fonte.exists({ _id: campos.fonte_id }))) {
+    return 'A fonte selecionada não existe mais. Atualize a lista e escolha outra.'
+  }
+  return null
+}
+
 // ─── POST /api/noticias ──────────────────────────────────────────────────────
 export async function criar(req, res, next) {
   try {
     const campos = extrairCampos(req.body)
+    const referenciaInvalida = await validarReferenciasConteudo(campos)
+    if (referenciaInvalida) return res.status(422).json({ erro: referenciaInvalida })
     const statusFinal  = campos.status || 'rascunho'
     if (statusFinal === 'agendado' && (!campos.agendado_para || campos.agendado_para <= new Date())) {
       return res.status(422).json({ erro: 'Defina uma data futura para agendar a publicação.' })
@@ -151,10 +166,12 @@ export async function criar(req, res, next) {
 // #20 — Registra publicado_em na primeira publicação.
 export async function atualizar(req, res, next) {
   try {
-    const noticiaAtual = await Noticia.findById(req.params.id).select('status publicado_em agendado_para')
+    const noticiaAtual = await Noticia.findById(req.params.id).select('status publicado_em agendado_para imagem_public_id')
     if (!noticiaAtual) return res.status(404).json({ erro: 'Notícia não encontrada' })
 
     const campos = extrairCampos(req.body)
+    const referenciaInvalida = await validarReferenciasConteudo(campos)
+    if (referenciaInvalida) return res.status(422).json({ erro: referenciaInvalida })
     const atualizacao = { ...campos }
     delete atualizacao.status // status gerenciado abaixo
 
@@ -173,6 +190,12 @@ export async function atualizar(req, res, next) {
       { new: true, runValidators: true }
     )
     if (!noticia) return res.status(404).json({ erro: 'Notícia não encontrada' })
+
+    const publicIdAnterior = noticiaAtual.imagem_public_id ? String(noticiaAtual.imagem_public_id) : ''
+    const publicIdNovo = noticia.imagem_public_id ? String(noticia.imagem_public_id) : ''
+    if (publicIdAnterior && publicIdAnterior !== publicIdNovo) {
+      await removerMidiaPersistida(publicIdAnterior)
+    }
 
     const populada = await popularUm(Noticia.findById(noticia._id))
     res.json(populada)
@@ -213,6 +236,10 @@ export async function mudarStatus(req, res, next) {
 
 async function removerMidiaPersistida(publicId) {
   if(!publicId)return
+  if(String(publicId).startsWith('r2:')) {
+    await deleteR2ByPublicId(publicId).catch(()=>{})
+    return
+  }
   if(String(publicId).startsWith('gridfs:')) {
     const id=String(publicId).slice(7)
     if(mongoose.isValidObjectId(id)) await gridfsMediaBucket().delete(new mongoose.Types.ObjectId(id)).catch(()=>{})

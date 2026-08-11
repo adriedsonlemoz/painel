@@ -1,7 +1,6 @@
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal, DSBtn, DSBadge } from '../../components/admin/ui/DS'
-import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Sparkles, Check, X, ExternalLink, ChevronDown } from 'lucide-react'
 import { noticiasService, categoriasService, fontesService } from '../../services/api'
 import { useNoticia } from '../../hooks/useNoticias'
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
@@ -11,19 +10,28 @@ import toast from 'react-hot-toast'
 import { authFetch } from '../../services/domains/http.js'
 
 function slugify(t) {
-  return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
-// #20 — Config visual de cada status
+function idOf(item) { return String(item?._id || item?.id || '') }
+function normalizar(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim() }
+function storageDaImagem(n) {
+  if (n?.imagem_storage) return n.imagem_storage
+  const id = String(n?.imagem_public_id || '')
+  if (id.startsWith('r2:')) return 'r2'
+  if (id.startsWith('gridfs:')) return 'gridfs'
+  if (id) return 'cloudinary'
+  return n?.imagem_url ? 'external' : ''
+}
+
 const STATUS_CFG = {
-  rascunho:  { label: 'Rascunho',  bg: 'rgba(100,116,139,.15)', color: C.subtle, border: 'rgba(100,116,139,.3)'  },
-  revisao:   { label: 'Revisão',   bg: C.amberBg, color: C.amber, border: C.amberBorder  },
-  agendado:  { label: 'Agendada',  bg: C.blueBg, color: C.blue, border: C.blueBorder },
-  publicado: { label: 'Publicado', bg: C.greenBg, color: C.greenSolid, border: C.greenBorder   },
-  arquivado: { label: 'Arquivado', bg: C.redBg, color: C.red, border: C.redBorder    },
+  rascunho:  { label: 'Rascunho',  hint: 'Somente editores veem.', cls: 'gray' },
+  revisao:   { label: 'Em revisão', hint: 'Aguardando aprovação.', cls: 'amber' },
+  agendado:  { label: 'Agendada',   hint: 'Publicação automática na data definida.', cls: 'blue' },
+  publicado: { label: 'Publicado',  hint: 'Visível no portal.', cls: 'green' },
+  arquivado: { label: 'Arquivado',  hint: 'Fora da listagem pública.', cls: 'red' },
 }
 
-// #20 — Transições possíveis a partir de cada estado
 const TRANSICOES = {
   rascunho:  ['revisao', 'agendado', 'publicado'],
   revisao:   ['rascunho', 'agendado', 'publicado', 'arquivado'],
@@ -33,131 +41,125 @@ const TRANSICOES = {
 }
 
 const LABEL_BOTAO = {
-  rascunho:  'Salvar rascunho',
-  revisao:   'Enviar para revisão',
-  agendado:  'Agendar publicação',
-  publicado: 'Publicar',
-  arquivado: 'Arquivar',
+  rascunho: 'Salvar rascunho', revisao: 'Enviar para revisão', agendado: 'Agendar', publicado: 'Publicar', arquivado: 'Arquivar',
 }
 
-/* ── QuickAdd ───────────────────────────────────────────────── */
+const VAZIO = {
+  titulo: '', resumo: '', conteudo: '', autor: '', tags: '', seo_titulo: '', seo_descricao: '',
+  imagem_url: '', imagem_public_id: '', imagem_legenda: '', imagem_alt: '', imagem_credito: '', imagem_fonte_url: '',
+  imagem_storage: '', imagem_key: '', imagem_mime: '', imagem_tamanho: null, imagem_largura: null, imagem_altura: null, imagem_nome_original: '',
+  categoria_id: '', fonte_id: '', destaque: false, urgente: false, urgente_ate: '', agendado_para: '', status: 'rascunho',
+}
+
+function CharCount({ current, max }) {
+  const ratio = max ? current / max : 0
+  return <span className={`news-char${ratio >= 1 ? ' danger' : ratio >= .85 ? ' warn' : ''}`}>{current}/{max}</span>
+}
+
 function QuickAdd({ tipo, onCriado, onFechar }) {
-  const [nome, setNome]   = useState('')
+  const [nome, setNome] = useState('')
   const [extra, setExtra] = useState('')
-  const [auto,  setAuto]  = useState(true)
-  const [busy,  setBusy]  = useState(false)
+  const [auto, setAuto] = useState(true)
+  const [busy, setBusy] = useState(false)
   const ref = useRef(null)
   useEffect(() => { ref.current?.focus() }, [])
 
-  function handleNome(v) { setNome(v); if (tipo==='categoria' && auto) setExtra(slugify(v)) }
+  function handleNome(v) {
+    setNome(v)
+    if (tipo === 'categoria' && auto) setExtra(slugify(v))
+  }
 
-  async function handleSalvar(e) {
-    e.preventDefault(); e.stopPropagation()
-    if (!nome.trim()) { toast.error('Nome obrigatório'); return }
+  async function salvar(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!nome.trim()) return toast.error('Informe o nome.')
     try {
       setBusy(true)
       const novo = tipo === 'categoria'
-        ? await categoriasService.criar({ nome: nome.trim(), slug: extra.trim() })
+        ? await categoriasService.criar({ nome: nome.trim(), slug: extra.trim() || slugify(nome) })
         : await fontesService.criar({ nome: nome.trim(), url: extra.trim() || null })
-      toast.success(`${tipo === 'categoria' ? 'Categoria' : 'Fonte'} criada!`)
       onCriado(novo)
+      toast.success(`${tipo === 'categoria' ? 'Categoria' : 'Fonte'} criada.`)
     } catch (err) { toast.error(err.message) }
     finally { setBusy(false) }
   }
 
   return (
-    <div style={{ marginTop: 8, background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)', borderRadius: 8, padding: 14 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--adm-muted)' }}>
-          {tipo === 'categoria' ? 'Nova categoria' : 'Nova fonte'}
-        </span>
-        <button type="button" onClick={onFechar} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" aria-label="Fechar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
+    <div className="news-quick-add">
+      <div className="news-quick-head">
+        <b>{tipo === 'categoria' ? 'Nova categoria' : 'Nova fonte'}</b>
+        <button type="button" onClick={onFechar} aria-label="Fechar"><X size={14}/></button>
       </div>
-      <input ref={ref} type="text" className="adm-input" placeholder={tipo === 'categoria' ? 'Nome da categoria' : 'Nome da fonte'}
-        value={nome} onChange={e => handleNome(e.target.value)} style={{ marginBottom: 8 }}/>
-      {tipo === 'categoria' && (
-        <input type="text" className="adm-input adm-input-mono" placeholder="slug-da-url"
-          value={extra} onChange={e => { setAuto(false); setExtra(e.target.value) }} style={{ marginBottom: 8 }}/>
+      <input ref={ref} className="adm-input" value={nome} onChange={e => handleNome(e.target.value)} placeholder="Nome" />
+      {tipo === 'categoria' ? (
+        <input className="adm-input adm-input-mono" value={extra} onChange={e => { setAuto(false); setExtra(e.target.value) }} placeholder="slug-da-categoria" />
+      ) : (
+        <input className="adm-input" type="url" value={extra} onChange={e => setExtra(e.target.value)} placeholder="Site da fonte (opcional)" />
       )}
-      {tipo === 'fonte' && (
-        <input type="url" className="adm-input" placeholder="https://... (opcional)"
-          value={extra} onChange={e => setExtra(e.target.value)} style={{ marginBottom: 8 }}/>
-      )}
-      <div style={{ display:'flex', gap: 8 }}>
-        <button type="button" onClick={handleSalvar} disabled={busy} className="adm-btn adm-btn-primary adm-btn-sm" style={{ flex: 1 }}>
-          {busy ? 'Criando...' : 'Criar'}
-        </button>
-        <button type="button" onClick={onFechar} className="adm-btn adm-btn-ghost adm-btn-sm">Cancelar</button>
+      <div className="news-inline-actions">
+        <button type="button" className="adm-btn adm-btn-primary adm-btn-sm" disabled={busy} onClick={salvar}>{busy ? 'Criando…' : 'Criar e selecionar'}</button>
+        <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onFechar}>Cancelar</button>
       </div>
     </div>
   )
 }
 
-/* ── SelectComAdicionar ─────────────────────────────────────── */
-function SelectComAdicionar({ tipo, valor, opcoes, onChange, onNovaOpcao }) {
-  const [open, setOpen] = useState(false)
-  const label = tipo === 'categoria' ? 'Categoria' : 'Fonte'
-  const empty = tipo === 'categoria' ? '— Sem categoria —' : '— Sem fonte —'
+function SelectIntegrado({ tipo, valor, opcoes, onChange, onNovaOpcao, erro }) {
+  const [adicionando, setAdicionando] = useState(false)
+  const categoria = tipo === 'categoria'
+  const label = categoria ? 'Categoria *' : 'Fonte'
+  const rota = categoria ? '/admin/categorias' : '/admin/fontes'
 
   return (
     <div className="adm-field">
-      <label className="adm-label">{label}</label>
-      <div style={{ display:'flex', gap: 8 }}>
-        <select className="adm-input" style={{ flex: 1 }} value={valor} onChange={e => onChange(e.target.value)}>
-          <option value="">{empty}</option>
-          {opcoes.map(o => <option key={o._id||o.id} value={o._id||o.id}>{o.nome}</option>)}
-        </select>
-        <button type="button" onClick={() => setOpen(o => !o)}
-          aria-label={`Criar nova ${label.toLowerCase()}`}
-          className={`adm-btn adm-btn-sm${open ? ' adm-btn-primary' : ' adm-btn-secondary'}`}
-          style={{ flexShrink: 0, padding: '0 10px' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
+      <div className="news-label-row">
+        <label className="adm-label">{label}</label>
+        <Link to={rota} className="news-manage-link">Gerenciar <ExternalLink size={10}/></Link>
       </div>
-      {open && <QuickAdd tipo={tipo} onCriado={n => { onNovaOpcao(n); onChange(n._id||n.id); setOpen(false) }} onFechar={() => setOpen(false)}/>}
+      <div className="news-select-add">
+        <select className={`adm-input${erro ? ' adm-input-error' : ''}`} value={valor} onChange={e => onChange(e.target.value)}>
+          <option value="">{categoria ? 'Selecione uma categoria' : 'Sem fonte definida'}</option>
+          {opcoes.map(o => <option key={idOf(o)} value={idOf(o)}>{o.nome}</option>)}
+        </select>
+        <button type="button" className={`adm-btn adm-btn-secondary adm-btn-icon${adicionando ? ' active' : ''}`} onClick={() => setAdicionando(v => !v)} title={`Criar ${categoria ? 'categoria' : 'fonte'}`}>+</button>
+      </div>
+      {erro && <span className="news-error">{erro}</span>}
+      {adicionando && <QuickAdd tipo={tipo} onFechar={() => setAdicionando(false)} onCriado={novo => {
+        onNovaOpcao(novo)
+        onChange(idOf(novo))
+        setAdicionando(false)
+      }}/>} 
     </div>
   )
 }
 
-/* ── Contador de caracteres ─────────────────────────────────── */
-function CharCount({ current, max, warn = 0.85 }) {
-  const pct = current / max
-  const color = pct >= 1 ? 'var(--adm-red)' : pct >= warn ? 'var(--adm-amber)' : 'var(--adm-muted)'
+function DetailsCard({ title, subtitle, children, open = false }) {
   return (
-    <span style={{ fontSize: 11, color, marginTop: 4, display:'block', textAlign:'right' }}>
-      {current}/{max}
-    </span>
+    <details className="adm-card news-details" open={open}>
+      <summary>
+        <span><b>{title}</b>{subtitle && <small>{subtitle}</small>}</span>
+        <ChevronDown size={16}/>
+      </summary>
+      <div className="adm-card-section">{children}</div>
+    </details>
   )
 }
 
-const VAZIO = {
-  titulo: '', resumo: '', conteudo: '', autor: '', tags: '', seo_titulo: '', seo_descricao: '',
-  imagem_url: '', imagem_public_id: '', imagem_legenda: '',
-  categoria_id: '', fonte_id: '', destaque: false,
-  urgente: false, urgente_ate: '', agendado_para: '',
-  status: 'rascunho',
-}
-
-/* ══════════════════════════════════════════════════════════════
-   COMPONENTE PRINCIPAL
-══════════════════════════════════════════════════════════════ */
 export default function AdminNoticiaForm() {
-  const { id }       = useParams()
-  const navigate     = useNavigate()
-  const isEdicao     = !!id
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const isEdicao = !!id
   const { noticia, loading: carregando, error: erroCarregamento } = useNoticia(id)
 
-  const [form,       setForm]       = useState(VAZIO)
-  const [isDirty,    setIsDirty]    = useState(false)
-  const [salvando,   setSalvando]   = useState(false)
-  const [salvouOk,   setSalvouOk]   = useState(false) // controla modal de sucesso
-  const [erros,      setErros]      = useState({})
+  const [form, setForm] = useState(VAZIO)
+  const [isDirty, setIsDirty] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [salvouOk, setSalvouOk] = useState(false)
+  const [erros, setErros] = useState({})
   const [categorias, setCategorias] = useState([])
-  const [fontes,     setFontes]     = useState([])
-  const [aiBusy,      setAiBusy]      = useState('')
-  const [aiResult,    setAiResult]    = useState(null)
+  const [fontes, setFontes] = useState([])
+  const [aiBusy, setAiBusy] = useState('')
+  const [aiResult, setAiResult] = useState(null)
 
   const { showPrompt, confirm: confirmarSaida, cancel: cancelarSaida } = useUnsavedChanges(isDirty)
 
@@ -167,552 +169,363 @@ export default function AdminNoticiaForm() {
   }, [])
 
   useEffect(() => {
-    if (noticia) {
-      setForm({
-        titulo:           noticia.titulo           || '',
-        resumo:           noticia.resumo           || '',
-        conteudo:         noticia.conteudo         || '',
-        autor:            noticia.autor            || '',
-        tags:             Array.isArray(noticia.tags) ? noticia.tags.join(', ') : '',
-        seo_titulo:       noticia.seo_titulo       || '',
-        seo_descricao:    noticia.seo_descricao    || '',
-        imagem_url:       noticia.imagem_url       || '',
-        imagem_public_id: noticia.imagem_public_id || '',
-        imagem_legenda:   noticia.imagem_legenda   || '',
-        categoria_id:     noticia.categoria_id?._id?.toString() || noticia.categoria_id?.id || noticia.categoria_id || '',
-        fonte_id:         noticia.fonte_id?._id?.toString()     || noticia.fonte_id?.id     || noticia.fonte_id     || '',
-        destaque:         noticia.destaque         || false,
-        urgente:          noticia.urgente          || false,
-        urgente_ate:      noticia.urgente_ate ? new Date(noticia.urgente_ate).toISOString().slice(0,16) : '',
-        agendado_para:    noticia.agendado_para ? new Date(noticia.agendado_para).toISOString().slice(0,16) : '',
-        status:           noticia.status           || 'rascunho',
-      })
-      setIsDirty(false)
-    }
+    if (!noticia) return
+    setForm({
+      titulo: noticia.titulo || '', resumo: noticia.resumo || '', conteudo: noticia.conteudo || '', autor: noticia.autor || '',
+      tags: Array.isArray(noticia.tags) ? noticia.tags.join(', ') : '', seo_titulo: noticia.seo_titulo || '', seo_descricao: noticia.seo_descricao || '',
+      imagem_url: noticia.imagem_url || '', imagem_public_id: noticia.imagem_public_id || '', imagem_legenda: noticia.imagem_legenda || '',
+      imagem_alt: noticia.imagem_alt || '', imagem_credito: noticia.imagem_credito || '', imagem_fonte_url: noticia.imagem_fonte_url || '',
+      imagem_storage: storageDaImagem(noticia), imagem_key: noticia.imagem_key || '', imagem_mime: noticia.imagem_mime || '',
+      imagem_tamanho: noticia.imagem_tamanho ?? null, imagem_largura: noticia.imagem_largura ?? null, imagem_altura: noticia.imagem_altura ?? null,
+      imagem_nome_original: noticia.imagem_nome_original || '',
+      categoria_id: idOf(noticia.categoria_id), fonte_id: idOf(noticia.fonte_id),
+      destaque: Boolean(noticia.destaque), urgente: Boolean(noticia.urgente),
+      urgente_ate: noticia.urgente_ate ? new Date(noticia.urgente_ate).toISOString().slice(0, 16) : '',
+      agendado_para: noticia.agendado_para ? new Date(noticia.agendado_para).toISOString().slice(0, 16) : '',
+      status: noticia.status || 'rascunho',
+    })
+    setIsDirty(false)
   }, [noticia])
 
   function set(campo, valor) {
-    setForm(f => ({...f, [campo]: valor}))
+    setForm(f => ({ ...f, [campo]: valor }))
     setIsDirty(true)
-    if (erros[campo]) setErros(e => ({...e, [campo]: ''}))
+    if (erros[campo]) setErros(e => ({ ...e, [campo]: '' }))
   }
 
-  async function executarIA(acao='analisar') {
+  const categoriaAtual = categorias.find(c => idOf(c) === String(form.categoria_id))
+  const fonteAtual = fontes.find(f => idOf(f) === String(form.fonte_id))
+
+  function categoriaIdPorNome(nome) {
+    const alvo = normalizar(nome)
+    return idOf(categorias.find(c => normalizar(c.nome) === alvo))
+  }
+
+  async function executarIA(acao) {
     if (!form.titulo.trim() && !form.conteudo.trim()) return toast.error('Escreva um título ou conteúdo antes de usar a IA.')
-    setAiBusy(acao)
     try {
-      const apiBase=import.meta.env.VITE_API_URL||'/api'
-      const r=await authFetch(`${apiBase}/analysis/ai/editorial`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,titulo:form.titulo,resumo:form.resumo,conteudo:form.conteudo})})
-      const d=await r.json().catch(()=>({}))
-      if(!r.ok) throw new Error(d.erro||'Falha ao consultar a IA')
+      setAiBusy(acao)
+      setAiResult(null)
+      const apiBase = import.meta.env.VITE_API_URL || '/api'
+      const r = await authFetch(`${apiBase}/analysis/ai/editorial`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          acao, titulo: form.titulo, resumo: form.resumo, conteudo: form.conteudo,
+          categoria_atual: categoriaAtual?.nome || '', fonte: fonteAtual?.nome || '',
+        }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.erro || 'Falha ao consultar a IA')
       setAiResult(d.resultado)
-      toast.success(`Sugestão gerada por ${d.resultado?._meta?.provedor||'IA'}. Revise antes de aplicar.`)
-    } catch(e) { toast.error(e.message) }
+    } catch (err) { toast.error(err.message) }
     finally { setAiBusy('') }
   }
 
-  function aplicarIA() {
-    if(!aiResult)return
-    setForm(f=>({
-      ...f,
-      titulo: aiResult.titulo || f.titulo,
-      resumo: aiResult.resumo || f.resumo,
-      seo_titulo: aiResult.seo_titulo || f.seo_titulo,
-      seo_descricao: aiResult.seo_descricao || f.seo_descricao,
-      tags: Array.isArray(aiResult.tags)&&aiResult.tags.length ? aiResult.tags.join(', ') : f.tags,
-      categoria_id: categorias.find(c=>String(c.nome||'').toLowerCase()===String(aiResult.categoria||'').toLowerCase())?.id || f.categoria_id,
-    }))
+  function aplicarCampos(campos) {
+    setForm(f => ({ ...f, ...campos }))
     setIsDirty(true)
-    toast.success('Sugestões aplicadas ao formulário. Revise antes de salvar.')
+    toast.success('Sugestão aplicada. Revise antes de salvar.')
+  }
+
+  function aplicarCompletar(parte = 'tudo') {
+    if (!aiResult) return
+    const campos = {}
+    if (parte === 'tudo' || parte === 'resumo') if (aiResult.resumo) campos.resumo = aiResult.resumo.slice(0, 300)
+    if (parte === 'tudo' || parte === 'seo') {
+      if (aiResult.seo_titulo) campos.seo_titulo = aiResult.seo_titulo.slice(0, 120)
+      if (aiResult.seo_descricao) campos.seo_descricao = aiResult.seo_descricao.slice(0, 180)
+    }
+    if (parte === 'tudo' || parte === 'classificacao') {
+      if (Array.isArray(aiResult.tags)) campos.tags = aiResult.tags.join(', ')
+      const cat = categoriaIdPorNome(aiResult.categoria)
+      if (cat) campos.categoria_id = cat
+    }
+    aplicarCampos(campos)
   }
 
   function validar() {
     const e = {}
-    if (!form.titulo.trim())   e.titulo   = 'Título é obrigatório'
-    if (!form.conteudo.trim()) e.conteudo = 'Conteúdo é obrigatório'
-    if (form.resumo.length > 300) e.resumo = 'Máximo de 300 caracteres'
-    if (form.seo_titulo.length > 120) e.seo_titulo = 'Máximo de 120 caracteres'
-    if (form.seo_descricao.length > 180) e.seo_descricao = 'Máximo de 180 caracteres'
-    if (form.status === 'agendado' && !form.agendado_para) e.agendado_para = 'Informe a data e hora da publicação'
-    setErros(e); return Object.keys(e).length === 0
+    if (!form.titulo.trim()) e.titulo = 'Título é obrigatório.'
+    if (!form.categoria_id) e.categoria_id = 'Toda notícia precisa de uma categoria.'
+    if (!form.conteudo.trim()) e.conteudo = 'Conteúdo é obrigatório.'
+    if (form.resumo.length > 300) e.resumo = 'Máximo de 300 caracteres.'
+    if (form.seo_titulo.length > 120) e.seo_titulo = 'Máximo de 120 caracteres.'
+    if (form.seo_descricao.length > 180) e.seo_descricao = 'Máximo de 180 caracteres.'
+    if (form.imagem_url && !form.imagem_alt.trim()) e.imagem_alt = 'Informe um texto alternativo para a imagem.'
+    if (form.status === 'agendado' && !form.agendado_para) e.agendado_para = 'Informe a data e hora da publicação.'
+    setErros(e)
+    return Object.keys(e).length === 0
   }
 
   async function handleSubmit(ev) {
     ev.preventDefault()
-    if (!validar()) { toast.error('Corrija os erros antes de salvar'); return }
+    if (!validar()) return toast.error('Corrija os campos destacados antes de salvar.')
     try {
       setSalvando(true)
       const dados = {
-        titulo:           form.titulo.trim(),
-        resumo:           form.resumo.trim(),
-        conteudo:         form.conteudo.trim(),
-        autor:            form.autor.trim() || null,
-        tags:             form.tags.split(',').map(t => t.trim()).filter(Boolean),
-        seo_titulo:       form.seo_titulo.trim() || null,
-        seo_descricao:    form.seo_descricao.trim() || null,
-        imagem_url:       form.imagem_url       || null,
-        imagem_public_id: form.imagem_public_id || null,
-        imagem_legenda:   form.imagem_legenda.trim(),
-        categoria_id:     form.categoria_id     || null,
-        fonte_id:         form.fonte_id         || null,
-        destaque:         form.destaque,
-        urgente:          form.urgente,
-        urgente_ate:      form.urgente && form.urgente_ate ? new Date(form.urgente_ate).toISOString() : null,
-        agendado_para:    form.status === 'agendado' && form.agendado_para ? new Date(form.agendado_para).toISOString() : null,
-        status:           form.status,
+        titulo: form.titulo.trim(), resumo: form.resumo.trim(), conteudo: form.conteudo.trim(), autor: form.autor.trim() || null,
+        tags: form.tags.split(',').map(t => t.trim()).filter(Boolean), seo_titulo: form.seo_titulo.trim() || null, seo_descricao: form.seo_descricao.trim() || null,
+        imagem_url: form.imagem_url || null, imagem_public_id: form.imagem_public_id || null, imagem_legenda: form.imagem_legenda.trim() || null,
+        imagem_alt: form.imagem_alt.trim() || null, imagem_credito: form.imagem_credito.trim() || null, imagem_fonte_url: form.imagem_fonte_url.trim() || null,
+        imagem_storage: form.imagem_storage || null, imagem_key: form.imagem_key || null, imagem_mime: form.imagem_mime || null,
+        imagem_tamanho: form.imagem_tamanho || null, imagem_largura: form.imagem_largura || null, imagem_altura: form.imagem_altura || null,
+        imagem_nome_original: form.imagem_nome_original || null,
+        categoria_id: form.categoria_id, fonte_id: form.fonte_id || null, destaque: form.destaque, urgente: form.urgente,
+        urgente_ate: form.urgente && form.urgente_ate ? new Date(form.urgente_ate).toISOString() : null,
+        agendado_para: form.status === 'agendado' && form.agendado_para ? new Date(form.agendado_para).toISOString() : null,
+        status: form.status,
       }
-      if (isEdicao) {
-        await noticiasService.editar(id, dados)
-      } else {
-        await noticiasService.criar(dados)
-      }
+      if (isEdicao) await noticiasService.editar(id, dados)
+      else await noticiasService.criar(dados)
       setIsDirty(false)
       setSalvouOk(true)
     } catch (err) { toast.error(err.message) }
     finally { setSalvando(false) }
   }
 
-  /* ── Estados de carregamento / erro ── */
-  if (isEdicao && carregando) {
-    return (
-      <div className="adm-empty" style={{ marginTop: 80 }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="28" height="28" className="adm-spin" style={{ margin: '0 auto' }}>
-          <path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/>
-        </svg>
-      </div>
-    )
-  }
-
-  if (isEdicao && !carregando && !noticia) {
-    return (
-      <div className="adm-empty" style={{ marginTop: 80 }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 12px', opacity: .3 }}>
-          <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-        </svg>
-        <p style={{ marginBottom: 6, fontWeight: 600 }}>Não foi possível carregar a notícia.</p>
-        {erroCarregamento && (
-          <p style={{ fontSize: 12, color: 'var(--adm-red)', marginBottom: 12 }}>Erro: {erroCarregamento}</p>
-        )}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-          <button onClick={() => window.location.reload()} className="adm-btn adm-btn-secondary adm-btn-sm">Tentar novamente</button>
-          <Link to="/admin/noticias" className="adm-btn adm-btn-ghost adm-btn-sm">← Voltar</Link>
-        </div>
-      </div>
-    )
-  }
-
-  /* ── Botão de salvar (label contextual ao status) ── */
-  const BotaoSalvar = () => (
-    <button type="submit" form="form-noticia" disabled={salvando} className="adm-btn adm-btn-primary">
-      {salvando
-        ? <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" className="adm-spin"><path d="M21 12a9 9 0 11-18 0"/></svg> Salvando...</>
-        : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M5 12l5 5L20 7"/></svg> {LABEL_BOTAO[form.status] || 'Salvar'}</>
-      }
-    </button>
+  if (isEdicao && carregando) return <div className="adm-empty" style={{ marginTop: 80 }}>Carregando…</div>
+  if (isEdicao && !carregando && !noticia) return (
+    <div className="adm-empty" style={{ marginTop: 80 }}>
+      <p style={{ fontWeight: 700 }}>Não foi possível carregar a notícia.</p>
+      {erroCarregamento && <p style={{ fontSize: 12, color: 'var(--adm-red)' }}>{erroCarregamento}</p>}
+      <Link to="/admin/noticias" className="adm-btn adm-btn-secondary">Voltar</Link>
+    </div>
   )
 
   const statusAtual = STATUS_CFG[form.status] || STATUS_CFG.rascunho
-  const transicoesDisponiveis = isEdicao ? (TRANSICOES[form.status] || []) : ['rascunho', 'revisao', 'agendado', 'publicado']
+  const permitidos = isEdicao ? new Set([form.status, ...(TRANSICOES[form.status] || [])]) : new Set(['rascunho', 'revisao', 'agendado', 'publicado'])
+
+  const BotaoSalvar = ({ compact = false }) => (
+    <button type="submit" form="form-noticia" disabled={salvando} className={`adm-btn adm-btn-primary${compact ? ' adm-btn-sm' : ''}`}>
+      {salvando ? 'Salvando…' : <><Check size={14}/> {LABEL_BOTAO[form.status] || 'Salvar'}</>}
+    </button>
+  )
 
   return (
     <>
       <style>{`
-        .status-selector { display:flex; flex-direction:column; gap:6px; }
-        .status-option   {
-          display:flex; align-items:center; gap:10px; padding:10px 12px;
-          border-radius:8px; border:2px solid var(--adm-border);
-          cursor:pointer; transition:all .15s; background:transparent;
-          font-size:13px; font-weight:500; color:var(--adm-text); text-align:left;
+        .news-page .adm-page-header{margin-bottom:14px}.news-page .adm-page-title{font-size:20px}.news-page .adm-page-sub{display:flex;align-items:center;gap:8px}
+        .news-status-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700}.news-status-badge.green{background:rgba(34,197,94,.12);color:#16a34a}.news-status-badge.gray{background:rgba(100,116,139,.12);color:var(--adm-muted)}.news-status-badge.amber{background:rgba(245,158,11,.12);color:#d97706}.news-status-badge.blue{background:rgba(59,130,246,.12);color:#2563eb}.news-status-badge.red{background:rgba(239,68,68,.1);color:var(--adm-red)}
+        .news-form-grid{grid-template-columns:minmax(0,1fr) 290px}.news-form-main{gap:12px}.news-form-side{gap:12px;position:sticky;top:76px}
+        .news-two-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}.news-label-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.news-label-row .adm-label{margin-bottom:6px}.news-manage-link{font-size:10px;color:var(--adm-accent);text-decoration:none;display:flex;align-items:center;gap:3px;margin-bottom:6px}.news-select-add{display:flex;gap:6px}.news-select-add select{min-width:0}.news-select-add .adm-btn{width:34px;height:34px;justify-content:center;font-size:18px;padding:0}.news-select-add .adm-btn.active{border-color:var(--adm-accent);color:var(--adm-accent)}
+        .news-quick-add{display:grid;gap:7px;padding:10px;margin-top:7px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2)}.news-quick-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--adm-muted)}.news-quick-head button{border:0;background:transparent;color:var(--adm-muted);cursor:pointer}.news-inline-actions{display:flex;gap:6px;flex-wrap:wrap}.news-error{font-size:10px;color:var(--adm-red);display:block;margin-top:4px}.news-char{font-size:10px;color:var(--adm-muted);display:block;text-align:right;margin-top:3px}.news-char.warn{color:#d97706}.news-char.danger{color:var(--adm-red)}
+        .news-content-card .adm-card-section{padding-bottom:16px}.news-cover-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.news-cover-fields .wide{grid-column:1/-1}.news-r2-note{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;color:var(--adm-muted);font-size:10px;line-height:1.45}.news-r2-note b{color:var(--adm-accent)}
+        .news-details>summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--adm-text)}.news-details>summary::-webkit-details-marker{display:none}.news-details>summary span{display:flex;flex-direction:column;gap:2px}.news-details>summary b{font-size:12px}.news-details>summary small{font-size:10px;font-weight:400;color:var(--adm-muted)}.news-details[open]>summary{border-bottom:1px solid var(--adm-border)}.news-details[open]>summary svg{transform:rotate(180deg)}
+        .news-ai-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.news-ai-actions .adm-btn{justify-content:center}.news-ai-result{margin-top:12px;border:1px solid var(--adm-border);border-radius:9px;padding:11px;background:var(--adm-surface2);font-size:11px;line-height:1.5}.news-ai-result-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.news-ai-result-head small{color:var(--adm-muted)}.news-ai-list{margin:6px 0 0;padding-left:18px}.news-ai-proposal{padding:8px 0;border-top:1px solid var(--adm-border)}.news-ai-proposal:first-of-type{border-top:0}.news-ai-proposal p{margin:4px 0;white-space:pre-wrap}.news-ai-text{max-height:230px;overflow:auto;padding:9px;border:1px solid var(--adm-border);border-radius:7px;background:var(--adm-surface);white-space:pre-wrap}.news-ai-mini-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+        .news-status-select{display:flex;align-items:center;gap:8px}.news-status-select select{flex:1}.news-status-hint{font-size:10px;color:var(--adm-muted);margin-top:5px;line-height:1.4}.news-toggle-compact .adm-toggle-row{padding:8px 0}.news-toggle-compact .adm-toggle-desc{font-size:10px}.news-side-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--adm-muted);margin-bottom:8px}
+        .news-mobile-actions{display:none}.news-modal-card{width:min(420px,100%);padding:22px;border-radius:14px;background:var(--adm-surface);border:1px solid var(--adm-border);box-shadow:var(--adm-shadow-md)}
+        @media(max-width:768px){
+          .news-page{padding-bottom:72px}.news-form-grid{grid-template-columns:1fr}.news-form-grid .adm-form-col:last-child{order:-1!important}.news-form-side{position:static}.news-page .adm-page-actions{display:none}.news-mobile-actions{display:flex;position:fixed;left:12px;right:12px;bottom:12px;z-index:80;padding:7px;background:color-mix(in srgb,var(--adm-surface) 94%,transparent);border:1px solid var(--adm-border);border-radius:11px;box-shadow:var(--adm-shadow-md);backdrop-filter:blur(10px);gap:7px}.news-mobile-actions .adm-btn{flex:1;justify-content:center}.news-two-cols,.news-cover-fields{grid-template-columns:1fr}.news-cover-fields .wide{grid-column:auto}.news-ai-actions{grid-template-columns:1fr 1fr}.news-page .adm-card-section{padding:12px}.news-details>summary{padding:11px 12px}
         }
-        .status-option:hover        { border-color:var(--adm-accent); }
-        .status-option.selected     { border-color:var(--adm-accent); background:rgba(var(--adm-accent-rgb,107,124,78),.08); }
-        .status-option.disabled-opt { opacity:.35; cursor:not-allowed; }
-        .status-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+        @media(max-width:420px){.news-ai-actions{grid-template-columns:1fr}.news-page .adm-page-title{font-size:19px}.news-r2-note{flex-direction:column}}
       `}</style>
 
-      {/* Modal: alterações não salvas */}
-      {/* ── Modal: Salvo com sucesso ── */}
-      {salvouOk && (
-        <div style={{
-          position:'fixed', inset:0, zIndex:500,
-          background:'rgba(0,0,0,.65)', backdropFilter:'blur(4px)',
-          display:'flex', alignItems:'center', justifyContent:'center', padding:20,
-        }}>
-          <div style={{
-            background:'var(--adm-surface)', border:'1px solid var(--adm-border)',
-            
-            boxShadow:'var(--adm-shadow-md)',
-          }}>
-            {/* Ícone de check */}
-            <div style={{ display:'flex', justifyContent:'center', marginBottom:14 }}>
-              <div style={{
-                width:44, height:44, borderRadius:'50%',
-                background:'rgba(34,197,94,.15)', display:'flex',
-                alignItems:'center', justifyContent:'center',
-              }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"
-                  width="22" height="22">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
+      <div className="news-page">
+        {salvouOk && (
+          <div className="adm-modal-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 18 }}>
+            <div className="news-modal-card">
+              <div style={{ width: 42, height: 42, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(34,197,94,.12)', color: '#16a34a', marginBottom: 12 }}><Check size={21}/></div>
+              <b style={{ fontSize: 16 }}>{form.status === 'publicado' ? 'Notícia publicada' : 'Notícia salva'}</b>
+              <p style={{ fontSize: 12, color: 'var(--adm-muted)', margin: '5px 0 16px' }}>As alterações foram registradas.</p>
+              <div className="news-inline-actions">
+                <button className="adm-btn adm-btn-secondary" onClick={() => setSalvouOk(false)}>Continuar editando</button>
+                <button className="adm-btn adm-btn-primary" onClick={() => navigate('/admin/noticias')}>Voltar às notícias</button>
               </div>
             </div>
-            <div style={{ fontSize:15, fontWeight:700, color:'var(--adm-text)', marginBottom:6, textAlign:'center' }}>
-              {form.status === 'publicado' ? 'Notícia publicada!' : 'Notícia salva!'}
-            </div>
-            <div style={{ fontSize:13, color:'var(--adm-muted)', marginBottom:20, lineHeight:1.5, textAlign:'center' }}>
-              {form.status === 'publicado'
-                ? 'A notícia está visível no portal.'
-                : `Salva como "${form.status === 'revisao' ? 'Em Revisão' : 'Rascunho'}".`}
-            </div>
-            <div style={{ display:'flex', gap:10, justifyContent:'center' }}>
-              <button
-                onClick={() => setSalvouOk(false)}
-                className="adm-btn adm-btn-secondary">
-                Continuar editando
-              </button>
-              <button
-                onClick={() => navigate('/admin/noticias')}
-                className="adm-btn adm-btn-primary">
-                Ir para Notícias
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── Modal: Sair sem salvar ── */}
-      {showPrompt && (
-        <div style={{
-          position:'fixed', inset:0, zIndex:500,
-          background:'rgba(0,0,0,.65)', backdropFilter:'blur(4px)',
-          display:'flex', alignItems:'center', justifyContent:'center', padding:20,
-        }}
-          onClick={e => { if (e.target === e.currentTarget) cancelarSaida() }}
-        >
-          <div style={{
-            background:'var(--adm-surface)', border:'1px solid var(--adm-border)',
-            
-            boxShadow:'var(--adm-shadow-md)',
-          }}>
-            <div style={{ fontSize:15, fontWeight:700, color:'var(--adm-text)', marginBottom:8 }}>Sair sem salvar?</div>
-            <div style={{ fontSize:13, color:'var(--adm-muted)', marginBottom:20, lineHeight:1.5 }}>
-              As alterações feitas nesta notícia serão perdidas.
-            </div>
-            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-              <button onClick={cancelarSaida} className="adm-btn adm-btn-secondary">Continuar editando</button>
-              <button onClick={confirmarSaida} className="adm-btn adm-btn-danger">Sair sem salvar</button>
+        {showPrompt && (
+          <div className="adm-modal-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 18 }} onClick={e => { if (e.target === e.currentTarget) cancelarSaida() }}>
+            <div className="news-modal-card">
+              <b style={{ fontSize: 16 }}>Sair sem salvar?</b>
+              <p style={{ fontSize: 12, color: 'var(--adm-muted)', margin: '6px 0 16px' }}>As alterações desta notícia serão perdidas.</p>
+              <div className="news-inline-actions">
+                <button className="adm-btn adm-btn-secondary" onClick={cancelarSaida}>Continuar editando</button>
+                <button className="adm-btn adm-btn-danger" onClick={confirmarSaida}>Sair sem salvar</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Page header */}
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">{isEdicao ? 'Editar Notícia' : 'Nova Notícia'}</div>
-          <div className="adm-page-sub" style={{ display:'flex', alignItems:'center', gap:8 }}>
-            {isEdicao ? 'Atualize os campos e salve' : 'Preencha e defina o status'}
-            {/* #20 — Badge do status atual */}
-            <span style={{
-              padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:700,
-              background: statusAtual.bg, color: statusAtual.color, border:`1px solid ${statusAtual.border}`,
-            }}>{statusAtual.label}</span>
+        <div className="adm-page-header">
+          <div>
+            <div className="adm-page-title">{isEdicao ? 'Editar notícia' : 'Nova notícia'}</div>
+            <div className="adm-page-sub">
+              <span>{isEdicao ? 'Edite, revise e publique.' : 'Escreva, classifique e publique.'}</span>
+              <span className={`news-status-badge ${statusAtual.cls}`}>{statusAtual.label}</span>
+            </div>
+          </div>
+          <div className="adm-page-actions">
+            <Link to="/admin/noticias" className="adm-btn adm-btn-secondary">Cancelar</Link>
+            <BotaoSalvar />
           </div>
         </div>
-        <div className="adm-page-actions">
-          <Link to="/admin/noticias" className="adm-btn adm-btn-secondary">Cancelar</Link>
-          <BotaoSalvar />
-        </div>
+
+        <form id="form-noticia" onSubmit={handleSubmit} noValidate>
+          <div className="adm-form-grid news-form-grid">
+            <div className="adm-form-col news-form-main">
+              <div className="adm-card">
+                <div className="adm-card-section">
+                  <div className="adm-field">
+                    <label className="adm-label" htmlFor="titulo">Título *</label>
+                    <input id="titulo" className={`adm-input${erros.titulo ? ' adm-input-error' : ''}`} value={form.titulo} onChange={e => set('titulo', e.target.value)} maxLength={200} placeholder="Título da notícia" />
+                    {erros.titulo ? <span className="news-error">{erros.titulo}</span> : <CharCount current={form.titulo.length} max={200}/>} 
+                  </div>
+                  <div className="adm-field">
+                    <label className="adm-label" htmlFor="resumo">Resumo / lead</label>
+                    <textarea id="resumo" className={`adm-input${erros.resumo ? ' adm-input-error' : ''}`} rows={2} maxLength={300} value={form.resumo} onChange={e => set('resumo', e.target.value)} placeholder="1–2 frases com o essencial da notícia" />
+                    {erros.resumo ? <span className="news-error">{erros.resumo}</span> : <CharCount current={form.resumo.length} max={300}/>} 
+                  </div>
+                  <div className="news-two-cols">
+                    <SelectIntegrado tipo="categoria" valor={form.categoria_id} opcoes={categorias} erro={erros.categoria_id} onChange={v => set('categoria_id', v)} onNovaOpcao={n => setCategorias(prev => [...prev, n].sort((a, b) => a.nome.localeCompare(b.nome)))}/>
+                    <SelectIntegrado tipo="fonte" valor={form.fonte_id} opcoes={fontes} onChange={v => set('fonte_id', v)} onNovaOpcao={n => setFontes(prev => [...prev, n].sort((a, b) => a.nome.localeCompare(b.nome)))}/>
+                  </div>
+                </div>
+              </div>
+
+              <div className="adm-card news-content-card">
+                <div className="adm-card-section">
+                  <div className="adm-section-label">Conteúdo *</div>
+                  <MarkdownEditor value={form.conteudo} onChange={v => set('conteudo', v)} error={Boolean(erros.conteudo)}/>
+                  {erros.conteudo && <span className="news-error">{erros.conteudo}</span>}
+                </div>
+              </div>
+
+              <div className="adm-card">
+                <div className="adm-card-section">
+                  <div className="adm-section-label">Imagem de capa</div>
+                  <div className="news-r2-note">
+                    <span><b>Cloudflare R2</b> · JPG, PNG ou WebP · até 5 MB. O AL Sistemas organiza automaticamente em <code>alsistemas/noticias/capas/ano/mês</code>.</span>
+                    {form.imagem_storage === 'r2' && <span className="news-status-badge green">R2</span>}
+                  </div>
+                  <ImageUpload
+                    value={form.imagem_url}
+                    publicId={form.imagem_public_id}
+                    metadata={{ largura: form.imagem_largura, altura: form.imagem_altura, mime: form.imagem_mime, size: form.imagem_tamanho }}
+                    onChange={r => {
+                      if (!r) {
+                        setForm(f => ({ ...f, imagem_url: '', imagem_public_id: '', imagem_storage: '', imagem_key: '', imagem_mime: '', imagem_tamanho: null, imagem_largura: null, imagem_altura: null, imagem_nome_original: '' }))
+                        setIsDirty(true)
+                        return
+                      }
+                      setForm(f => ({
+                        ...f,
+                        imagem_url: r.url || '', imagem_public_id: r.public_id || '', imagem_storage: r.storage || 'r2', imagem_key: r.key || '',
+                        imagem_mime: r.mime || '', imagem_tamanho: r.size ?? null, imagem_largura: r.largura ?? null, imagem_altura: r.altura ?? null,
+                        imagem_nome_original: r.original_name || '', imagem_alt: f.imagem_alt || f.titulo || '',
+                      }))
+                      setIsDirty(true)
+                    }}
+                  />
+                  {form.imagem_url && (
+                    <div className="news-cover-fields">
+                      <div className="adm-field wide">
+                        <label className="adm-label" htmlFor="imagem_alt">Texto alternativo *</label>
+                        <input id="imagem_alt" className={`adm-input${erros.imagem_alt ? ' adm-input-error' : ''}`} value={form.imagem_alt} onChange={e => set('imagem_alt', e.target.value)} maxLength={220} placeholder="Descreva objetivamente o que aparece na imagem" />
+                        {erros.imagem_alt ? <span className="news-error">{erros.imagem_alt}</span> : <span className="adm-hint">Usado por leitores de tela e quando a imagem não carrega.</span>}
+                      </div>
+                      <div className="adm-field">
+                        <label className="adm-label" htmlFor="imagem_legenda">Legenda</label>
+                        <input id="imagem_legenda" className="adm-input" value={form.imagem_legenda} onChange={e => set('imagem_legenda', e.target.value)} maxLength={250} placeholder="Legenda exibida no portal" />
+                      </div>
+                      <div className="adm-field">
+                        <label className="adm-label" htmlFor="imagem_credito">Crédito</label>
+                        <input id="imagem_credito" className="adm-input" value={form.imagem_credito} onChange={e => set('imagem_credito', e.target.value)} maxLength={180} placeholder="Foto: Nome / Agência" />
+                      </div>
+                      <div className="adm-field wide" style={{ marginBottom: 0 }}>
+                        <label className="adm-label" htmlFor="imagem_fonte_url">Link da fonte da imagem</label>
+                        <input id="imagem_fonte_url" type="url" className="adm-input" value={form.imagem_fonte_url} onChange={e => set('imagem_fonte_url', e.target.value)} placeholder="https://…" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <DetailsCard title="Assistente editorial de IA" subtitle="Sugestões separadas; nada é aplicado ou publicado automaticamente.">
+                <div className="news-ai-actions">
+                  <button type="button" className="adm-btn adm-btn-secondary" disabled={Boolean(aiBusy)} onClick={() => executarIA('analisar')}><Sparkles size={13}/> {aiBusy === 'analisar' ? 'Analisando…' : 'Revisar texto'}</button>
+                  <button type="button" className="adm-btn adm-btn-secondary" disabled={Boolean(aiBusy)} onClick={() => executarIA('completar')}><Sparkles size={13}/> {aiBusy === 'completar' ? 'Gerando…' : 'Completar campos'}</button>
+                  <button type="button" className="adm-btn adm-btn-secondary" disabled={Boolean(aiBusy)} onClick={() => executarIA('titulos')}><Sparkles size={13}/> {aiBusy === 'titulos' ? 'Gerando…' : 'Sugerir títulos'}</button>
+                  <button type="button" className="adm-btn adm-btn-secondary" disabled={Boolean(aiBusy)} onClick={() => executarIA('melhorar')}><Sparkles size={13}/> {aiBusy === 'melhorar' ? 'Reescrevendo…' : 'Melhorar conteúdo'}</button>
+                </div>
+                <p className="adm-hint" style={{ marginTop: 8 }}>A IA recebe o texto, a categoria atual e o nome da fonte. A fonte nunca é trocada pela IA.</p>
+
+                {aiResult && (
+                  <div className="news-ai-result">
+                    <div className="news-ai-result-head"><b>Resultado</b><small>{aiResult._meta?.provedor} · {aiResult._meta?.modelo}</small></div>
+                    {aiResult.qualidade && (
+                      <>
+                        <b>Nota: {Math.round(Number(aiResult.qualidade.nota) || 0)}/100</b>
+                        {aiResult.qualidade.alertas?.length > 0 && <><div style={{ marginTop: 7 }}><b>Alertas</b></div><ul className="news-ai-list">{aiResult.qualidade.alertas.map((x, i) => <li key={i}>{x}</li>)}</ul></>}
+                        {aiResult.qualidade.correcoes?.length > 0 && <><div style={{ marginTop: 7 }}><b>Correções sugeridas</b></div><ul className="news-ai-list">{aiResult.qualidade.correcoes.map((x, i) => <li key={i}>{x}</li>)}</ul></>}
+                      </>
+                    )}
+                    {aiResult.titulos_alternativos?.map((titulo, i) => (
+                      <div className="news-ai-proposal" key={`${titulo}-${i}`}>
+                        <p>{titulo}</p><button type="button" className="adm-btn adm-btn-primary adm-btn-sm" onClick={() => aplicarCampos({ titulo })}>Usar este título</button>
+                      </div>
+                    ))}
+                    {aiResult.resumo && (
+                      <div className="news-ai-proposal"><b>Resumo</b><p>{aiResult.resumo}</p><button type="button" className="adm-btn adm-btn-secondary adm-btn-sm" onClick={() => aplicarCompletar('resumo')}>Aplicar resumo</button></div>
+                    )}
+                    {(aiResult.seo_titulo || aiResult.seo_descricao) && (
+                      <div className="news-ai-proposal"><b>SEO</b><p>{aiResult.seo_titulo}<br/>{aiResult.seo_descricao}</p><button type="button" className="adm-btn adm-btn-secondary adm-btn-sm" onClick={() => aplicarCompletar('seo')}>Aplicar SEO</button></div>
+                    )}
+                    {(aiResult.categoria || aiResult.tags?.length) && (
+                      <div className="news-ai-proposal"><b>Classificação</b><p>{aiResult.categoria || '—'} · {(aiResult.tags || []).join(', ')}</p><button type="button" className="adm-btn adm-btn-secondary adm-btn-sm" disabled={Boolean(aiResult.categoria && !categoriaIdPorNome(aiResult.categoria))} onClick={() => aplicarCompletar('classificacao')}>Aplicar categoria e tags</button></div>
+                    )}
+                    {aiResult.conteudo_sugerido && (
+                      <div className="news-ai-proposal"><b>Conteúdo revisado</b><div className="news-ai-text">{aiResult.conteudo_sugerido}</div>{aiResult.alteracoes?.length > 0 && <ul className="news-ai-list">{aiResult.alteracoes.map((x, i) => <li key={i}>{x}</li>)}</ul>}<button type="button" className="adm-btn adm-btn-primary adm-btn-sm" onClick={() => aplicarCampos({ conteudo: aiResult.conteudo_sugerido })}>Substituir conteúdo</button></div>
+                    )}
+                    {aiResult._meta?.acao === 'completar' && <div className="news-ai-mini-actions"><button type="button" className="adm-btn adm-btn-primary adm-btn-sm" onClick={() => aplicarCompletar('tudo')}>Aplicar todos os campos sugeridos</button></div>}
+                  </div>
+                )}
+              </DetailsCard>
+
+              <DetailsCard title="SEO e autoria" subtitle="Opcional; usa título e resumo como fallback.">
+                <div className="news-two-cols">
+                  <div className="adm-field"><label className="adm-label" htmlFor="autor">Autor</label><input id="autor" className="adm-input" value={form.autor} onChange={e => set('autor', e.target.value)} placeholder="Nome ou redação" /></div>
+                  <div className="adm-field"><label className="adm-label" htmlFor="tags">Tags</label><input id="tags" className="adm-input" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="cidade, política, cultura" /></div>
+                </div>
+                <div className="adm-field"><label className="adm-label" htmlFor="seo_titulo">Título SEO</label><input id="seo_titulo" className={`adm-input${erros.seo_titulo ? ' adm-input-error' : ''}`} maxLength={120} value={form.seo_titulo} onChange={e => set('seo_titulo', e.target.value)} placeholder="Vazio = título da notícia"/><CharCount current={form.seo_titulo.length} max={120}/></div>
+                <div className="adm-field" style={{ marginBottom: 0 }}><label className="adm-label" htmlFor="seo_descricao">Descrição SEO</label><textarea id="seo_descricao" rows={2} className={`adm-input${erros.seo_descricao ? ' adm-input-error' : ''}`} maxLength={180} value={form.seo_descricao} onChange={e => set('seo_descricao', e.target.value)} placeholder="Vazio = resumo da notícia"/><CharCount current={form.seo_descricao.length} max={180}/></div>
+              </DetailsCard>
+            </div>
+
+            <div className="adm-form-col news-form-side">
+              <div className="adm-card">
+                <div className="adm-card-section">
+                  <div className="news-side-label">Publicação</div>
+                  <div className="adm-field">
+                    <label className="adm-label" htmlFor="status">Status</label>
+                    <div className="news-status-select">
+                      <select id="status" className="adm-input" value={form.status} onChange={e => set('status', e.target.value)}>
+                        {Object.entries(STATUS_CFG).map(([valor, cfg]) => <option key={valor} value={valor} disabled={!permitidos.has(valor)}>{cfg.label}</option>)}
+                      </select>
+                      <span className={`news-status-badge ${statusAtual.cls}`}>{statusAtual.label}</span>
+                    </div>
+                    <div className="news-status-hint">{statusAtual.hint}</div>
+                  </div>
+                  {form.status === 'agendado' && (
+                    <div className="adm-field"><label className="adm-label" htmlFor="agendado_para">Publicar em *</label><input id="agendado_para" type="datetime-local" className={`adm-input${erros.agendado_para ? ' adm-input-error' : ''}`} value={form.agendado_para} onChange={e => set('agendado_para', e.target.value)}/>{erros.agendado_para && <span className="news-error">{erros.agendado_para}</span>}</div>
+                  )}
+                  <div className="news-toggle-compact">
+                    <div className="adm-toggle-row"><div><div className="adm-toggle-label">Destaque</div><div className="adm-toggle-desc">Exibir na área de destaques.</div></div><button type="button" role="switch" aria-checked={form.destaque} className={`adm-toggle${form.destaque ? ' on' : ''}`} onClick={() => set('destaque', !form.destaque)}/></div>
+                    <div className="adm-toggle-row"><div><div className="adm-toggle-label">Plantão / urgente</div><div className="adm-toggle-desc">Faixa de urgência no portal.</div></div><button type="button" role="switch" aria-checked={form.urgente} className={`adm-toggle${form.urgente ? ' on' : ''}`} onClick={() => set('urgente', !form.urgente)}/></div>
+                  </div>
+                  {form.urgente && <div className="adm-field" style={{ marginTop: 8, marginBottom: 0 }}><label className="adm-label" htmlFor="urgente_ate">Encerrar plantão em</label><input id="urgente_ate" type="datetime-local" className="adm-input" value={form.urgente_ate} onChange={e => set('urgente_ate', e.target.value)}/></div>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="news-mobile-actions">
+            <Link to="/admin/noticias" className="adm-btn adm-btn-secondary">Cancelar</Link>
+            <BotaoSalvar compact />
+          </div>
+        </form>
       </div>
-
-      <form id="form-noticia" onSubmit={handleSubmit} noValidate>
-        <div className="adm-form-grid">
-
-          {/* ══ COLUNA PRINCIPAL ══ */}
-          <div className="adm-form-col">
-
-            {/* Card: Título + Resumo */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">Identificação</div>
-
-                <div className="adm-field">
-                  <label className="adm-label" htmlFor="titulo">Título *</label>
-                  <input
-                    id="titulo" type="text"
-                    className={`adm-input${erros.titulo ? ' adm-input-error' : ''}`}
-                    placeholder="Ex: Prefeitura inaugura nova praça no centro"
-                    value={form.titulo} onChange={e => set('titulo', e.target.value)}
-                    maxLength={200}
-                  />
-                  {erros.titulo
-                    ? <span style={{ fontSize:11, color:'var(--adm-red)', marginTop:4, display:'block' }}>{erros.titulo}</span>
-                    : <CharCount current={form.titulo.length} max={200} />}
-                </div>
-
-                <div className="adm-field" style={{ marginBottom: 0 }}>
-                  <label className="adm-label" htmlFor="resumo">
-                    Resumo
-                    <span style={{
-                      marginLeft: 6, fontSize: 10, fontWeight: 600,
-                      background: 'rgba(var(--adm-accent-rgb,107,124,78),.12)',
-                      color: 'var(--adm-accent)', padding: '1px 6px', borderRadius: 4,
-                    }}>LEAD</span>
-                  </label>
-                  <textarea
-                    id="resumo"
-                    className={`adm-input${erros.resumo ? ' adm-input-error' : ''}`}
-                    placeholder="Escreva uma chamada de 1–2 frases que apareça abaixo do título..."
-                    value={form.resumo}
-                    onChange={e => set('resumo', e.target.value)}
-                    rows={3}
-                    maxLength={300}
-                    style={{ resize: 'none' }}
-                  />
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginTop: 4 }}>
-                    {erros.resumo
-                      ? <span style={{ fontSize:11, color:'var(--adm-red)' }}>{erros.resumo}</span>
-                      : <span style={{ fontSize:11, color:'var(--adm-muted)', lineHeight:1.4 }}>
-                          Aparece entre o título e o corpo da notícia, em destaque.
-                        </span>}
-                    <CharCount current={form.resumo.length} max={300} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Card: Assistente editorial */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">✨ Assistente editorial de IA</div>
-                <p style={{fontSize:12,color:'var(--adm-muted)',lineHeight:1.5,margin:'0 0 12px'}}>Usa o provedor priorizado em Integrações e APIs (Gemini ou OpenRouter). A IA nunca publica sozinha: ela apenas sugere e você decide o que aplicar.</p>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                  {[['analisar','Analisar qualidade'],['resumo','Gerar resumo'],['titulos','Sugerir títulos'],['seo','Gerar SEO'],['categoria','Categoria e tags'],['melhorar','Melhorar texto']].map(([acao,label])=><button key={acao} type="button" className="adm-btn adm-btn-secondary" onClick={()=>executarIA(acao)} disabled={!!aiBusy}>{aiBusy===acao?'Gerando…':label}</button>)}
-                </div>
-                {aiResult&&<div style={{marginTop:14,padding:14,border:'1px solid var(--adm-border)',borderRadius:12,background:'var(--adm-surface2)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}><b>Prévia das sugestões</b><span style={{fontSize:11,color:'var(--adm-muted)'}}>{aiResult?._meta?.provedor} · {aiResult?._meta?.modelo}</span></div>
-                  {aiResult.titulos_alternativos?.filter(Boolean).length>0&&<div style={{marginTop:9,fontSize:12}}><b>Títulos:</b> {aiResult.titulos_alternativos.filter(Boolean).join(' • ')}</div>}
-                  {aiResult.resumo&&<div style={{marginTop:7,fontSize:12}}><b>Resumo:</b> {aiResult.resumo}</div>}
-                  {(aiResult.seo_titulo||aiResult.seo_descricao)&&<div style={{marginTop:7,fontSize:12}}><b>SEO:</b> {aiResult.seo_titulo}{aiResult.seo_descricao?` — ${aiResult.seo_descricao}`:''}</div>}
-                  {(aiResult.categoria||aiResult.tags?.length)&&<div style={{marginTop:7,fontSize:12}}><b>Classificação:</b> {aiResult.categoria||'—'} · {(aiResult.tags||[]).join(', ')}</div>}
-                  {aiResult.qualidade&&<div style={{marginTop:7,fontSize:12}}><b>Qualidade:</b> {aiResult.qualidade.nota ?? '—'}/100 {(aiResult.qualidade.alertas||[]).length?`· ${(aiResult.qualidade.alertas||[]).join(' • ')}`:''}</div>}
-                  <button type="button" className="adm-btn adm-btn-primary" onClick={aplicarIA} style={{marginTop:12}}>Aplicar sugestões ao formulário</button>
-                </div>}
-              </div>
-            </div>
-
-            {/* Card: SEO editorial */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">SEO e autoria</div>
-                <div className="adm-field">
-                  <label className="adm-label" htmlFor="autor">Autor</label>
-                  <input id="autor" className="adm-input" value={form.autor} onChange={e => set('autor', e.target.value)} placeholder="Nome do autor ou redação" />
-                </div>
-                <div className="adm-field">
-                  <label className="adm-label" htmlFor="tags">Tags</label>
-                  <input id="tags" className="adm-input" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="Iguatama, política, cultura" />
-                  <span style={{fontSize:11,color:'var(--adm-muted)',marginTop:4,display:'block'}}>Separe por vírgulas. As tags entram nos dados estruturados da notícia.</span>
-                </div>
-                <div className="adm-field">
-                  <label className="adm-label" htmlFor="seo_titulo">Título SEO</label>
-                  <input id="seo_titulo" className={`adm-input${erros.seo_titulo ? ' adm-input-error' : ''}`} value={form.seo_titulo} onChange={e => set('seo_titulo', e.target.value)} maxLength={120} placeholder="Deixe vazio para usar o título da notícia" />
-                  <CharCount current={form.seo_titulo.length} max={120} />
-                </div>
-                <div className="adm-field" style={{marginBottom:0}}>
-                  <label className="adm-label" htmlFor="seo_descricao">Descrição SEO</label>
-                  <textarea id="seo_descricao" className={`adm-input${erros.seo_descricao ? ' adm-input-error' : ''}`} value={form.seo_descricao} onChange={e => set('seo_descricao', e.target.value)} rows={3} maxLength={180} placeholder="Deixe vazio para usar o resumo da notícia" style={{resize:'none'}} />
-                  <CharCount current={form.seo_descricao.length} max={180} />
-                </div>
-              </div>
-            </div>
-
-            {/* Card: Conteúdo */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">Corpo da notícia *</div>
-                <MarkdownEditor value={form.conteudo} onChange={v => set('conteudo', v)} error={!!erros.conteudo}/>
-                {erros.conteudo && (
-                  <span style={{ fontSize:11, color:'var(--adm-red)', marginTop:4, display:'block' }}>{erros.conteudo}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Card: Imagem de capa + legenda */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">Imagem de capa</div>
-                <div style={{ fontSize:11, color:'var(--adm-muted)', marginBottom:12 }}>
-                  1280×720px · JPG, PNG, WebP · máx. 5 MB
-                </div>
-                <ImageUpload
-                  value={form.imagem_url}
-                  onChange={r => {
-                    if (r && typeof r === 'object') { set('imagem_url', r.url||''); set('imagem_public_id', r.public_id||'') }
-                    else { set('imagem_url',''); set('imagem_public_id','') }
-                  }}
-                />
-                {form.imagem_url && (
-                  <div className="adm-field" style={{ marginTop: 14, marginBottom: 0 }}>
-                    <label className="adm-label" htmlFor="imagem_legenda">
-                      Legenda da foto
-                      <span style={{
-                        marginLeft: 6, fontSize: 10, fontWeight: 600,
-                        background: 'rgba(99,102,241,.1)', color: '#6366f1',
-                        padding: '1px 6px', borderRadius: 4,
-                      }}>OPCIONAL</span>
-                    </label>
-                    <input
-                      id="imagem_legenda" type="text"
-                      className="adm-input"
-                      placeholder="Ex: Vista aérea da nova praça — Foto: Secretaria Municipal"
-                      value={form.imagem_legenda}
-                      onChange={e => set('imagem_legenda', e.target.value)}
-                      maxLength={200}
-                    />
-                    <span style={{ fontSize:11, color:'var(--adm-muted)', marginTop:4, display:'block' }}>
-                      Crédito da foto ou descrição curta. Aparece logo abaixo da imagem.
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ══ SIDEBAR ══ */}
-          <div className="adm-form-col">
-
-            {/* Card: Publicação — inclui status + destaque + cat + fonte */}
-            <div className="adm-card">
-              <div className="adm-card-section">
-                <div className="adm-section-label">Status editorial</div>
-
-                {/* #20 — Seletor de status */}
-                <div className="status-selector">
-                  {(['rascunho', 'revisao', 'agendado', 'publicado', 'arquivado']).map(s => {
-                    const cfg       = STATUS_CFG[s]
-                    const isSelected = form.status === s
-                    const isAvail   = !isEdicao
-                      ? ['rascunho', 'revisao', 'agendado', 'publicado'].includes(s)
-                      : s === form.status || transicoesDisponiveis.includes(s)
-
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        disabled={!isAvail}
-                        onClick={() => isAvail && set('status', s)}
-                        className={`status-option${isSelected ? ' selected' : ''}${!isAvail ? ' disabled-opt' : ''}`}
-                      >
-                        <span
-                          className="status-dot"
-                          style={{ background: cfg.color }}
-                        />
-                        <span style={{ flex: 1 }}>{cfg.label}</span>
-                        {isSelected && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                            width="14" height="14" style={{ color: 'var(--adm-accent)', flexShrink:0 }}>
-                            <path d="M5 12l5 5L20 7"/>
-                          </svg>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                {/* Dica contextual por status */}
-                <div style={{
-                  marginTop: 10, padding: '8px 12px', borderRadius: 8,
-                  background: statusAtual.bg, border: `1px solid ${statusAtual.border}`,
-                  fontSize: 11, color: statusAtual.color, lineHeight: 1.5,
-                }}>
-                  {form.status === 'rascunho'  && 'Visível apenas para editores. Ainda não aparece no portal.'}
-                  {form.status === 'revisao'   && 'Aguardando aprovação. Ainda não aparece no portal.'}
-                  {form.status === 'agendado'  && 'Será publicada automaticamente na data e hora definidas.'}
-                  {form.status === 'publicado' && 'Visível para todos os leitores do portal.'}
-                  {form.status === 'arquivado' && 'Removida da listagem pública. Pode ser recuperada a qualquer momento.'}
-                </div>
-
-                {form.status === 'agendado' && (
-                  <div className="adm-field" style={{ marginTop: 12, marginBottom: 0 }}>
-                    <label className="adm-label" htmlFor="agendado_para">Publicar em *</label>
-                    <input id="agendado_para" type="datetime-local" className={`adm-input${erros.agendado_para ? ' adm-input-error' : ''}`}
-                      value={form.agendado_para} min={new Date().toISOString().slice(0,16)}
-                      onChange={e => set('agendado_para', e.target.value)} />
-                    {erros.agendado_para && <span style={{ fontSize:11, color:'var(--adm-red)', marginTop:4, display:'block' }}>{erros.agendado_para}</span>}
-                  </div>
-                )}
-              </div>
-
-              <div className="adm-card-section">
-                <div className="adm-section-label">Configurações</div>
-                <div className="adm-toggle-row">
-                  <div>
-                    <div className="adm-toggle-label">Destaque</div>
-                    <div className="adm-toggle-desc">Aparece na seção Destaques da home</div>
-                  </div>
-                  <button
-                    type="button" role="switch"
-                    aria-checked={form.destaque}
-                    onClick={() => set('destaque', !form.destaque)}
-                    className={`adm-toggle${form.destaque ? ' on' : ''}`}
-                    aria-label="Marcar como destaque"
-                  />
-                </div>
-                <div className="adm-toggle-row" style={{ marginTop: 12 }}>
-                  <div>
-                    <div className="adm-toggle-label">🔴 Plantão / Urgente</div>
-                    <div className="adm-toggle-desc">Exibe uma faixa de notícia urgente no topo do portal</div>
-                  </div>
-                  <button type="button" role="switch" aria-checked={form.urgente}
-                    onClick={() => set('urgente', !form.urgente)} className={`adm-toggle${form.urgente ? ' on' : ''}`} />
-                </div>
-                {form.urgente && (
-                  <div className="adm-field" style={{ marginTop: 10, marginBottom: 0 }}>
-                    <label className="adm-label" htmlFor="urgente_ate">Retirar plantão automaticamente em</label>
-                    <input id="urgente_ate" type="datetime-local" className="adm-input" value={form.urgente_ate}
-                      onChange={e => set('urgente_ate', e.target.value)} />
-                    <span style={{ fontSize:11, color:'var(--adm-muted)', marginTop:4, display:'block' }}>Opcional. Sem data, permanece até você desmarcar.</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="adm-card-section">
-                <SelectComAdicionar tipo="categoria" valor={form.categoria_id} opcoes={categorias}
-                  onChange={v => set('categoria_id', v)}
-                  onNovaOpcao={n => setCategorias(prev => [...prev, n].sort((a,b) => a.nome.localeCompare(b.nome)))}/>
-                <SelectComAdicionar tipo="fonte" valor={form.fonte_id} opcoes={fontes}
-                  onChange={v => set('fonte_id', v)}
-                  onNovaOpcao={n => setFontes(prev => [...prev, n].sort((a,b) => a.nome.localeCompare(b.nome)))}/>
-              </div>
-            </div>
-
-            {/* Dica de resumo */}
-            <div style={{
-              background: 'rgba(var(--adm-accent-rgb,107,124,78),.07)',
-              border: '1px solid rgba(var(--adm-accent-rgb,107,124,78),.2)',
-              borderRadius: 10, padding: '14px 16px',
-            }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'var(--adm-accent)', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                Dica: campo Resumo
-              </div>
-              <p style={{ fontSize:12, color:'var(--adm-muted)', margin:0, lineHeight:1.6 }}>
-                O <b style={{color:'var(--adm-text)'}}>resumo</b> funciona como o lead jornalístico —
-                responde &quot;quem, o quê, quando, onde&quot; em 1-2 frases.
-                Aparece em destaque logo abaixo do título, antes do corpo, como na CNN, BBC e G1.
-              </p>
-            </div>
-
-            {/* Botão salvar fixo na sidebar (mobile) */}
-            <div className="adm-form-save-mobile">
-              <BotaoSalvar />
-            </div>
-          </div>
-        </div>
-      </form>
     </>
   )
 }

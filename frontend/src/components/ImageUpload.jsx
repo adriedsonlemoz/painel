@@ -1,9 +1,19 @@
 import { useState, useRef } from 'react'
-import { Upload, X, ImageIcon, Loader2 } from 'lucide-react'
+import { Upload, X, ImageIcon, Loader2, RefreshCw, Cloud } from 'lucide-react'
 import { storageService } from '../services/api'
 import toast from 'react-hot-toast'
 
-export default function ImageUpload({ value, onChange }) {
+function dimensoes(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => { resolve({ largura: img.naturalWidth || null, altura: img.naturalHeight || null }); URL.revokeObjectURL(url) }
+    img.onerror = () => { resolve({ largura: null, altura: null }); URL.revokeObjectURL(url) }
+    img.src = url
+  })
+}
+
+export default function ImageUpload({ value, publicId, metadata = {}, onChange }) {
   const [progresso, setProgresso] = useState(0)
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef(null)
@@ -11,14 +21,17 @@ export default function ImageUpload({ value, onChange }) {
   async function handleFile(e) {
     const file = e.target.files?.[0]
     if (!file) return
-
     try {
       setUploading(true)
       setProgresso(0)
-      const resultado = await storageService.upload(file, setProgresso)
-      // resultado = { url, public_id } — repassado ao pai para salvar ambos
-      onChange(resultado)
-      toast.success('Imagem enviada!')
+      const dims = await dimensoes(file)
+      const resultado = await storageService.uploadNoticia(file, setProgresso)
+      onChange({
+        ...resultado,
+        largura: dims.largura,
+        altura: dims.altura,
+      })
+      toast.success('Imagem salva no Cloudflare R2')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -29,55 +42,66 @@ export default function ImageUpload({ value, onChange }) {
   }
 
   function remover() {
-    onChange('')
+    onChange(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
+  const info = [
+    metadata.largura && metadata.altura ? `${metadata.largura}×${metadata.altura}px` : '',
+    metadata.mime ? metadata.mime.replace('image/', '').toUpperCase() : '',
+    metadata.size ? `${(metadata.size / 1024 / 1024).toFixed(2)} MB` : '',
+  ].filter(Boolean).join(' · ')
+
   return (
-    <div>
-      <input ref={inputRef} type="file" accept="image/*"
-        onChange={handleFile} className="hidden" id="img-upload" />
+    <div className="news-image-upload">
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp"
+        onChange={handleFile} className="hidden" id="news-cover-upload" />
 
       {value ? (
-        <div className="relative rounded-xl overflow-hidden border border-gray-200">
-          <img src={value} alt="Preview" className="w-full h-52 object-cover" />
-          <button type="button" onClick={remover}
-            className="absolute top-2 right-2 bg-red-500 hover:bg-red-600
-                       text-white rounded-full p-1.5 transition-colors shadow">
-            <X size={14} />
-          </button>
+        <div className="news-image-preview">
+          <img src={value} alt="Prévia da capa" />
+          <div className="news-image-preview-bar">
+            <div className="news-image-meta">
+              <span><Cloud size={13}/> Cloudflare R2</span>
+              {info && <small>{info}</small>}
+            </div>
+            <div className="news-image-actions">
+              <button type="button" onClick={() => inputRef.current?.click()} className="adm-btn adm-btn-secondary adm-btn-sm">
+                <RefreshCw size={13}/> Trocar
+              </button>
+              <button type="button" onClick={remover} className="adm-btn adm-btn-danger adm-btn-sm" aria-label="Remover imagem">
+                <X size={13}/>
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
-        <label htmlFor="img-upload"
-          className={`flex flex-col items-center justify-center gap-3 h-44 border-2
-                      border-dashed rounded-xl cursor-pointer transition-colors
-                      ${uploading
-                        ? 'border-green-300 bg-green-50 cursor-wait'
-                        : 'border-gray-300 hover:border-green-400 hover:bg-green-50'}`}>
+        <label htmlFor="news-cover-upload" className={`news-image-drop${uploading ? ' uploading' : ''}`}>
           {uploading ? (
             <>
-              <Loader2 size={26} className="text-green-500 animate-spin" />
-              <div className="w-32 bg-gray-200 rounded-full h-1.5">
-                <div className="bg-green-500 h-1.5 rounded-full transition-all"
-                  style={{ width: `${progresso}%` }} />
-              </div>
-              <p className="text-sm text-green-600 font-medium">Enviando {progresso}%</p>
+              <Loader2 size={24} className="adm-spin" />
+              <b>Enviando para o Cloudflare R2…</b>
+              <div className="news-upload-progress"><span style={{ width: `${progresso}%` }}/></div>
+              <small>{progresso}%</small>
             </>
           ) : (
             <>
-              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                <ImageIcon size={22} className="text-gray-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-gray-700 flex items-center gap-1 justify-center">
-                  <Upload size={14} /> Clique para enviar
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">PNG, JPG, WebP • máx 1MB</p>
-              </div>
+              <span className="news-image-icon"><ImageIcon size={21}/></span>
+              <b><Upload size={14}/> Adicionar imagem de capa</b>
+              <small>JPG, PNG ou WebP · até 5 MB</small>
             </>
           )}
         </label>
       )}
+      <style>{`
+        .news-image-drop{min-height:132px;border:1.5px dashed var(--adm-border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:pointer;background:var(--adm-surface2);color:var(--adm-muted);transition:.15s;padding:18px;text-align:center}
+        .news-image-drop:hover{border-color:var(--adm-accent);background:rgba(var(--adm-accent-rgb,107,124,78),.05)}
+        .news-image-drop b{font-size:13px;color:var(--adm-text);display:flex;align-items:center;gap:6px}.news-image-drop small{font-size:11px}.news-image-icon{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:var(--adm-surface);border:1px solid var(--adm-border)}
+        .news-upload-progress{width:min(220px,70%);height:5px;background:var(--adm-border);border-radius:9px;overflow:hidden}.news-upload-progress span{display:block;height:100%;background:var(--adm-accent)}
+        .news-image-preview{border:1px solid var(--adm-border);border-radius:12px;overflow:hidden;background:var(--adm-surface2)}.news-image-preview>img{display:block;width:100%;max-height:300px;object-fit:cover;background:#eee}
+        .news-image-preview-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px}.news-image-meta{min-width:0;display:flex;flex-direction:column;gap:2px;color:var(--adm-muted)}.news-image-meta span{font-size:11px;font-weight:700;color:var(--adm-accent);display:flex;gap:5px;align-items:center}.news-image-meta small{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.news-image-actions{display:flex;gap:6px;flex-shrink:0}
+        @media(max-width:520px){.news-image-preview-bar{align-items:flex-start}.news-image-actions .adm-btn{padding:6px 8px}.news-image-preview>img{max-height:220px}}
+      `}</style>
     </div>
   )
 }

@@ -339,20 +339,69 @@ export async function provedorInfo() {
   }
 }
 
-const EDITORIAL_SCHEMA = {
-  type:'object', properties:{
-    titulo:{type:'string'}, titulos_alternativos:{type:'array',items:{type:'string'},maxItems:3}, resumo:{type:'string'}, seo_titulo:{type:'string'}, seo_descricao:{type:'string'}, tags:{type:'array',items:{type:'string'},maxItems:8}, categoria:{type:'string'},
-    qualidade:{type:'object',properties:{nota:{type:'number'},alertas:{type:'array',items:{type:'string'}},pontos_fortes:{type:'array',items:{type:'string'}}},required:['nota','alertas','pontos_fortes'],additionalProperties:false},
-  }, required:['titulo','titulos_alternativos','resumo','seo_titulo','seo_descricao','tags','categoria','qualidade'], additionalProperties:false,
+const EDITORIAL_SCHEMAS = {
+  analisar: {
+    type:'object', properties:{
+      qualidade:{type:'object',properties:{
+        nota:{type:'number'},
+        alertas:{type:'array',items:{type:'string'},maxItems:6},
+        pontos_fortes:{type:'array',items:{type:'string'},maxItems:5},
+        correcoes:{type:'array',items:{type:'string'},maxItems:6},
+      },required:['nota','alertas','pontos_fortes','correcoes'],additionalProperties:false},
+    }, required:['qualidade'], additionalProperties:false,
+  },
+  resumo: {
+    type:'object', properties:{resumo:{type:'string'}}, required:['resumo'], additionalProperties:false,
+  },
+  titulos: {
+    type:'object', properties:{titulos_alternativos:{type:'array',items:{type:'string'},minItems:1,maxItems:3}}, required:['titulos_alternativos'], additionalProperties:false,
+  },
+  seo: {
+    type:'object', properties:{seo_titulo:{type:'string'},seo_descricao:{type:'string'}}, required:['seo_titulo','seo_descricao'], additionalProperties:false,
+  },
+  categoria: {
+    type:'object', properties:{categoria:{type:'string'},tags:{type:'array',items:{type:'string'},maxItems:8}}, required:['categoria','tags'], additionalProperties:false,
+  },
+  completar: {
+    type:'object', properties:{
+      resumo:{type:'string'}, seo_titulo:{type:'string'}, seo_descricao:{type:'string'},
+      categoria:{type:'string'}, tags:{type:'array',items:{type:'string'},maxItems:8},
+    }, required:['resumo','seo_titulo','seo_descricao','categoria','tags'], additionalProperties:false,
+  },
+  melhorar: {
+    type:'object', properties:{
+      conteudo_sugerido:{type:'string'},
+      alteracoes:{type:'array',items:{type:'string'},maxItems:6},
+    }, required:['conteudo_sugerido','alteracoes'], additionalProperties:false,
+  },
+  rss: {
+    type:'object', properties:{
+      titulo:{type:'string'}, resumo:{type:'string'}, categoria:{type:'string'},
+      tags:{type:'array',items:{type:'string'},maxItems:8},
+    }, required:['titulo','resumo','categoria','tags'], additionalProperties:false,
+  },
 }
 
-export async function analisarNoticiaEditorial({ titulo='', resumo='', conteudo='', categorias=[], acao='analisar', provedor }) {
-  const systemPrompt='Você é um assistente editorial de um portal jornalístico brasileiro. Nunca invente fatos, pessoas, números, datas ou fontes. Trabalhe somente com o texto fornecido. Preserve o sentido factual.'
-  const profile = acao === 'rss' ? 'rss' : 'editorial'
-  const pergunta=`TAREFA: ${acao}\nCATEGORIAS DISPONÍVEIS: ${categorias.join(', ')||'nenhuma'}\n\nTÍTULO:\n${redactAiText(titulo)}\n\nRESUMO:\n${redactAiText(resumo)}\n\n${wrapUntrusted('CONTEÚDO DA NOTÍCIA', truncateForTokens(conteudo, 10000))}\n\nLimites: resumo 300 caracteres, seo_titulo 60, seo_descricao 160, tags até 8. Se a tarefa não pedir alteração de um campo, mantenha uma sugestão conservadora.`
-  const key = acao === 'rss' ? aiCacheKey('editorial-rss', {titulo,resumo,conteudo,categorias}) : null
-  const result=await enviarJson({systemPrompt,pergunta,schema:EDITORIAL_SCHEMA,schemaName:'analise_editorial',provedor,profile,task:`editorial:${acao}`,dataClass:acao==='rss'?'rss_content':'editorial',cacheKey:key,cacheTtlMs:acao==='rss'?24*60*60_000:0})
-  return {...result.data,_meta:{provedor:result.provedor,modelo:result.modelo,tokens:result.tokens,fallback:Boolean(result.fallback),falhasAnteriores:result.falhasAnteriores||[],structuredMode:result.structuredMode,cacheHit:Boolean(result.cacheHit),retries:result.retries||0}}
+const EDITORIAL_TASK_HINTS = {
+  analisar:'Avalie clareza, estrutura jornalística, ortografia e possíveis trechos que exigem checagem. Não reescreva a matéria.',
+  resumo:'Escreva somente um lead/resumo fiel ao conteúdo, com no máximo 300 caracteres.',
+  titulos:'Sugira até 3 títulos objetivos e jornalísticos, sem clickbait e sem inventar fatos.',
+  seo:'Gere título SEO de até 60 caracteres e descrição SEO de até 160 caracteres, fiéis ao conteúdo.',
+  categoria:'Escolha obrigatoriamente uma das categorias fornecidas e sugira até 8 tags úteis.',
+  completar:'Complete resumo, SEO, categoria e tags. Escolha obrigatoriamente uma das categorias fornecidas.',
+  melhorar:'Reescreva somente o corpo da notícia para melhorar clareza, gramática e fluidez, preservando integralmente fatos, nomes, números, datas e fontes.',
+  rss:'Enriqueça o item importado sem inventar fatos: título conservador, resumo curto, categoria existente e tags.',
+}
+
+export async function analisarNoticiaEditorial({ titulo='', resumo='', conteudo='', categorias=[], acao='analisar', provedor, categoriaAtual='', fonte='' }) {
+  const tarefa = EDITORIAL_SCHEMAS[acao] ? acao : 'analisar'
+  const schema = EDITORIAL_SCHEMAS[tarefa]
+  const systemPrompt='Você é um assistente editorial de um portal jornalístico brasileiro. Nunca invente fatos, pessoas, números, datas, locais ou fontes. Trabalhe somente com o texto fornecido. Preserve o sentido factual. Quando houver categorias disponíveis, use exatamente um dos nomes fornecidos.'
+  const profile = tarefa === 'rss' ? 'rss' : (tarefa === 'seo' ? 'seo' : 'editorial')
+  const pergunta=`TAREFA: ${tarefa}\nOBJETIVO: ${EDITORIAL_TASK_HINTS[tarefa]}\nCATEGORIAS DISPONÍVEIS: ${categorias.join(', ')||'nenhuma'}\nCATEGORIA ATUAL: ${redactAiText(categoriaAtual||'não definida')}\nFONTE INFORMADA: ${redactAiText(fonte||'não informada')}\n\nTÍTULO:\n${redactAiText(titulo)}\n\nRESUMO:\n${redactAiText(resumo)}\n\n${wrapUntrusted('CONTEÚDO DA NOTÍCIA', truncateForTokens(conteudo, 10000))}\n\nLimites editoriais: resumo 300 caracteres, seo_titulo 60, seo_descricao 160, tags até 8. A fonte é contexto somente leitura: nunca crie ou troque a fonte.`
+  const key = tarefa === 'rss' ? aiCacheKey('editorial-rss', {titulo,resumo,conteudo,categorias}) : null
+  const result=await enviarJson({systemPrompt,pergunta,schema,schemaName:`analise_editorial_${tarefa}`,provedor,profile,task:`editorial:${tarefa}`,dataClass:tarefa==='rss'?'rss_content':'editorial',cacheKey:key,cacheTtlMs:tarefa==='rss'?24*60*60_000:0})
+  return {...result.data,_meta:{acao:tarefa,provedor:result.provedor,modelo:result.modelo,tokens:result.tokens,fallback:Boolean(result.fallback),falhasAnteriores:result.falhasAnteriores||[],structuredMode:result.structuredMode,cacheHit:Boolean(result.cacheHit),retries:result.retries||0}}
 }
 
 export async function sugerirDescricaoRepositorio({ nome='', descricaoAtual='', linguagem='', topicos=[], readme='', provedor }) {

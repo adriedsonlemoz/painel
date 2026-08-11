@@ -248,6 +248,30 @@ router.get('/contagem', autenticar, verificarPermissao('erros.ver'), async (_req
   } catch (err) { next(err) }
 })
 
+// ─── GET /api/erros/export ────────────────────────────────────
+// Exporta todos os erros persistidos em um único JSON, sem consultar
+// integrações externas e sem executar diagnóstico ou análise de IA.
+router.get('/export', autenticar, verificarPermissao('erros.ver'), async (_req, res, next) => {
+  try {
+    await importarErrosAtualizadorSpool().catch(() => {})
+    const erros = await ErroLog.find({}).sort({ criado_em: -1 }).lean()
+    const geradoEm = new Date().toISOString()
+    const payload = {
+      produto: 'AL Sistemas',
+      versao: '1.0.117',
+      gerado_em: geradoEm,
+      total: erros.length,
+      erros,
+    }
+    const stamp = geradoEm.replace(/[:.]/g, '-')
+    const body = JSON.stringify(payload, null, 2)
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="al-sistemas-erros-${stamp}.json"`)
+    res.setHeader('X-Error-Count', String(erros.length))
+    res.send(body)
+  } catch (err) { next(err) }
+})
+
 // ─── GET /api/erros ───────────────────────────────────────────
 // Lista erros com filtros e paginação.
 router.get('/', autenticar, verificarPermissao('erros.ver'), async (req, res, next) => {

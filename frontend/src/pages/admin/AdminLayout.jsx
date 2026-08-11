@@ -20,10 +20,8 @@ import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 // Itens core do SaaS ficam no nível raiz para acesso rápido.
 // Módulo Portal agrupado em seção colapsável — rotas preservadas intactas.
 const NAV = [
-  // Ações principais ficam soltas: são as três centrais acessadas com mais frequência.
+  // Dashboard fica solto no topo: acesso rápido de sempre.
   { to: '/admin',               label: 'Dashboard',      icon: IconGrid,   perm: null },
-  { to: '/admin/atualizacoes',  label: 'Atualizações',   icon: IconBackup, perm: 'atualizacoes.gerenciar' },
-  { to: '/admin/erros',         label: 'Erros e logs',   icon: IconAlerta, perm: 'erros.ver' },
 
   // Os grupos levam a uma Central em cards no mobile. As rotas antigas
   // continuam preservadas e aparecem como atalhos no dropdown desktop.
@@ -71,6 +69,10 @@ const NAV = [
       { to: '/admin/ai-assistant',  label: 'Assistente de IA',   icon: IconIA,       perm: 'ia.usar' },
     ],
   },
+
+  // Atualizações e Erros e logs ficam por último na listagem.
+  { to: '/admin/atualizacoes',  label: 'Atualizações',   icon: IconBackup, perm: 'atualizacoes.gerenciar' },
+  { to: '/admin/erros',         label: 'Erros e logs',   icon: IconAlerta, perm: 'erros.ver' },
 ]
 
 /* ── helpers ────────────────────────────────────────────────── */
@@ -218,25 +220,63 @@ export default function AdminLayout() {
     )
   }
 
-  /** Grupo no drawer mobile: abre uma Central em cards, sem despejar dezenas de links. */
+  /** Grupo no drawer mobile: acordeão — clicar expande os filhos ali mesmo, sem navegar. */
   function DrawerGroup({ item }) {
     const temAtivo = groupHasActive(pathname, item)
+    const aberto = !!gruposAbertos[item.label]
+    const filhosVisiveis = item.children.filter(c => podeVer(c.perm))
     return (
-      <Link to={item.to}
-        aria-current={pathname === item.to ? 'page' : undefined}
-        style={{
-          display:'flex', alignItems:'center', gap:10, width:'100%',
-          padding:'10px 12px', borderRadius:RADIUS.md, marginBottom:2,
-          fontSize:13, fontWeight:600, textAlign:'left', textDecoration:'none',
-          background: temAtivo ? 'var(--adm-surface2)' : 'transparent',
-          color: temAtivo ? 'var(--adm-text)' : 'var(--adm-muted)',
-          transition:'all .15s',
-        }}
-      >
-        <span style={{ width:16, height:16, display:'flex', alignItems:'center', flexShrink:0 }}><item.icon /></span>
-        <span style={{ flex:1 }}>{item.label}</span>
-        <span style={{ fontSize:16, lineHeight:1, color:'var(--adm-muted)' }}>›</span>
-      </Link>
+      <div style={{ marginBottom:2 }}>
+        <button type="button" onClick={() => toggleGrupo(item.label)}
+          aria-expanded={aberto}
+          style={{
+            display:'flex', alignItems:'center', gap:10, width:'100%',
+            padding:'10px 12px', borderRadius:RADIUS.md,
+            fontSize:13, fontWeight:600, textAlign:'left',
+            background: temAtivo ? 'var(--adm-surface2)' : 'transparent',
+            color: temAtivo ? 'var(--adm-text)' : 'var(--adm-muted)',
+            border:'none', cursor:'pointer', fontFamily:'inherit',
+            transition:'all .15s',
+          }}
+        >
+          <span style={{ width:16, height:16, display:'flex', alignItems:'center', flexShrink:0 }}><item.icon /></span>
+          <span style={{ flex:1 }}>{item.label}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="12" height="12"
+            style={{ transition:'transform .15s', transform: aberto ? 'rotate(180deg)' : 'rotate(0deg)', flexShrink:0 }}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        {aberto && (
+          <div style={{ marginLeft:12, paddingLeft:12, marginTop:2, marginBottom:4,
+            borderLeft:'2px solid var(--adm-border)' }}>
+            {filhosVisiveis.map(child => {
+              const childActive = isActive(pathname, child.to)
+              const ChildTag = child.external ? 'a' : Link
+              const childProps = child.external
+                ? { href: child.to, target:'_blank', rel:'noopener noreferrer' }
+                : { to: child.to }
+              return (
+                <ChildTag key={child.to} {...childProps}
+                  style={{
+                    display:'flex', alignItems:'center', gap:9,
+                    padding:'8px 10px', borderRadius:RADIUS.md, marginBottom:1,
+                    fontSize:12.5, fontWeight:500, textDecoration:'none',
+                    color: childActive ? 'var(--adm-text)' : 'var(--adm-muted)',
+                    background: childActive ? 'var(--adm-surface2)' : 'transparent',
+                    transition:'all .15s',
+                  }}
+                >
+                  <span style={{ width:14, height:14, display:'flex', alignItems:'center', flexShrink:0 }}>
+                    <child.icon />
+                  </span>
+                  <span style={{ flex:1 }}>{child.label}</span>
+                  {child.to === '/admin/erros' && badgeErros()}
+                </ChildTag>
+              )
+            })}
+          </div>
+        )}
+      </div>
     )
   }
 

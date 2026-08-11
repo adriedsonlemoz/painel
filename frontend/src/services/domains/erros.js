@@ -74,6 +74,23 @@ export const errosService = {
     setTimeout(() => URL.revokeObjectURL(url), 1500)
     return { ok: true, filename, size: blob.size }
   },
+  async exportarTodos() {
+    const res = await authFetch(`${BASE_URL_ERROS}/export`, { credentials: 'include' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.erro || `Erro ${res.status}`)
+    }
+    const blob = await res.blob()
+    const disposition = res.headers.get('content-disposition') || ''
+    const match = disposition.match(/filename=\"?([^\";]+)\"?/i)
+    const filename = match?.[1] || `al-sistemas-erros-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    const total = Number(res.headers.get('x-error-count') || 0)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1500)
+    return { ok: true, filename, size: blob.size, total }
+  },
   async contagem()              { return api('/erros/contagem') },
   async marcarLido(id, lido = true) {
     return api(`/erros/${id}/lido`, { method: 'PATCH', body: JSON.stringify({ lido }) })

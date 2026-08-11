@@ -451,7 +451,6 @@ function AbaNoticia() {
   const [deletandoId,  setDeletandoId]  = useState(null)
   const [publicandoId, setPublicandoId] = useState(null)
   const [confirm,      setConfirm]      = useState({aberto:false,noticia:null,carregando:false})
-  const [contagem,     setContagem]     = useState({rascunho:0,revisao:0,agendado:0,publicado:0,arquivado:0})
 
   const {noticias,total,paginas,loading,error,recarregar} = useNoticias({
     categoriaSlug: filtroCat||undefined,
@@ -459,8 +458,6 @@ function AbaNoticia() {
     page, limit:   10, status: filtroStatus,
   })
   const {categorias} = useCategorias()
-
-  useEffect(()=>{ noticiasService.contagemStatus().then(setContagem).catch(()=>{}) },[])
 
   function aplicarStatus(s){setFiltroStatus(s);setPage(1)}
 
@@ -476,7 +473,6 @@ function AbaNoticia() {
         '✓ Despublicado'
       toast.success(msg)
       recarregar()
-      noticiasService.contagemStatus().then(setContagem).catch(()=>{})
     }catch(err){toast.error(err.message)}
     finally{setPublicandoId(null)}
   }
@@ -487,7 +483,7 @@ function AbaNoticia() {
     try{
       setDeletandoId(nid);await noticiasService.excluir(nid)
       toast.success('Notícia excluída!');setConfirm({aberto:false,noticia:null,carregando:false})
-      recarregar();noticiasService.contagemStatus().then(setContagem).catch(()=>{})
+      recarregar()
     }catch(err){toast.error(err.message);setConfirm(c=>({...c,carregando:false}))}
     finally{setDeletandoId(null)}
   }
@@ -499,45 +495,25 @@ function AbaNoticia() {
         carregando={confirm.carregando} onConfirmar={confirmarExclusao}
         onCancelar={()=>setConfirm({aberto:false,noticia:null,carregando:false})}/>
 
-      {/* Topo */}
-      <div style={{marginBottom:14}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+      {/* Filtros compactos: a página começa pela lista, sem painel editorial duplicado */}
+      <div className="not-toolbar">
+        <div className="not-toolbar-top">
           <div>
-            <div style={{fontSize:14,fontWeight:700,color:'var(--adm-text)'}}>Notícias</div>
-            <div style={{fontSize:12,color:'var(--adm-muted)'}}>{total} encontradas</div>
+            <div className="not-result-count">{total} {total===1?'notícia':'notícias'}</div>
+            <div className="not-result-hint">Encontre e gerencie o conteúdo publicado.</div>
           </div>
-          <Link to="/admin/nova-noticia" className="adm-btn adm-btn-primary adm-btn-sm">{Ico.plus} Nova notícia</Link>
         </div>
-
-        {/* Chips de status */}
-        <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:10}}>
-          {FILTROS_STATUS.map(f=>(
-            <button key={f.value} onClick={()=>aplicarStatus(f.value)}
-              style={{
-                padding:`${SPACE.xs}px ${SPACE.lg}px`,borderRadius:RADIUS.pill,fontSize:FONT.base,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',
-                border:`1px solid ${filtroStatus===f.value?'var(--adm-accent)':'var(--adm-border)'}`,
-                background:filtroStatus===f.value?'var(--adm-accent)':'transparent',
-                color:filtroStatus===f.value?'#fff':'var(--adm-muted)',transition:'all .15s',
-              }}>
-              {f.label}
-              {f.value!=='todos'&&contagem[f.value]>0&&(
-                <span style={{marginLeft:5,background:'rgba(255,255,255,.22)',borderRadius:20,padding:'0 5px',fontSize:11}}>
-                  {contagem[f.value]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Busca + categoria */}
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <div className="adm-search" style={{flex:1,minWidth:180}}>
+        <div className="not-filter-grid">
+          <div className="adm-search not-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input type="search" placeholder="Filtrar por título…" value={busca}
+            <input type="search" placeholder="Buscar notícia…" value={busca}
               onChange={e=>{setBusca(e.target.value);setPage(1)}}/>
           </div>
+          <select className="adm-filter-select not-filter" value={filtroStatus} onChange={e=>aplicarStatus(e.target.value)} aria-label="Filtrar por status">
+            {FILTROS_STATUS.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
           {categorias.length>0&&(
-            <select className="adm-filter-select" value={filtroCat} onChange={e=>{setFiltroCat(e.target.value);setPage(1)}}>
+            <select className="adm-filter-select not-filter" value={filtroCat} onChange={e=>{setFiltroCat(e.target.value);setPage(1)}} aria-label="Filtrar por categoria">
               <option value="">Todas as categorias</option>
               {categorias.map(c=><option key={c.id} value={c.slug}>{c.nome}</option>)}
             </select>
@@ -545,7 +521,6 @@ function AbaNoticia() {
         </div>
       </div>
 
-      {/* Estados */}
       {loading&&(
         <div className="adm-empty" role="status">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="adm-spin"
@@ -565,16 +540,16 @@ function AbaNoticia() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{width:36,height:36,opacity:.25,margin:'0 auto 10px'}}>
             <path d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v10a2 2 0 01-2 2z"/>
           </svg>
-          <p>{busca||filtroCat?'Nenhuma notícia encontrada.':'Nenhuma notícia ainda.'}</p>
-          {!busca&&!filtroCat&&(
+          <p>{busca||filtroCat||filtroStatus!=='todos'?'Nenhuma notícia encontrada.':'Nenhuma notícia ainda.'}</p>
+          {!busca&&!filtroCat&&filtroStatus==='todos'&&(
             <Link to="/admin/nova-noticia" className="adm-btn adm-btn-primary adm-btn-sm" style={{marginTop:12}}>Criar primeira notícia</Link>
           )}
         </div>
       )}
 
-      {/* Tabela — desktop */}
       {!loading&&!error&&noticias.length>0&&(
         <>
+          {/* Desktop: tabela enxuta */}
           <div className="not-table-wrap adm-table-scroll">
             <table className="adm-table" aria-label="Lista de notícias">
               <thead>
@@ -591,12 +566,8 @@ function AbaNoticia() {
                   const emT=publicandoId===nid, emD=deletandoId===nid
                   return (
                     <tr key={nid}>
-                      <td style={{maxWidth:240}}>
-                        <div style={{fontWeight:600,fontSize:13,lineHeight:1.4,
-                          display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                          {n.titulo}
-                        </div>
-                        {n.destaque&&<span className="adm-badge adm-badge-amber" style={{marginTop:3}}>⭐ Destaque</span>}
+                      <td style={{maxWidth:280}}>
+                        <div style={{fontWeight:650,fontSize:13,lineHeight:1.4,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{n.titulo}</div>
                       </td>
                       <td><CategoriaBadge nome={n.categoria_id?.nome??n.categoria?.nome??'—'}/></td>
                       <td><StatusBadge status={st}/></td>
@@ -604,27 +575,11 @@ function AbaNoticia() {
                       <td style={{color:'var(--adm-muted)',fontSize:12,textAlign:'right'}}>{(n.views||0).toLocaleString('pt-BR')}</td>
                       <td>
                         <div className="adm-td-actions not-row-actions">
-                          {/* Ver publicada */}
-                          {st==='publicado'&&(
-                            <Link to={`/noticia/${nid}`} target="_blank" aria-label="Ver no site" title="Ver no site"
-                              className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">{Ico.eye}</Link>
-                          )}
-                          {/* ── Toggle Publicar / Despublicar ── */}
-                          <button onClick={()=>!emT&&!emD&&togglePublicacao(n)}
-                            disabled={emT||emD} aria-label={tcfg.label} title={tcfg.label}
-                            className="adm-btn adm-btn-icon adm-btn-sm"
-                            style={{background:tcfg.bg,color:tcfg.color,border:`1px solid ${tcfg.border}`}}>
-                            {emT?Ico.spinSm:tcfg.icon}
-                          </button>
-                          {/* Editar */}
-                          <Link to={`/admin/editar/${nid}`} aria-label="Editar" title="Editar"
-                            className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">{Ico.edit}</Link>
-                          {/* Excluir */}
-                          <button onClick={()=>!emD&&!emT&&setConfirm({aberto:true,noticia:n,carregando:false})}
-                            disabled={emD||emT} aria-label="Excluir" title="Excluir"
-                            className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                            {emD?Ico.spinSm:Ico.trash}
-                          </button>
+                          {st==='publicado'&&<Link to={`/noticia/${nid}`} target="_blank" aria-label="Ver no site" title="Ver no site" className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">{Ico.eye}</Link>}
+                          <button onClick={()=>!emT&&!emD&&togglePublicacao(n)} disabled={emT||emD} aria-label={tcfg.label} title={tcfg.label}
+                            className="adm-btn adm-btn-icon adm-btn-sm" style={{background:tcfg.bg,color:tcfg.color,border:`1px solid ${tcfg.border}`}}>{emT?Ico.spinSm:tcfg.icon}</button>
+                          <Link to={`/admin/editar/${nid}`} aria-label="Editar" title="Editar" className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">{Ico.edit}</Link>
+                          <button onClick={()=>!emD&&!emT&&setConfirm({aberto:true,noticia:n,carregando:false})} disabled={emD||emT} aria-label="Excluir" title="Excluir" className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">{emD?Ico.spinSm:Ico.trash}</button>
                         </div>
                       </td>
                     </tr>
@@ -634,51 +589,47 @@ function AbaNoticia() {
             </table>
           </div>
 
-          {/* Cards — mobile */}
+          {/* Mobile: cards compactos e ações com hierarquia clara */}
           <div className="not-cards">
             {noticias.map(n=>{
               const nid=n._id?.toString()||n.id
               const st=n.status||'publicado'
               const tcfg=getToggleConfig(st)
               const emT=publicandoId===nid, emD=deletandoId===nid
+              const categoria=n.categoria_id?.nome??n.categoria?.nome
               return (
-                <div key={nid} style={{background:'var(--adm-surface2)',border:'1px solid var(--adm-border)',borderRadius:10,padding:'10px 12px'}}>
-                  <div style={{fontWeight:600,fontSize:13,lineHeight:1.4,marginBottom:6}}>{n.titulo}</div>
-                  <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
-                    <StatusBadge status={st}/><CategoriaBadge nome={n.categoria_id?.nome??'—'}/>
+                <article key={nid} className="not-card">
+                  <div className="not-card-head">
+                    <div className="not-card-title">{n.titulo}</div>
+                    <details className="not-more">
+                      <summary aria-label="Mais ações" title="Mais ações">•••</summary>
+                      <div className="not-more-menu">
+                        {st==='publicado'&&<Link to={`/noticia/${nid}`} target="_blank">{Ico.eye}<span>Ver no site</span></Link>}
+                        <button onClick={()=>!emD&&!emT&&setConfirm({aberto:true,noticia:n,carregando:false})} disabled={emD||emT} className="danger">{emD?Ico.spinSm:Ico.trash}<span>Excluir</span></button>
+                      </div>
+                    </details>
                   </div>
-                  <div style={{fontSize:11,color:'var(--adm-muted)',marginBottom:8}}>
-                    {formatarData(n.criado_em)} · {(n.views||0).toLocaleString('pt-BR')} views
+                  <div className="not-card-meta">
+                    <StatusBadge status={st}/>
+                    {categoria&&<CategoriaBadge nome={categoria}/>} 
+                    <span>{formatarData(n.criado_em)}</span>
+                    <span>•</span>
+                    <span>{(n.views||0).toLocaleString('pt-BR')} views</span>
                   </div>
-                  <div style={{display:'flex',gap:6}}>
-                    {/* Toggle */}
-                    <button onClick={()=>!emT&&!emD&&togglePublicacao(n)} disabled={emT||emD}
-                      className="adm-btn adm-btn-sm"
-                      style={{flex:1,justifyContent:'center',background:tcfg.bg,color:tcfg.color,border:`1px solid ${tcfg.border}`,fontWeight:600}}>
-                      {emT?Ico.spinSm:tcfg.icon}
-                      <span style={{marginLeft:5}}>{emT?'…':tcfg.label}</span>
-                    </button>
-                    {/* Editar */}
-                    <Link to={`/admin/editar/${nid}`} className="adm-btn adm-btn-secondary adm-btn-sm"
-                      style={{flex:1,justifyContent:'center'}}>
-                      {Ico.edit}<span style={{marginLeft:5}}>Editar</span>
-                    </Link>
-                    {/* Excluir */}
-                    <button onClick={()=>!emD&&!emT&&setConfirm({aberto:true,noticia:n,carregando:false})}
-                      disabled={emD||emT} className="adm-btn adm-btn-danger adm-btn-sm" aria-label="Excluir">
-                      {emD?Ico.spinSm:Ico.trash}
-                    </button>
+                  <div className="not-card-actions">
+                    <Link to={`/admin/editar/${nid}`} className="adm-btn adm-btn-secondary adm-btn-sm not-edit-btn">{Ico.edit}<span>Editar</span></Link>
+                    <button onClick={()=>!emT&&!emD&&togglePublicacao(n)} disabled={emT||emD} className="adm-btn adm-btn-sm not-toggle-btn"
+                      style={{background:tcfg.bg,color:tcfg.color,border:`1px solid ${tcfg.border}`}}>{emT?Ico.spinSm:tcfg.icon}<span>{emT?'Aguarde…':tcfg.label}</span></button>
                   </div>
-                </div>
+                </article>
               )
             })}
           </div>
 
-          {/* Paginação */}
           {paginas>1&&(
-            <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:8,padding:'14px 0'}}>
+            <div className="not-pagination">
               <button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>← Anterior</button>
-              <span style={{fontSize:12,color:'var(--adm-muted)'}}>{page} / {paginas} — {total} notícias</span>
+              <span>{page} / {paginas}</span>
               <button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>setPage(p=>Math.min(paginas,p+1))} disabled={page===paginas}>Próxima →</button>
             </div>
           )}
@@ -689,70 +640,82 @@ function AbaNoticia() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ABAS + COMPONENTE PRINCIPAL
+//  COMPONENTE PRINCIPAL
 // ═══════════════════════════════════════════════════════════════
-const ABAS = [
-  {id:'noticias',   label:'Notícias',   icon:Ico.newspaper},
-  {id:'categorias', label:'Categorias', icon:Ico.tag},
-  {id:'fontes',     label:'Fontes',     icon:Ico.globe},
-]
-
 export default function AdminNoticias() {
-  const [abaAtiva, setAbaAtiva] = useState('noticias')
-
   return (
     <>
       <style>{`
         @keyframes not-spin { to { transform: rotate(360deg) } }
 
-        /* Tabela: desktop | Cards: mobile */
-        .not-table-wrap { display: block; }
-        .not-cards      { display: none; flex-direction: column; gap: 8px; padding: 10px 12px; }
+        .not-toolbar {
+          margin-bottom: 14px;
+          padding: 12px;
+          background: var(--adm-surface2);
+          border: 1px solid var(--adm-border);
+          border-radius: 14px;
+        }
+        .not-toolbar-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+        .not-result-count { font-size:13px; font-weight:700; color:var(--adm-text); }
+        .not-result-hint { margin-top:2px; font-size:11px; color:var(--adm-muted); }
+        .not-filter-grid { display:grid; grid-template-columns:minmax(220px,1fr) 160px 210px; gap:8px; }
+        .not-filter { width:100%; min-width:0; }
+        .not-table-wrap { display:block; }
+        .not-cards { display:none; }
+        .not-pagination { display:flex; justify-content:center; align-items:center; gap:8px; padding:14px 0; }
+        .not-pagination span { font-size:12px; color:var(--adm-muted); }
+
+        @media (hover:hover) {
+          .not-row-actions { opacity:0; transition:opacity .15s; }
+          .adm-table tbody tr:hover .not-row-actions { opacity:1; }
+        }
+
         @media (max-width: 640px) {
-          .not-table-wrap { display: none !important; }
-          .not-cards      { display: flex !important; }
-        }
+          .adm-page-header { align-items:flex-start; gap:10px; }
+          .adm-page-header .adm-btn-primary { flex:0 0 auto; }
+          .not-toolbar { margin:0 0 10px; padding:10px; border-radius:12px; }
+          .not-toolbar-top { margin-bottom:8px; }
+          .not-result-hint { display:none; }
+          .not-filter-grid { grid-template-columns:1fr 1fr; gap:7px; }
+          .not-search { grid-column:1 / -1; min-width:0 !important; }
+          .not-filter { font-size:12px; }
+          .not-table-wrap { display:none !important; }
+          .not-cards { display:flex !important; flex-direction:column; gap:8px; }
 
-        /* Ações inline: apenas visíveis ao hover no desktop */
-        @media (hover: hover) {
-          .not-row-actions { opacity: 0; transition: opacity .15s; }
-          .adm-table tbody tr:hover .not-row-actions { opacity: 1; }
-        }
+          .not-card {
+            position:relative;
+            background:var(--adm-surface2);
+            border:1px solid var(--adm-border);
+            border-radius:14px;
+            padding:13px;
+          }
+          .not-card-head { display:flex; align-items:flex-start; gap:8px; }
+          .not-card-title { flex:1; min-width:0; font-size:14px; line-height:1.38; font-weight:700; color:var(--adm-text); }
+          .not-card-meta { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-top:8px; font-size:11px; color:var(--adm-muted); }
+          .not-card-meta .adm-badge { font-size:10px; padding:2px 7px; }
+          .not-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }
+          .not-card-actions .adm-btn { justify-content:center; min-height:36px; }
 
-        /*\n         * .adm-tabs já tem overflow-x:auto e scrollbar-width:none nativamente.\n         */
+          .not-more { position:relative; flex:0 0 auto; }
+          .not-more summary { list-style:none; cursor:pointer; width:32px; height:30px; display:flex; align-items:center; justify-content:center; border:1px solid var(--adm-border); border-radius:9px; color:var(--adm-muted); font-size:15px; font-weight:800; user-select:none; }
+          .not-more summary::-webkit-details-marker { display:none; }
+          .not-more-menu { position:absolute; z-index:20; right:0; top:36px; min-width:150px; padding:5px; background:var(--adm-surface); border:1px solid var(--adm-border); border-radius:10px; box-shadow:0 10px 28px rgba(0,0,0,.14); }
+          .not-more-menu a,.not-more-menu button { width:100%; display:flex; align-items:center; gap:8px; padding:9px 10px; border:0; background:transparent; color:var(--adm-text); text-decoration:none; font:inherit; font-size:12px; border-radius:7px; cursor:pointer; }
+          .not-more-menu a:hover,.not-more-menu button:hover { background:var(--adm-surface2); }
+          .not-more-menu .danger { color:var(--adm-red); }
+        }
       `}</style>
 
       <div style={{maxWidth:960,margin:'0 auto'}}>
-
-        {/* Cabeçalho — padrão adm-page-header */}
         <div className="adm-page-header">
           <div>
-            <div className="adm-page-title" style={{display:'flex',alignItems:'center',gap:8}}>
-              {Ico.newspaper} Notícias
-            </div>
-            <div className="adm-page-sub">Gerencie notícias, categorias e fontes do portal.</div>
+            <div className="adm-page-title" style={{display:'flex',alignItems:'center',gap:8}}>{Ico.newspaper} Notícias</div>
+            <div className="adm-page-sub">Gerencie o conteúdo publicado no portal.</div>
           </div>
-          {abaAtiva==='noticias'&&(
-            <Link to="/admin/nova-noticia" className="adm-btn adm-btn-primary">
-              {Ico.plus} Nova notícia
-            </Link>
-          )}
+          <Link to="/admin/nova-noticia" className="adm-btn adm-btn-primary">{Ico.plus} Nova notícia</Link>
         </div>
 
-        {/* Barra de abas */}
-        <div className="adm-tabs">
-          {ABAS.map(aba=>(
-            <button key={aba.id} onClick={()=>setAbaAtiva(aba.id)}
-              className={`adm-tab-btn${abaAtiva===aba.id?' active':''}`}>
-              {aba.icon} {aba.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Conteúdo */}
-        {abaAtiva==='noticias'   && <AbaNoticia/>}
-        {abaAtiva==='categorias' && <AbaCategorias/>}
-        {abaAtiva==='fontes'     && <AbaFontes/>}
+        <AbaNoticia/>
       </div>
     </>
   )

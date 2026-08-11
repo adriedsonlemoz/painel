@@ -89,10 +89,17 @@ const noticiaSchema = new mongoose.Schema(
       default: [],
     },
 
-    imagem_legenda: {
-      type:    String,
-      default: '',
-    },
+    imagem_legenda: { type: String, default: '' },
+    imagem_alt: { type: String, default: '', maxlength: 220 },
+    imagem_credito: { type: String, default: '', maxlength: 220 },
+    imagem_fonte_url: { type: String, default: null },
+    imagem_storage: { type: String, enum: ['r2', 'cloudinary', 'gridfs', 'external', null], default: null },
+    imagem_key: { type: String, default: null },
+    imagem_mime: { type: String, default: null },
+    imagem_tamanho: { type: Number, default: null },
+    imagem_largura: { type: Number, default: null },
+    imagem_altura: { type: Number, default: null },
+    imagem_nome_original: { type: String, default: null },
 
     /** Contador de visualizações únicas por IP (#5) */
     views: {

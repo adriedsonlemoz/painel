@@ -158,10 +158,26 @@ export function buildSort(ordem, q) {
  * @param {object} body — req.body
  * @returns {object}
  */
+function storageOuNull(storage, publicId, url) {
+  if (storage) return storage
+  const id = String(publicId || '')
+  if (id.startsWith('r2:')) return 'r2'
+  if (id.startsWith('gridfs:')) return 'gridfs'
+  if (id) return 'cloudinary'
+  return url ? 'external' : null
+}
+
+function numeroOuNull(valor) {
+  if (valor === null || valor === undefined || valor === '') return null
+  const n = Number(valor)
+  return Number.isFinite(n) ? n : null
+}
+
 export function extrairCampos(body) {
   const {
     titulo, resumo, conteudo, autor, tags, seo_titulo, seo_descricao,
-    imagem_url, imagem_public_id, imagem_legenda,
+    imagem_url, imagem_public_id, imagem_legenda, imagem_alt, imagem_credito, imagem_fonte_url,
+    imagem_storage, imagem_key, imagem_mime, imagem_tamanho, imagem_largura, imagem_altura, imagem_nome_original,
     categoria_id, fonte_id, destaque, urgente, urgente_ate,
     galeria, status, agendado_para,
   } = body
@@ -177,6 +193,16 @@ export function extrairCampos(body) {
     imagem_url:       imagem_url       || null,
     imagem_public_id: imagem_public_id || null,
     imagem_legenda:   imagem_legenda   || '',
+    imagem_alt:       imagem_alt       || '',
+    imagem_credito:   imagem_credito   || '',
+    imagem_fonte_url: imagem_fonte_url?.trim() || null,
+    imagem_storage:   storageOuNull(imagem_storage, imagem_public_id, imagem_url),
+    imagem_key:       imagem_key       || null,
+    imagem_mime:      imagem_mime      || null,
+    imagem_tamanho:   numeroOuNull(imagem_tamanho),
+    imagem_largura:   numeroOuNull(imagem_largura),
+    imagem_altura:    numeroOuNull(imagem_altura),
+    imagem_nome_original: imagem_nome_original || null,
     destaque:         Boolean(destaque),
     urgente:          Boolean(urgente),
     urgente_ate:      urgente_ate ? new Date(urgente_ate) : null,

@@ -110,6 +110,7 @@ async function seed() {
 
   // ── Categorias ───────────────────────────────────────
   const cats = [
+    { nome: 'Geral',              slug: 'geral',        cor: '#607D8B' },
     { nome: 'Cidades',            slug: 'cidades',      cor: '#1B5E3B' },
     { nome: 'História e Tradição',slug: 'historia',     cor: '#795548' },
     { nome: 'Belezas Naturais',   slug: 'natureza',     cor: '#2E7D32' },

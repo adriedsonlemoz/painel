@@ -724,3 +724,27 @@ select.adm-input { max-width: 100%; }
   .admin-shell .mongo-doc-table td:nth-child(2)::before { content: 'Campos'; }
   .admin-shell .mongo-doc-table td:nth-child(3)::before { content: 'Ações'; }
 }
+
+/* GitHub — Central do repositório: grade compacta de 3 colunas no celular. */
+@media (max-width: 520px) {
+  .admin-shell .gh-command-deck { padding-left: 10px !important; padding-right: 10px !important; }
+  .admin-shell .gh-command-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 7px !important; }
+  .admin-shell .gh-command-card {
+    min-width: 0 !important;
+    min-height: 118px !important;
+    padding: 10px 5px 9px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 7px !important;
+    text-align: center !important;
+  }
+  .admin-shell .gh-command-card-icon {
+    width: 42px !important; height: 42px !important; flex: 0 0 42px !important;
+    border-radius: 50% !important; font-size: 18px !important;
+  }
+  .admin-shell .gh-command-card-copy { width: 100%; align-items: center !important; gap: 3px !important; }
+  .admin-shell .gh-command-card-copy b { width: 100%; font-size: 11px !important; line-height: 1.15 !important; text-align: center; }
+  .admin-shell .gh-command-card-copy small { width: 100%; font-size: 8.5px !important; line-height: 1.25 !important; text-align: center; }
+}

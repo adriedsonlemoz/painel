@@ -7,9 +7,11 @@ import mongoose from 'mongoose'
 import app from '../server.js'
 import Noticia from '../models/Noticia.js'
 import Usuario from '../models/Usuario.js'
+import Categoria from '../models/Categoria.js'
 
 const MONGO_URI = process.env.MONGO_URI_TEST || process.env.MONGO_URI
 let authCookie
+let categoriaId
 
 beforeAll(async () => {
   if (mongoose.connection.readyState === 0) await mongoose.connect(MONGO_URI)
@@ -17,11 +19,18 @@ beforeAll(async () => {
   await Usuario.create({ email, senha: 'senha123', nome: 'Admin Teste' })
   const login = await request(app).post('/api/auth/login').send({ email, senha: 'senha123' })
   authCookie = login.headers['set-cookie']
+  const categoria = await Categoria.findOneAndUpdate(
+    { slug: 'teste-noticias' },
+    { nome: 'Teste Notícias', slug: 'teste-noticias', cor: '#607D8B' },
+    { upsert: true, new: true }
+  )
+  categoriaId = categoria._id.toString()
 })
 
 afterAll(async () => {
   await Noticia.deleteMany({ titulo: /\[TESTE\]/ })
   await Usuario.deleteMany({ email: /noticias_test_.*@alsistemas\.test/ })
+  await Categoria.deleteOne({ slug: 'teste-noticias' })
   await mongoose.connection.close()
 })
 
@@ -158,7 +167,7 @@ describe('POST /api/noticias', () => {
     const res = await request(app)
       .post('/api/noticias')
       .set('Cookie', authCookie)
-      .send({ titulo: '[TESTE] Com Galeria', conteudo: 'conteúdo galeria', galeria })
+      .send({ titulo: '[TESTE] Com Galeria', conteudo: 'conteúdo galeria', categoria_id: categoriaId, galeria })
     expect(res.status).toBe(201)
     expect(res.body.galeria).toHaveLength(2)
   })
@@ -185,7 +194,7 @@ describe('PUT /api/noticias/:id', () => {
     const res = await request(app)
       .put(`/api/noticias/${noticiaId}`)
       .set('Cookie', authCookie)
-      .send({ titulo: '[TESTE] Editado', conteudo: 'depois' })
+      .send({ titulo: '[TESTE] Editado', conteudo: 'depois', categoria_id: categoriaId })
     expect(res.status).toBe(200)
     expect(res.body.titulo).toBe('[TESTE] Editado')
   })
@@ -194,7 +203,7 @@ describe('PUT /api/noticias/:id', () => {
     const res = await request(app)
       .put('/api/noticias/000000000000000000000000')
       .set('Cookie', authCookie)
-      .send({ titulo: 'x', conteudo: 'y' })
+      .send({ titulo: 'x', conteudo: 'y', categoria_id: categoriaId })
     expect(res.status).toBe(404)
   })
 })

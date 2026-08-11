@@ -297,15 +297,20 @@ export default function NoticiaDetalhe() {
                style={{ maxHeight: '480px' }}>
             <img
               src={noticia.imagem_url}
-              alt={noticia.imagem_legenda || noticia.titulo}
+              alt={noticia.imagem_alt || noticia.imagem_legenda || noticia.titulo}
               className="w-full h-full object-cover"
               style={{ maxHeight: '480px' }}
             />
           </div>
-          {noticia.imagem_legenda && (
+          {(noticia.imagem_legenda || noticia.imagem_credito) && (
             <figcaption className="mt-2 text-center text-xs text-gray-400
                                    font-grotesk leading-relaxed px-2">
-              {noticia.imagem_legenda}
+              {noticia.imagem_legenda && <span>{noticia.imagem_legenda}</span>}
+              {noticia.imagem_legenda && noticia.imagem_credito && <span> · </span>}
+              {noticia.imagem_credito && (noticia.imagem_fonte_url
+                ? <a href={noticia.imagem_fonte_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-brand-500">{noticia.imagem_credito}</a>
+                : <span>{noticia.imagem_credito}</span>
+              )}
             </figcaption>
           )}
         </figure>

@@ -32,9 +32,15 @@ export const regraNoticia = [
     .isLength({ max: 300 }).withMessage('Título deve ter no máximo 300 caracteres'),
   body('conteudo')
     .notEmpty().withMessage('Conteúdo obrigatório'),
+  body('categoria_id')
+    .notEmpty().withMessage('Categoria obrigatória')
+    .isMongoId().withMessage('Categoria inválida'),
   body('imagem_url')
     .optional({ nullable: true })
     .isURL().withMessage('URL da imagem inválida'),
+  body('imagem_fonte_url')
+    .optional({ nullable: true, checkFalsy: true })
+    .isURL().withMessage('URL da fonte da imagem inválida'),
   body('destaque')
     .optional()
     .isBoolean().withMessage('Destaque deve ser booleano')

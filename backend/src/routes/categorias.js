@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import Categoria from '../models/Categoria.js'
+import Noticia from '../models/Noticia.js'
+import RssFonte from '../models/RssFonte.js'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { regraCategoria, validar } from '../middleware/validacoes.js'
@@ -49,6 +51,16 @@ router.put('/:id', autenticar, verificarPermissao('categorias.gerenciar'), regra
 // DELETE /api/categorias/:id — autenticado
 router.delete('/:id', autenticar, verificarPermissao('categorias.gerenciar'), async (req, res, next) => {
   try {
+    const [noticias, feeds] = await Promise.all([
+      Noticia.countDocuments({ categoria_id: req.params.id }),
+      RssFonte.countDocuments({ categoria_id: req.params.id }),
+    ])
+    if (noticias || feeds) {
+      return res.status(409).json({
+        erro: `Categoria em uso por ${noticias} notícia(s) e ${feeds} fonte(s) RSS. Reclassifique o conteúdo antes de excluir.`,
+        uso: { noticias, feeds },
+      })
+    }
     const categoria = await Categoria.findByIdAndDelete(req.params.id)
     if (!categoria) return res.status(404).json({ erro: 'Categoria não encontrada' })
     await cacheDel(CACHE_KEY)

@@ -4,6 +4,7 @@ import { autenticar } from '../middleware/auth.js'
 import mongoose from 'mongoose'
 import { upload, uploadMidia, gridfsMediaBucket } from '../middleware/upload.js'
 import { cloudinary } from '../config/index.js'
+import { uploadNewsImage, getR2Object, deleteR2ByPublicId } from '../services/r2MediaStorage.js'
 
 const router = Router()
 
@@ -14,6 +15,52 @@ const uploadLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos uploads. Tente novamente em 10 minutos.' },
+})
+
+
+// POST /api/upload/noticias — capa de notícia armazenada no Cloudflare R2.
+// O bucket e as credenciais vêm do módulo central Integrações e APIs.
+router.post('/noticias', autenticar, uploadLimiter, upload.single('imagem'), async (req, res, next) => {
+  if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
+  try {
+    const permitido = new Set(['image/jpeg', 'image/png', 'image/webp'])
+    if (!permitido.has(String(req.file.mimetype || '').toLowerCase())) {
+      return res.status(415).json({ erro: 'Use JPG, PNG ou WebP para a imagem de capa.' })
+    }
+    const resultado = await uploadNewsImage(req.file)
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()
+    const proxyPath = `/api/upload/r2/${encodeURIComponent(resultado.bucket)}/${resultado.key.split('/').map(encodeURIComponent).join('/')}`
+    const url = resultado.public_url || `${proto}://${req.get('host')}${proxyPath}`
+    res.json({
+      url,
+      public_id: resultado.public_id,
+      storage: 'r2',
+      bucket: resultado.bucket,
+      key: resultado.key,
+      mime: resultado.mime,
+      size: resultado.size,
+      original_name: resultado.original_name,
+    })
+  } catch (err) { next(err) }
+})
+
+// GET /api/upload/r2/:bucket/* — proxy público de leitura.
+// Mantém as imagens do portal acessíveis mesmo quando o bucket R2 não usa r2.dev/domínio público.
+router.get('/r2/:bucket/:key(*)', async (req, res, next) => {
+  try {
+    const out = await getR2Object(req.params.bucket, req.params.key)
+    if (out.ContentType) res.setHeader('Content-Type', out.ContentType)
+    if (out.ContentLength != null) res.setHeader('Content-Length', String(out.ContentLength))
+    if (out.ETag) res.setHeader('ETag', out.ETag)
+    res.setHeader('Cache-Control', out.CacheControl || 'public, max-age=86400, stale-while-revalidate=604800')
+    if (out.Body?.pipe) return out.Body.on('error', next).pipe(res)
+    const bytes = await out.Body?.transformToByteArray?.()
+    if (bytes) return res.end(Buffer.from(bytes))
+    return res.status(404).end()
+  } catch (err) {
+    if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NoSuchKey') return res.status(404).end()
+    next(err)
+  }
 })
 
 // POST /api/upload — autenticado
@@ -54,6 +101,10 @@ router.delete('/', autenticar, async (req, res, next) => {
   try {
     const { public_id } = req.body
     if (!public_id) return res.status(400).json({ erro: 'public_id obrigatório' })
+    if(String(public_id).startsWith('r2:')) {
+      await deleteR2ByPublicId(public_id)
+      return res.json({ mensagem:'Imagem removida do Cloudflare R2', storage:'r2' })
+    }
     if(String(public_id).startsWith('gridfs:')) {
       const id=String(public_id).slice(7)
       if(!mongoose.isValidObjectId(id)) return res.status(400).json({erro:'ID GridFS inválido.'})

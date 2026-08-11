@@ -346,10 +346,18 @@ router.post('/ai/chat/stream', autenticar, async (req,res) => {
 ═══════════════════════════════════════════════════════════════ */
 router.post('/ai/editorial', autenticar, async (req,res) => {
   try {
-    const { titulo='', resumo='', conteudo='', acao='analisar', provedor } = req.body || {}
+    const { titulo='', resumo='', conteudo='', acao='analisar', provedor, categoria_atual='', fonte='' } = req.body || {}
     if(!String(titulo||conteudo).trim()) return res.status(400).json({ok:false,erro:'Informe título ou conteúdo para a análise editorial.'})
-    const categorias=(await Categoria.find().sort({nome:1}).select('nome').lean()).map(c=>c.nome).filter(Boolean)
-    const resultado=await analisarNoticiaEditorial({titulo,resumo,conteudo,categorias,acao,provedor})
+    let categorias=(await Categoria.find().sort({nome:1}).select('nome').lean()).map(c=>c.nome).filter(Boolean)
+    if (!categorias.length) {
+      const geral = await Categoria.findOneAndUpdate(
+        { slug:'geral' },
+        { $setOnInsert:{ nome:'Geral', slug:'geral', cor:'#607D8B', descricao:'Notícias gerais do portal.' } },
+        { upsert:true, new:true, setDefaultsOnInsert:true }
+      )
+      categorias=[geral.nome]
+    }
+    const resultado=await analisarNoticiaEditorial({titulo,resumo,conteudo,categorias,acao,provedor,categoriaAtual:categoria_atual,fonte})
     await AuditLog.create({admin_id:req.usuario?._id,admin_email:req.usuario?.email,acao:'consultar',recurso:'ai_editorial',recurso_id:acao,payload:{acao,provedor:resultado?._meta?.provedor,modelo:resultado?._meta?.modelo},ip:req.ip,request_id:req.requestId||null}).catch(()=>{})
     res.json({ok:true,resultado,aviso:'Sugestão de IA: revise os fatos antes de aplicar ou publicar.'})
   } catch(err) { res.status(err.status||500).json({ok:false,erro:err.message}) }
