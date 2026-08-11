@@ -283,3 +283,8 @@ O backend também verifica automaticamente jobs abandonados a cada 30 segundos e
 `cd backend && npm run test:update`
 
 O pré-check valida espaço, permissões, Node.js, dependências, migrações, MongoDB e integridade do staging. ZIPs também passam por limites contra traversal/zip bomb. Por padrão são mantidos 3 snapshots (`AL_UPDATE_SNAPSHOT_KEEP`) e 5 stagings preparados (`AL_UPDATE_STAGE_KEEP`).
+
+## AL Sistemas 1.0.91 — GitHub em popups e publicação Wizard
+- O gerenciador GitHub mantém a lista principal compacta; seções do repositório abrem em modal e não expandem o drawer.
+- Publicar abre um assistente em etapas: ZIP → repositório → branch/pasta → segurança/R2 → vínculos cloud → revisão.
+- O GitHub continua como destino principal; Vercel/Render aparecem somente quando vinculados ao repositório.

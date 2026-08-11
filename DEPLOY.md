@@ -235,3 +235,6 @@ AL_UPDATE_HEALTH_URL=http://127.0.0.1:3001/api/health/live
 `AL_UPDATE_RESTART_STRATEGY` aceita `none`, `pm2` ou `systemd`. Em `systemd`, a tarefa de atualização é iniciada com `systemd-run` para permanecer fora da unidade principal durante o reinício. O usuário do serviço precisa de permissão para executar o restart configurado.
 
 Dados persistentes como `.env`, `backend/.al-sistemas/`, uploads, backups e logs não são substituídos. Snapshots de versão ficam em `backend/.al-sistemas/updates/snapshots/` e o histórico em `backend/.al-sistemas/updates/history.json`.
+
+### GitHub / publicação Wizard (1.0.91)
+- A publicação GitHub-first agora usa wizard modal e preserva o fluxo cloud R2/GitHub/Vercel/Render introduzido nas versões anteriores.

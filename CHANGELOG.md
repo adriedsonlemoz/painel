@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.91
+- GitHub: todas as opções da Ponte de Comando passam a abrir em popup/modal próprio; nenhum card de Visão geral, Organização, Análise, Arquivos, Commits, Releases, Artefatos, Workflows, Secrets ou manutenção injeta conteúdo abaixo da grade.
+- A grade de comandos permanece visível e compacta, com 3 cards por linha no mobile. Ao fechar uma seção, o usuário volta à mesma Ponte de Comando.
+- O botão/card Publicar deixa de abrir uma página comprida e passa a iniciar um Wizard modal interativo.
+- Wizard de publicação dividido em 6 etapas: selecionar ZIP, escolher repositório, definir branch/pasta, opções de substituição e snapshot R2, conferir Vercel/Render e revisão final.
+- Nenhum commit é criado antes da tela final de revisão; o destino exato repositório → branch → pasta permanece visível antes da confirmação.
+- Publicação continua independente do módulo Projetos e reutiliza exclusivamente as credenciais de Integrações e APIs.
+- R2 continua opcional para snapshots; Vercel/Render continuam opcionais e só aparecem quando houver vínculo detectado com o GitHub escolhido.
+- Após o commit, o Wizard apresenta resultado, SHA, snapshot R2 e ações de deploy Render quando disponíveis; projetos Vercel ligados por Git continuam usando o fluxo de deploy do commit.
+- Termux/VPS e o modo local legado permanecem suportados sem alteração das regras de publicação existentes fora do módulo GitHub.
+
 ## 1.0.90
 - Autenticação Vercel + Render deixa de depender exclusivamente de cookie cross-site: o cookie HttpOnly continua sendo tentado e, somente quando frontend e backend estão em origens diferentes, o login recebe um Bearer de sessão temporário como fallback.
 - No login cloud, o frontend testa primeiro se o cookie cross-site foi aceito. Se funcionar, descarta o Bearer e continua no cookie HttpOnly; se o navegador bloquear o cookie, mantém o Bearer apenas no sessionStorage da aba, com validade reduzida (12h por padrão). Termux/VPS nunca recebem esse fallback.

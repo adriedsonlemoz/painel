@@ -189,6 +189,8 @@ function RunBadge({ status, conclusao }) {
 ═══════════════════════════════════════════════════════════ */
 function PainelDetalhes({ repo, onFechar, toastShow }) {
   const [aba, setAba] = useState('visao')
+  const [secaoModal, setSecaoModal] = useState(null)
+  const [publicarAberto, setPublicarAberto] = useState(false)
   const [meta, setMeta] = useState(null)
   const [readme, setReadme] = useState(null)
   const [commits, setCommits] = useState(null)
@@ -253,7 +255,12 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
 
   useEffect(() => { carregarAba(aba) }, [aba])
 
-  const mudarAba = (a) => { setAba(a); setErroAba(null) }
+  const mudarAba = (a) => {
+    setErroAba(null)
+    if (a === 'push') { setPublicarAberto(true); return }
+    setAba(a)
+    setSecaoModal(a)
+  }
 
   async function salvarMeta() {
     setSalvandoMeta(true)
@@ -357,7 +364,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               </svg>
               {baixandoProjeto ? 'Gerando…' : 'Baixar projeto'}
             </button>
-            <DSBtn variant="primary" size="sm" onClick={() => mudarAba('push')}>↑ Publicar</DSBtn>
+            <DSBtn variant="primary" size="sm" onClick={() => setPublicarAberto(true)}>↑ Publicar</DSBtn>
             <DSBtn variant="ghost" size="icon" onClick={fecharPainel} aria-label="Fechar repositório">✕</DSBtn>
           </div>
         </div>
@@ -387,8 +394,14 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
           <style>{`@media(max-width:720px){.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}.gh-command-deck{position:relative!important;top:auto!important}.gh-repo-head{position:relative!important;top:auto!important}.gh-file-row{grid-template-columns:minmax(0,1fr)!important}.gh-file-actions{justify-content:flex-end!important}.gh-clean-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}}`}</style>
         </div>
 
-        {/* Conteúdo */}
-        <div style={{ padding: SPACE.xl2, flex: 1 }}>
+        <div className="gh-command-empty" style={{ padding: SPACE.xl2, flex: 1 }}>
+          <div style={{border:`1px dashed ${C.border}`,borderRadius:RADIUS.lg,padding:SPACE.xl2,textAlign:'center',color:C.muted}}>
+            <b style={{display:'block',fontSize:FONT.base,color:C.text,marginBottom:4}}>Escolha uma seção</b>
+            <span style={{fontSize:FONT.sm}}>Cada card abre suas informações em uma janela própria, sem aumentar esta página.</span>
+          </div>
+        </div>
+
+        <DSModal open={Boolean(secaoModal)} onClose={() => setSecaoModal(null)} title={`${abaAtual.grupo} · ${abaAtual.label}`} size="xl">
           {loadingAba ? (
             <div style={{ textAlign: 'center', padding: `${SPACE.xl5}px 0`, color: C.muted, fontSize: FONT.base }}>Carregando...</div>
           ) : erroAba ? (
@@ -405,10 +418,13 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               {aba === 'secrets'   && <AbaSecrets secrets={secrets} owner={owner} repo={repoNome} onRefresh={() => { setSecrets(null); carregarAba('secrets') }} toastShow={toastShow} />}
               {aba === 'workflows' && <AbaWorkflows workflows={workflows} owner={owner} repo={repoNome} toastShow={toastShow} />}
               {aba === 'delete'    && <AbaDelete repo={repo} repoNome={repoNome} deleteStep={deleteStep} setDeleteStep={setDeleteStep} deleteInput={deleteInput} setDeleteInput={setDeleteInput} onConfirmar={confirmarDelete} deletandoRepo={deletandoRepo} />}
-              {aba === 'push'      && <AbaPublicar repo={repoDetalhes} owner={owner} repoNome={repoNome} meta={meta} toastShow={toastShow} onMetaAtualizado={setMeta} />}
             </>
           )}
-        </div>
+        </DSModal>
+
+        <DSModal open={publicarAberto} onClose={() => setPublicarAberto(false)} title="Publicar projeto" size="xl">
+          <AbaPublicar repo={repoDetalhes} owner={owner} repoNome={repoNome} meta={meta} toastShow={toastShow} onMetaAtualizado={setMeta} onClose={() => setPublicarAberto(false)} />
+        </DSModal>
       </div>
     </div>
   )
@@ -958,7 +974,7 @@ function AbaAnalysis({ analysis: an }) {
 /* ── ABA: Excluir ────────────────────────────────────────── */
 
 /* ── ABA: Push (local → GitHub) ──────────────────────────── */
-function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado }) {
+function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado, onClose }) {
   const repoAtual = repo.nomeCompleto || `${owner}/${repoNome}`
   const [repos, setRepos] = useState([])
   const [repository, setRepository] = useState(meta?.publicacao?.repository || repoAtual)
@@ -971,9 +987,9 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado 
   const [checking, setChecking] = useState(false)
   const [deployment, setDeployment] = useState(null)
   const [publicando, setPublicando] = useState(false)
-  const [confirmarPublicacao, setConfirmarPublicacao] = useState(false)
   const [resultado, setResultado] = useState(null)
   const [deployingRender, setDeployingRender] = useState({})
+  const [passo, setPasso] = useState(1)
 
   useEffect(() => {
     githubService.repos({ per_page: 100, sort: 'updated' })
@@ -982,32 +998,35 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado 
   }, [])
 
   const conferir = useCallback(async () => {
-    if (!repository || !branch) return
+    if (!repository || !branch) return null
     setChecking(true)
     try {
-      setDeployment(await updatesService.deploymentCheck(repository, branch))
+      const d = await updatesService.deploymentCheck(repository, branch)
+      setDeployment(d)
+      return d
     } catch (e) {
-      setDeployment({ erro: e.message || 'Não foi possível conferir os vínculos.' })
+      const d = { erro: e.message || 'Não foi possível conferir os vínculos.' }
+      setDeployment(d)
+      return d
     } finally { setChecking(false) }
   }, [repository, branch])
 
-  useEffect(() => {
-    const t = setTimeout(conferir, 450)
-    return () => clearTimeout(t)
-  }, [conferir])
-
   const limparPath = v => v.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\.{2}/g, '').replace(/\/+/g, '/')
   const destinoVisual = `${repository || 'repositório'} → ${branch || 'main'} → /${targetPath || ''}`
+  const totalPassos = 6
 
-  function solicitarPublicacao() {
-    if (!arquivo) return toastShow('Selecione o ZIP do projeto que será enviado ao GitHub.', 'erro')
-    if (!repository) return toastShow('Selecione o repositório de destino.', 'erro')
-    if (!branch) return toastShow('Informe a branch de destino.', 'erro')
-    setConfirmarPublicacao(true)
+  async function avancar() {
+    if (passo === 1 && !arquivo) return toastShow('Selecione o ZIP do projeto para continuar.', 'erro')
+    if (passo === 2 && !repository) return toastShow('Selecione o repositório de destino.', 'erro')
+    if (passo === 3 && !branch) return toastShow('Informe a branch de destino.', 'erro')
+    if (passo === 5) await conferir()
+    setPasso(p => Math.min(totalPassos, p + 1))
   }
 
+  function voltar() { setPasso(p => Math.max(1, p - 1)) }
+
   async function publicar() {
-    setConfirmarPublicacao(false)
+    if (!arquivo || !repository || !branch) return
     setPublicando(true); setResultado(null)
     try {
       const r = await githubService.publicarPacote(owner, repoNome, arquivo, {
@@ -1019,6 +1038,7 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado 
       const atualizado = await githubService.getMeta(repo.id).catch(() => null)
       if (atualizado) onMetaAtualizado?.(atualizado)
       await conferir()
+      setPasso(7)
     } catch (e) {
       toastShow(e.message || 'Não foi possível publicar o projeto.', 'erro')
     } finally { setPublicando(false) }
@@ -1035,93 +1055,97 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado 
     finally { setDeployingRender(p => ({ ...p, [service.id]: false })) }
   }
 
+  const etapas = [
+    ['Origem', 'ZIP do projeto'],
+    ['GitHub', 'Repositório'],
+    ['Destino', 'Branch e pasta'],
+    ['Opções', 'R2 e substituição'],
+    ['Cloud', 'Vercel e Render'],
+    ['Revisão', 'Confirmar publicação'],
+  ]
+
   return (
-    <div className="gh-publish-shell">
-      <div className="gh-publish-intro">
-        <div>
-          <div className="gh-kicker">Publicação GitHub-first</div>
-          <h3>Envie qualquer projeto sem depender da pasta Projetos</h3>
-          <p>O ZIP escolhido no aparelho vai diretamente para o repositório, branch e pasta conferidos abaixo. Vercel e Render entram apenas depois, quando houver vínculo com esse GitHub.</p>
+    <div className="gh-wizard-shell">
+      {passo <= totalPassos && <>
+        <div className="gh-wizard-progress" aria-label={`Etapa ${passo} de ${totalPassos}`}>
+          <div className="gh-wizard-progress-top"><b>Etapa {passo} de {totalPassos}</b><span>{etapas[passo-1][0]} · {etapas[passo-1][1]}</span></div>
+          <div className="gh-wizard-track"><span style={{width:`${(passo/totalPassos)*100}%`}} /></div>
+          <div className="gh-wizard-dots">{etapas.map((e,i)=><button type="button" key={e[0]} className={i+1===passo?'ativo':i+1<passo?'feito':''} onClick={()=>i+1<passo&&setPasso(i+1)} title={`${i+1}. ${e[0]}`}>{i+1}</button>)}</div>
         </div>
-        <div className="gh-destination-pill" title={destinoVisual}>{destinoVisual}</div>
-      </div>
 
-      <div className="gh-publish-grid">
-        <section className="gh-publish-card">
-          <div className="gh-card-section-head"><b>1. Destino no GitHub</b><span>credencial de Integrações e APIs</span></div>
-          <label className="gh-field">
-            <span>Repositório</span>
-            <select value={repository} onChange={e => { setRepository(e.target.value); setResultado(null) }} style={inp()}>
-              {!repos.some(r => r.nomeCompleto === repository) && repository && <option value={repository}>{repository}</option>}
-              {repos.map(r => <option key={r.id} value={r.nomeCompleto}>{r.nomeCompleto}{r.privado ? ' · privado' : ''}</option>)}
-            </select>
-          </label>
-          <div className="gh-two-fields">
-            <label className="gh-field"><span>Branch</span><input value={branch} onChange={e => { setBranch(e.target.value.replace(/\s/g,'')); setResultado(null) }} placeholder="main" style={inp()} /></label>
-            <label className="gh-field"><span>Pasta no GitHub</span><input value={targetPath} onChange={e => { setTargetPath(limparPath(e.target.value)); setResultado(null) }} placeholder="/ (raiz) ou frontend" style={inp()} /></label>
-          </div>
-          <div className="gh-path-preview"><span>Destino confirmado</span><code>{repository || '—'} / {branch || 'main'} / {targetPath || '(raiz)'}</code></div>
-          <label className="gh-check-row">
-            <input type="checkbox" checked={replacePath} onChange={e => setReplacePath(e.target.checked)} />
-            <span><b>Substituir somente a pasta escolhida</b><small>Remove arquivos antigos apenas de <code>/{targetPath || ''}</code>. Desmarcado = mesclar/atualizar sem apagar outros arquivos.</small></span>
-          </label>
-        </section>
-
-        <section className="gh-publish-card">
-          <div className="gh-card-section-head"><b>2. Origem</b><span>ZIP do projeto</span></div>
-          <label className="gh-upload-box">
+        {passo === 1 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>1</span><div><h3>Escolha o projeto</h3><p>O arquivo pode vir do celular, computador ou qualquer outro lugar. Ele não precisa existir no módulo Projetos.</p></div></div>
+          <label className="gh-upload-box gh-wizard-upload">
             <input type="file" accept=".zip,application/zip" onChange={e => { setArquivo(e.target.files?.[0] || null); setResultado(null) }} />
             <strong>{arquivo ? arquivo.name : 'Selecionar ZIP do projeto'}</strong>
-            <span>{arquivo ? `${fmtBytes(arquivo.size)} · pronto para enviar` : 'Pode vir do celular, PC ou qualquer outro projeto. Não precisa existir em Projetos.'}</span>
+            <span>{arquivo ? `${fmtBytes(arquivo.size)} · pronto para continuar` : 'Toque aqui e selecione o pacote que será enviado ao GitHub.'}</span>
           </label>
-          <label className="gh-field"><span>Mensagem do commit</span><input value={commitMessage} onChange={e => setCommitMessage(e.target.value.slice(0,240))} placeholder={arquivo ? `Publica ${arquivo.name}` : 'Descreva a alteração'} style={inp()} /></label>
-          <label className="gh-check-row">
-            <input type="checkbox" checked={snapshotR2} onChange={e => setSnapshotR2(e.target.checked)} />
-            <span><b>Guardar cópia no R2 antes do commit</b><small>Opcional. Usa o R2 já configurado em Integrações e APIs e salva em projects/.../snapshots.</small></span>
-          </label>
-          <DSBtn variant="primary" onClick={solicitarPublicacao} loading={publicando} disabled={publicando || !arquivo || !repository} style={{ width:'100%' }}>↑ Conferir e publicar</DSBtn>
-        </section>
-      </div>
+          <label className="gh-field"><span>Mensagem do commit</span><input value={commitMessage} onChange={e => setCommitMessage(e.target.value.slice(0,240))} placeholder={arquivo ? `Publica ${arquivo.name}` : 'Pode deixar em branco para gerar automaticamente'} style={inp()} /></label>
+        </section>}
 
-      <section className="gh-publish-card" style={{ marginTop:12 }}>
-        <div className="gh-card-section-head"><b>3. Vínculos cloud</b><DSBtn size="sm" variant="ghost" onClick={conferir} loading={checking}>↻ Conferir</DSBtn></div>
-        {checking && !deployment ? <div className="gh-muted-box">Conferindo Vercel e Render…</div> : deployment?.erro ? <div className="gh-error-box">{deployment.erro}</div> : deployment && <div className="gh-cloud-grid">
-          <div className="gh-cloud-card">
-            <div className="gh-cloud-title"><b>Vercel</b><DSBadge variant={deployment.vercel?.projects?.length ? 'green' : 'gray'}>{deployment.vercel?.projects?.length || 0} vínculo(s)</DSBadge></div>
-            {deployment.vercel?.projects?.length ? deployment.vercel.projects.map(p => <div className="gh-cloud-row" key={p.id}><span><b>{p.name}</b><small>{p.rootDirectory ? `Pasta: /${p.rootDirectory}` : 'Raiz do repositório'}{p.productionBranch ? ` · ${p.productionBranch}` : ''}</small></span><em>Git deploy</em></div>) : <p>{deployment.vercel?.message || 'Nenhum projeto Vercel detectado para este repositório.'}</p>}
-          </div>
-          <div className="gh-cloud-card">
-            <div className="gh-cloud-title"><b>Render</b><DSBadge variant={deployment.render?.services?.length ? 'green' : 'gray'}>{deployment.render?.services?.length || 0} vínculo(s)</DSBadge></div>
-            {deployment.render?.services?.length ? deployment.render.services.map(svc => <div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}{svc.autoDeploy ? ` · auto deploy: ${String(svc.autoDeploy)}` : ''}</small></span>{resultado?.commit?.commitSha ? <DSBtn size="sm" onClick={() => implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar</DSBtn> : <em>vinculado</em>}</div>) : <p>{deployment.render?.message || 'Nenhum serviço Render detectado para este repositório.'}</p>}
-          </div>
-        </div>}
-        <div className="gh-cloud-note">O GitHub é sempre o destino principal. Se houver integração Git na Vercel, o novo commit dispara o deploy automaticamente. Na Render, o AL permite iniciar o deploy do mesmo SHA quando necessário.</div>
-      </section>
+        {passo === 2 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>2</span><div><h3>Escolha o repositório</h3><p>A lista vem diretamente da conta GitHub configurada em Integrações e APIs.</p></div></div>
+          <label className="gh-field"><span>Repositório de destino</span><select value={repository} onChange={e => { setRepository(e.target.value); setDeployment(null); setResultado(null) }} style={inp()}>
+            {!repos.some(r => r.nomeCompleto === repository) && repository && <option value={repository}>{repository}</option>}
+            {repos.map(r => <option key={r.id} value={r.nomeCompleto}>{r.nomeCompleto}{r.privado ? ' · privado' : ''}</option>)}
+          </select></label>
+          <div className="gh-wizard-summary-line"><span>Conta / repositório</span><code>{repository || '—'}</code></div>
+        </section>}
 
-      <DSModal
-        open={confirmarPublicacao}
-        onClose={() => !publicando && setConfirmarPublicacao(false)}
-        title="Confirmar destino no GitHub"
-        size="sm"
-        footer={<>
-          <DSBtn onClick={() => setConfirmarPublicacao(false)} disabled={publicando}>Voltar</DSBtn>
-          <DSBtn variant="primary" onClick={publicar} loading={publicando}>Criar commit</DSBtn>
-        </>}
-      >
-        <div className="gh-publish-confirm">
-          <div><span>Arquivo</span><b>{arquivo?.name || '—'}</b><small>{arquivo ? fmtBytes(arquivo.size) : ''}</small></div>
-          <div><span>Repositório</span><b>{repository || '—'}</b></div>
-          <div><span>Branch</span><b>{branch || 'main'}</b></div>
-          <div><span>Pasta</span><b>/{targetPath || ''}</b><small>{targetPath ? 'Somente esta subpasta será o destino.' : 'A raiz inteira do repositório é o destino.'}</small></div>
-          <div><span>Modo</span><b>{replacePath ? 'Substituir o conteúdo do destino' : 'Mesclar / atualizar arquivos'}</b><small>{replacePath ? 'Exclusões ficam limitadas ao caminho escolhido.' : 'Arquivos que não estão no ZIP não serão removidos.'}</small></div>
-          <div><span>Snapshot R2</span><b>{snapshotR2 ? 'Sim, antes do commit' : 'Não'}</b></div>
+        {passo === 3 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>3</span><div><h3>Defina branch e pasta</h3><p>Confira exatamente em qual lugar do GitHub os arquivos serão gravados.</p></div></div>
+          <div className="gh-two-fields">
+            <label className="gh-field"><span>Branch</span><input value={branch} onChange={e => { setBranch(e.target.value.replace(/\s/g,'')); setDeployment(null); setResultado(null) }} placeholder="main" style={inp()} /></label>
+            <label className="gh-field"><span>Pasta no GitHub</span><input value={targetPath} onChange={e => { setTargetPath(limparPath(e.target.value)); setResultado(null) }} placeholder="/ (raiz), frontend, backend..." style={inp()} /></label>
+          </div>
+          <div className="gh-path-preview"><span>Destino exato</span><code>{destinoVisual}</code></div>
+        </section>}
+
+        {passo === 4 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>4</span><div><h3>Opções de segurança</h3><p>Escolha como o AL tratará o conteúdo existente e se deve guardar uma cópia no R2.</p></div></div>
+          <label className="gh-check-row gh-wizard-choice"><input type="checkbox" checked={replacePath} onChange={e => setReplacePath(e.target.checked)} /><span><b>Substituir somente a pasta escolhida</b><small>{targetPath ? `Somente /${targetPath} poderá ter arquivos antigos removidos.` : 'A raiz do repositório é o destino; use esta opção com atenção.'} Desmarcado = mesclar/atualizar sem apagar arquivos ausentes do ZIP.</small></span></label>
+          <label className="gh-check-row gh-wizard-choice"><input type="checkbox" checked={snapshotR2} onChange={e => setSnapshotR2(e.target.checked)} /><span><b>Guardar snapshot no R2 antes do commit</b><small>Opcional. Usa a configuração R2 existente em Integrações e APIs.</small></span></label>
+        </section>}
+
+        {passo === 5 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>5</span><div><h3>Conferir plataformas</h3><p>Vercel e Render são opcionais. O GitHub continua sendo o destino principal.</p></div></div>
+          <DSBtn size="sm" variant="ghost" onClick={conferir} loading={checking}>↻ Conferir novamente</DSBtn>
+          {checking && !deployment ? <div className="gh-muted-box">Conferindo vínculos do repositório…</div> : deployment?.erro ? <div className="gh-error-box">{deployment.erro}</div> : deployment ? <div className="gh-cloud-grid gh-wizard-cloud">
+            <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Vercel</b><DSBadge variant={deployment.vercel?.projects?.length ? 'green' : 'gray'}>{deployment.vercel?.projects?.length || 0}</DSBadge></div>{deployment.vercel?.projects?.length ? deployment.vercel.projects.map(p=><div className="gh-cloud-row" key={p.id}><span><b>{p.name}</b><small>{p.rootDirectory ? `/${p.rootDirectory}` : 'raiz'}{p.productionBranch ? ` · ${p.productionBranch}` : ''}</small></span><em>Git deploy</em></div>) : <p>Nenhum projeto Vercel vinculado.</p>}</div>
+            <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Render</b><DSBadge variant={deployment.render?.services?.length ? 'green' : 'gray'}>{deployment.render?.services?.length || 0}</DSBadge></div>{deployment.render?.services?.length ? deployment.render.services.map(s=><div className="gh-cloud-row" key={s.id}><span><b>{s.name || s.id}</b><small>{s.branch || branch}</small></span><em>vinculado</em></div>) : <p>Nenhum serviço Render vinculado.</p>}</div>
+          </div> : <div className="gh-muted-box">Toque em continuar para conferir automaticamente Vercel e Render.</div>}
+        </section>}
+
+        {passo === 6 && <section className="gh-wizard-step">
+          <div className="gh-wizard-step-head"><span>6</span><div><h3>Revise antes de publicar</h3><p>Nada será enviado antes da sua confirmação nesta tela.</p></div></div>
+          <div className="gh-publish-confirm gh-wizard-review">
+            <div><span>Arquivo</span><b>{arquivo?.name || '—'}</b><small>{arquivo ? fmtBytes(arquivo.size) : ''}</small></div>
+            <div><span>Repositório</span><b>{repository || '—'}</b></div>
+            <div><span>Branch</span><b>{branch || 'main'}</b></div>
+            <div><span>Pasta</span><b>/{targetPath || ''}</b><small>{targetPath ? 'Publicação limitada a esta pasta.' : 'Destino na raiz.'}</small></div>
+            <div><span>Modo</span><b>{replacePath ? 'Substituir destino' : 'Mesclar / atualizar'}</b></div>
+            <div><span>Snapshot R2</span><b>{snapshotR2 ? 'Sim' : 'Não'}</b></div>
+            <div><span>Vercel</span><b>{deployment?.vercel?.projects?.length || 0} vínculo(s)</b></div>
+            <div><span>Render</span><b>{deployment?.render?.services?.length || 0} vínculo(s)</b></div>
+          </div>
+          <div className="gh-wizard-warning">O commit será criado em <b>{repository}</b>, branch <b>{branch}</b>, pasta <b>/{targetPath || ''}</b>.</div>
+        </section>}
+
+        <div className="gh-wizard-actions">
+          <DSBtn onClick={passo === 1 ? onClose : voltar} disabled={publicando}>{passo === 1 ? 'Cancelar' : '← Voltar'}</DSBtn>
+          {passo < totalPassos ? <DSBtn variant="primary" onClick={avancar} loading={checking && passo===5}>Continuar →</DSBtn> : <DSBtn variant="primary" onClick={publicar} loading={publicando}>↑ Publicar no GitHub</DSBtn>}
         </div>
-      </DSModal>
+      </>}
 
-      {resultado && <section className="gh-publish-result">
-        <div><b>✓ Publicação concluída</b><span>{resultado.destino?.repository} → {resultado.destino?.branch} → {resultado.destino?.path || '/'}</span></div>
+      {passo === 7 && resultado && <section className="gh-wizard-success">
+        <div className="gh-wizard-success-icon">✓</div>
+        <h3>Publicação concluída</h3>
+        <p>{resultado.destino?.repository} → {resultado.destino?.branch} → {resultado.destino?.path || '/'}</p>
         <div className="gh-result-stats"><span><b>{resultado.pacote?.arquivos || 0}</b> arquivos</span><span><b>{resultado.commit?.commitSha?.slice(0,7) || '—'}</b> commit</span><span><b>{resultado.snapshot ? 'R2 ✓' : 'R2 —'}</b> snapshot</span></div>
         {resultado.commit?.commitUrl && <a href={resultado.commit.commitUrl} target="_blank" rel="noopener noreferrer">Ver commit no GitHub ↗</a>}
+        {deployment?.render?.services?.length > 0 && <div className="gh-wizard-deploys"><b>Render</b>{deployment.render.services.map(svc=><div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}</small></span><DSBtn size="sm" onClick={()=>implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar este commit</DSBtn></div>)}</div>}
+        {deployment?.vercel?.projects?.length > 0 && <div className="gh-cloud-note">Vercel: o commit foi enviado ao GitHub; projetos vinculados por Git podem iniciar o deploy automaticamente.</div>}
+        <div className="gh-wizard-actions"><DSBtn variant="primary" onClick={onClose}>Concluir</DSBtn></div>
       </section>}
     </div>
   )
@@ -1714,6 +1738,7 @@ export default function AdminGitHub() {
         .gh-cloud-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.gh-cloud-card{border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg);padding:9px;min-width:0}.gh-cloud-title{margin-bottom:6px}.gh-cloud-title>b{font-size:10.5px}.gh-cloud-card p,.gh-cloud-note{font-size:8.5px;line-height:1.4;color:var(--adm-muted);margin:0}.gh-cloud-row{display:flex;align-items:center;justify-content:space-between;gap:7px;border-top:1px solid var(--adm-border);padding:7px 0}.gh-cloud-row:first-of-type{border-top:0}.gh-cloud-row span{min-width:0}.gh-cloud-row b{display:block;font-size:9.5px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-cloud-row small{display:block;font-size:7.5px;color:var(--adm-muted);margin-top:2px}.gh-cloud-row em{font-style:normal;font-size:7.5px;color:var(--adm-accent);font-weight:800;white-space:nowrap}.gh-cloud-note{margin-top:8px}.gh-muted-box,.gh-error-box{padding:10px;border-radius:8px;background:var(--adm-bg);border:1px solid var(--adm-border);font-size:9px;color:var(--adm-muted)}.gh-error-box{color:var(--adm-red,#c33);border-color:color-mix(in srgb,var(--adm-red,#c33) 35%,var(--adm-border))}
         .gh-publish-confirm{display:grid;grid-template-columns:1fr 1fr;gap:8px}.gh-publish-confirm>div{min-width:0;padding:9px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-bg)}.gh-publish-confirm span{display:block;font-size:7px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;color:var(--adm-muted)}.gh-publish-confirm b{display:block;margin-top:3px;font-size:10px;color:var(--adm-text);overflow-wrap:anywhere}.gh-publish-confirm small{display:block;margin-top:3px;font-size:8px;line-height:1.35;color:var(--adm-muted)}
         .gh-publish-result{margin-top:12px;padding:12px;border-radius:11px;border:1px solid color-mix(in srgb,var(--adm-green,#1d9f55) 35%,var(--adm-border));background:color-mix(in srgb,var(--adm-green,#1d9f55) 7%,var(--adm-surface));display:grid;gap:9px}.gh-publish-result>div:first-child b{display:block;font-size:11px;color:var(--adm-text)}.gh-publish-result>div:first-child span{display:block;font-size:8.5px;color:var(--adm-muted);margin-top:2px}.gh-result-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.gh-result-stats span{font-size:7.5px;color:var(--adm-muted);padding:7px;background:var(--adm-bg);border-radius:7px;border:1px solid var(--adm-border);text-align:center}.gh-result-stats b{display:block;color:var(--adm-text);font-size:9px}.gh-publish-result>a{font-size:9px;font-weight:800;color:var(--adm-accent);text-decoration:none}
+        .gh-wizard-shell{min-width:0}.gh-wizard-progress{padding:2px 0 14px;border-bottom:1px solid var(--adm-border);margin-bottom:16px}.gh-wizard-progress-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.gh-wizard-progress-top b{font-size:10px;color:var(--adm-text)}.gh-wizard-progress-top span{font-size:9px;color:var(--adm-muted)}.gh-wizard-track{height:4px;background:var(--adm-bg);border-radius:999px;overflow:hidden;margin-top:8px}.gh-wizard-track>span{display:block;height:100%;border-radius:inherit;background:var(--adm-accent);transition:width .2s ease}.gh-wizard-dots{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:8px}.gh-wizard-dots button{height:24px;border-radius:7px;border:1px solid var(--adm-border);background:var(--adm-bg);color:var(--adm-muted);font-size:9px;font-weight:850}.gh-wizard-dots button.ativo{border-color:var(--adm-accent);background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));color:var(--adm-accent)}.gh-wizard-dots button.feito{border-color:color-mix(in srgb,var(--adm-green,#1d9f55) 40%,var(--adm-border));color:var(--adm-green,#1d9f55);cursor:pointer}.gh-wizard-step{min-height:300px}.gh-wizard-step-head{display:flex;gap:11px;align-items:flex-start;margin-bottom:16px}.gh-wizard-step-head>span{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));font-size:11px;font-weight:900;color:var(--adm-accent)}.gh-wizard-step-head h3{margin:0;font-size:15px;color:var(--adm-text)}.gh-wizard-step-head p{margin:4px 0 0;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-wizard-upload{min-height:150px}.gh-wizard-summary-line{margin-top:12px;padding:11px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg)}.gh-wizard-summary-line span{display:block;font-size:7.5px;font-weight:850;text-transform:uppercase;color:var(--adm-muted);margin-bottom:4px}.gh-wizard-summary-line code{display:block;font-size:10px;overflow-wrap:anywhere;color:var(--adm-text)}.gh-wizard-choice{padding:12px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-wizard-cloud{margin-top:12px}.gh-wizard-actions{display:flex;justify-content:space-between;gap:8px;padding-top:14px;margin-top:16px;border-top:1px solid var(--adm-border);position:sticky;bottom:-1px;background:var(--adm-surface);z-index:2}.gh-wizard-warning{margin-top:12px;padding:10px;border:1px solid color-mix(in srgb,var(--adm-amber,#b7791f) 35%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-amber,#b7791f) 7%,var(--adm-surface));font-size:9px;color:var(--adm-text);overflow-wrap:anywhere}.gh-wizard-success{text-align:center;padding:10px 0}.gh-wizard-success-icon{display:grid;place-items:center;margin:0 auto 10px;width:48px;height:48px;border-radius:50%;background:color-mix(in srgb,var(--adm-green,#1d9f55) 12%,var(--adm-surface));color:var(--adm-green,#1d9f55);font-size:24px;font-weight:900}.gh-wizard-success h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-wizard-success>p{font-size:10px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-wizard-success>a{display:inline-flex;margin:12px 0;font-size:10px;font-weight:800;color:var(--adm-accent);text-decoration:none}.gh-wizard-deploys{text-align:left;margin-top:14px;border:1px solid var(--adm-border);border-radius:10px;padding:10px}.gh-command-empty{min-height:120px}
         .gh-readme{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:16px;max-width:100%;overflow:auto;color:var(--adm-text);font-size:12px;line-height:1.65;word-wrap:break-word}
         .gh-readme>*:first-child{margin-top:0}.gh-readme>*:last-child{margin-bottom:0}.gh-readme h1{font-size:20px}.gh-readme h2{font-size:17px}.gh-readme h3{font-size:15px}.gh-readme h1,.gh-readme h2{padding-bottom:6px;border-bottom:1px solid var(--adm-border)}
         .gh-readme pre{max-width:100%;overflow:auto;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:11px}.gh-readme code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}.gh-readme :not(pre)>code{background:var(--adm-bg);padding:2px 5px;border-radius:5px}
@@ -1723,7 +1748,7 @@ export default function AdminGitHub() {
         .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-empty{padding:12px!important}}
       `}</style>
 
       <PerfilGitHubModal
