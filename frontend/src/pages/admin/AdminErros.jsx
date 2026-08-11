@@ -8,11 +8,11 @@ import { formatarDataRelativa } from '../../utils/formatters'
 
 const SOURCES=[
   {key:'',label:'Todos'}, {key:'al',label:'AL'}, {key:'github',label:'GitHub'},
-  {key:'vercel',label:'Vercel'}, {key:'render',label:'Render'}, {key:'mongo',label:'MongoDB'},
+  {key:'vercel',label:'Vercel'}, {key:'render',label:'Render'}, {key:'mongo',label:'MongoDB'}, {key:'ia',label:'IA'},
 ]
 const STATUS={novo:'Novo',acompanhando:'Acompanhando',revisado:'Revisado',silenciado:'Silenciado'}
-const sourceLabel={al:'AL Sistemas',github:'GitHub Actions',vercel:'Vercel',render:'Render',mongo:'MongoDB'}
-const sourceIcon={al:'◆',github:'◈',vercel:'▲',render:'R',mongo:'DB'}
+const sourceLabel={al:'AL Sistemas',github:'GitHub Actions',vercel:'Vercel',render:'Render',mongo:'MongoDB',ia:'IA · Gemini/OpenRouter'}
+const sourceIcon={al:'◆',github:'◈',vercel:'▲',render:'R',mongo:'DB',ia:'AI'}
 const severityColor={critical:T.red,warning:T.amberSolid||'#d97706',info:T.blue,ok:T.greenSolid}
 
 function SourceSummary({item}){

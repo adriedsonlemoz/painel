@@ -5,7 +5,7 @@
 - Cofre criptografado no MongoDB para Cloudinary, GitHub e provedores de IA.
 - Compatibilidade temporária com `.env`, sem obrigatoriedade do painel do Render.
 - Página **Integrações e APIs** com status, cadastro, atualização, teste e remoção.
-- Provedores: OpenAI, Gemini, Anthropic, OpenRouter e personalizado.
+- Provedores de IA ativos: Google Gemini e OpenRouter, com fallback automático e saída JSON estruturada quando o recurso exige campos confiáveis.
 - Geração de senhas fortes com 36 caracteres e cópia segura.
 - Diagnóstico centralizado sem exposição de segredos.
 - Reconexão do MongoDB após atualização.
@@ -23,7 +23,7 @@
 
 ## Riscos remanescentes
 - Sem volume persistente, a chave local pode ser perdida em redeploy e tornar o cofre ilegível.
-- O teste genérico de IA depende de uma URL de teste compatível informada pelo administrador.
+- O diagnóstico de IA testa conexão, geração de texto e JSON estruturado em Gemini/OpenRouter; cotas e disponibilidade continuam dependentes dos provedores externos.
 - A invalidação global de sessões exige uma versão de sessão persistida por usuário; a estrutura atual ainda usa JWT simples.
 - Rotas legadas de Cloudflare ainda consultam variáveis de ambiente e devem ser migradas em uma etapa específica.
 

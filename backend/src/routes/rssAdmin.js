@@ -17,6 +17,7 @@
  */
 import { Router } from 'express'
 import RssFonte from '../models/RssFonte.js'
+import Noticia from '../models/Noticia.js'
 import { importarFonte, importarTodasFontes, parseFeed } from '../services/rssImporter.js'
 import {
   iniciarRssJob,
@@ -27,6 +28,7 @@ import {
 import { autenticar }         from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { logger }             from '../utils/logger.js'
+import { sanitizeContent, makeExcerpt } from '../services/rssSanitizer.js'
 
 const router   = Router()
 const auth     = [autenticar]
@@ -202,6 +204,61 @@ router.post('/importar-todas', ...authEdit, async (_req, res, next) => {
       totalDuplicadas: totais.duplicadas,
       ...totais,
       resultados,
+    })
+  } catch (err) { next(err) }
+})
+
+
+/**
+ * POST /admin/rss/reprocessar-importadas
+ * Reaplica a sanitização editorial às notícias RSS já persistidas.
+ * Útil após ajustes no sanitizador: remove publicidade/blocos relacionados e
+ * recria o resumo em texto puro sem alterar título, fonte, URL ou datas.
+ */
+router.post('/reprocessar-importadas', ...authEdit, async (_req, res, next) => {
+  try {
+    const cursor = Noticia.find({ importado: true })
+      .select('_id conteudo resumo')
+      .lean()
+      .cursor()
+
+    let total = 0
+    let atualizadas = 0
+    let inalteradas = 0
+    const ops = []
+
+    const flush = async () => {
+      if (!ops.length) return
+      const lote = ops.splice(0, ops.length)
+      const r = await Noticia.bulkWrite(lote, { ordered: false })
+      atualizadas += Number(r.modifiedCount || 0)
+    }
+
+    for await (const noticia of cursor) {
+      total += 1
+      const conteudo = sanitizeContent(String(noticia.conteudo || ''))
+      const resumo = makeExcerpt(conteudo || String(noticia.resumo || ''), 300)
+      if (conteudo === String(noticia.conteudo || '') && resumo === String(noticia.resumo || '')) {
+        inalteradas += 1
+        continue
+      }
+      ops.push({
+        updateOne: {
+          filter: { _id: noticia._id },
+          update: { $set: { conteudo, resumo } },
+        },
+      })
+      if (ops.length >= 150) await flush()
+    }
+    await flush()
+
+    logger.info({ total, atualizadas, inalteradas }, 'RSS: notícias importadas reprocessadas')
+    res.json({
+      ok: true,
+      mensagem: 'Notícias RSS reprocessadas com sucesso',
+      total,
+      atualizadas,
+      inalteradas,
     })
   } catch (err) { next(err) }
 })

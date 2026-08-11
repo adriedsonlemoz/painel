@@ -2,6 +2,22 @@ import { Link } from 'react-router-dom'
 import { Clock, ChevronRight } from 'lucide-react'
 import { formatarDataRelativa } from '../utils/formatters'
 
+function resumoSeguro(noticia, max = 110) {
+  const raw = String(noticia?.resumo || noticia?.conteudo || '')
+  const texto = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!texto) return ''
+  return texto.length > max ? `${texto.slice(0, max).replace(/\s+\S*$/, '')}…` : texto
+}
+
 // Badge da categoria com cor personalizada
 export function CategoriaBadge({ categoria, small = false }) {
   if (!categoria) return null
@@ -51,9 +67,9 @@ export function NoticiaCardV({ noticia, fullWidth = false }) {
                          group-hover:text-brand-500 transition-colors line-clamp-3 flex-1">
             {noticia.titulo}
           </h3>
-          {noticia.conteudo && (
+          {resumoSeguro(noticia, 110) && (
             <p className="text-gray-500 text-sm mt-2 line-clamp-2 font-normal">
-              {noticia.conteudo.slice(0, 110)}
+              {resumoSeguro(noticia, 110)}
             </p>
           )}
           <div className="flex items-center gap-1.5 text-gray-400 text-xs font-semibold mt-3">
@@ -129,9 +145,9 @@ export function NoticiaCardLista({ noticia }) {
                        group-hover:text-brand-500 transition-colors line-clamp-2">
           {noticia.titulo}
         </h3>
-        {noticia.conteudo && (
+        {resumoSeguro(noticia, 90) && (
           <p className="text-gray-500 text-xs mt-1 line-clamp-2 font-normal">
-            {noticia.conteudo.slice(0, 90)}
+            {resumoSeguro(noticia, 90)}
           </p>
         )}
       </div>

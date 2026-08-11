@@ -22,7 +22,7 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 - **Gestão de notícias** com editor Markdown, categorias e badges coloridos
 - **Módulo GitHub** — visualização de repositórios e commits em tempo real
 - **Projetos e GitHub** — gerenciamento GitHub-first, publicação por repositório/branch/pasta e vínculo opcional com Vercel/Render; pastas locais ficam como legado para VPS
-- **IA Assistant** — integração com Groq (llama-3.3) para análise de conteúdo
+- **IA Assistant** — Gemini + OpenRouter com fallback, saída estruturada e diagnóstico central para análise editorial e de produção
 - **RSS Importer** — importação automática de feeds com scheduler
 - **Portal público dinâmico** — 3 destaques em carrossel, previsão do tempo, Brasil e Mundo por RSS e blocos opcionais de futebol e horóscopo via backend/cache
 - **Infraestrutura** — monitoramento de MongoDB, Cloudinary e Redis pelo painel

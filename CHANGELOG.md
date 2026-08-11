@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.99 — Home editorial, RSS limpo e núcleo de IA estabilizado
+
+- Home passa a abrir com o carrossel de até 3 destaques; o Plantão urgente fica logo abaixo e os quatro atalhos locais permanecem na mesma linha no mobile.
+- Editorias extras de Últimas Notícias deixam de aumentar a página e passam a abrir em popup/bottom-sheet; espaçamentos verticais foram compactados.
+- Brasil e Mundo preserva a fonte real dos feeds e recebe acabamento editorial mais limpo.
+- Matérias RSS renderizam HTML sanitizado corretamente, enquanto cards usam resumo em texto puro e deixam de expor tags HTML.
+- Sanitizador RSS remove publicidade/rastreamento e blocos repetitivos como `Leia Mais`, `Veja também` e relacionados.
+- Admin RSS ganha **Reprocessar notícias**, reaplicando a limpeza às importações já salvas no MongoDB sem perder origem, URL ou datas.
+- Núcleo de IA oficial passa a ser somente **Gemini + OpenRouter**, com timeout, fallback automático e erros registrados na Central de Diagnóstico.
+- SEO, análise editorial e análise de logs usam saída JSON estruturada quando suportada, reduzindo falhas por respostas inválidas.
+- Login, Health, Dashboard e Infraestrutura deixam de procurar Groq/Anthropic e refletem os provedores realmente configurados.
+- Integrações e APIs ganha **Diagnóstico da IA** com teste de conexão, texto e JSON estruturado para cada provedor.
+- Falhas de IA passam a poder aparecer/filtar na Central de Erros como origem `IA · Gemini/OpenRouter`.
+- Vercel/Render continuam sendo o fluxo principal de produção; VPS/Termux legado permanecem compatíveis.
+
 ## 1.0.98 — Exportação completa de diagnóstico e atualização cloud por etapas
 
 - Central de Erros e logs ganha exportação ZIP unificada de AL Sistemas, GitHub Actions, Vercel, Render e MongoDB, incluindo triagem e detalhes disponíveis, com mascaramento de padrões comuns de segredos.

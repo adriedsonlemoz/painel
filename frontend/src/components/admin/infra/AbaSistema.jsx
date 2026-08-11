@@ -519,7 +519,7 @@ export default function AbaSistema() {
             <div style={{ gridColumn: '1 / -1' }}>
               <span style={{ color: C.muted }}>AI Provider:</span>{' '}
               <b>{ambiente?.aiProvider || '—'}</b>
-              {ambiente?.groqModel && <span style={{ color: C.muted, fontSize: 11 }}> · {ambiente.groqModel}</span>}
+              {ambiente?.aiModel && <span style={{ color: C.muted, fontSize: 11 }}> · {ambiente.aiModel}</span>}
             </div>
           </div>
 
@@ -534,7 +534,8 @@ export default function AbaSistema() {
                 { label: 'Redis',      ok: !!ambiente?.redisUrl },
                 { label: 'Cloudinary', ok: !!ambiente?.cloudinaryConfig },
                 { label: 'GitHub',     ok: !!ambiente?.githubToken },
-                { label: 'Groq / IA',  ok: !!ambiente?.groqApiKey },
+                { label: 'Gemini / IA', ok: !!ambiente?.geminiConfigured },
+                { label: 'OpenRouter / IA', ok: !!ambiente?.openrouterConfigured },
               ].map(({ label, ok }) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, fontSize: 13 }}>
                   <span style={{

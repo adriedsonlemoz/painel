@@ -432,9 +432,9 @@ function PainelResultados({ resultados, onFechar }) {
 export default function AdminRssImport() {
   const {
     fontes, padrao, categorias,
-    carregando, importando, importandoTodas, adicionando, resultados,
+    carregando, importando, importandoTodas, reprocessando, adicionando, resultados,
     setResultados, temFontesAtivas,
-    adicionarPadrao, salvarFonte, excluirFonte, importarFonte, importarTodas,
+    adicionarPadrao, salvarFonte, excluirFonte, importarFonte, importarTodas, reprocessarImportadas,
   } = useRss()
 
   const [modal, setModal] = useState(null)
@@ -469,7 +469,10 @@ export default function AdminRssImport() {
             Busque notícias automaticamente de feeds RSS externos e importe para o banco de dados.
           </div>
         </div>
-        <div style={{ display: 'flex', gap: SPACE.md + 2 }}>
+        <div style={{ display: 'flex', gap: SPACE.md + 2, flexWrap: 'wrap' }}>
+          <DSBtn variant="ghost" size="sm" loading={reprocessando} disabled={reprocessando || importandoTodas || !!importando} onClick={reprocessarImportadas}>
+            {reprocessando ? 'Limpando…' : 'Reprocessar notícias'}
+          </DSBtn>
           <DSBtn variant="secondary" size="sm" loading={importandoTodas}
             disabled={importandoTodas || !temFontesAtivas || !!importando}
             onClick={importarTodas}>

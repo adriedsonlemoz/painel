@@ -190,10 +190,11 @@ function AbasCategorias({ catAtual, onMudar }) {
   const [mais, setMais] = useState(false)
   const principais = categorias.slice(0, 4)
   const extras = categorias.slice(4)
+  const escolher = slug => { onMudar(slug); setMais(false) }
   const renderButton = c => (
     <button
       key={c._id || c.id}
-      onClick={() => onMudar(c.slug)}
+      onClick={() => escolher(c.slug)}
       className={`portal-cat-btn ${catAtual === c.slug ? 'active' : ''}`}
       style={catAtual === c.slug ? { '--cat-color': c.cor || '#ff5c00' } : {}}>
       {c.nome}
@@ -202,11 +203,16 @@ function AbasCategorias({ catAtual, onMudar }) {
   return (
     <div className="portal-categories-compact">
       <div className="portal-category-primary">
-        <button onClick={() => onMudar(null)} className={`portal-cat-btn ${!catAtual ? 'active' : ''}`}>Tudo</button>
+        <button onClick={() => escolher(null)} className={`portal-cat-btn ${!catAtual ? 'active' : ''}`}>Tudo</button>
         {principais.map(renderButton)}
-        {extras.length > 0 && <button className="portal-cat-btn more" onClick={() => setMais(v => !v)}>{mais ? 'Menos' : 'Mais'} <span>{mais ? '−' : '+'}</span></button>}
+        {extras.length > 0 && <button className="portal-cat-btn more" onClick={() => setMais(true)}>Mais <span>+</span></button>}
       </div>
-      {mais && <div className="portal-category-more">{extras.map(renderButton)}</div>}
+      {mais && <div className="portal-category-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setMais(false) }}>
+        <div className="portal-category-sheet">
+          <div className="portal-category-sheet-head"><strong>Mais editorias</strong><button onClick={() => setMais(false)} aria-label="Fechar categorias">×</button></div>
+          <div className="portal-category-more">{extras.map(renderButton)}</div>
+        </div>
+      </div>}
     </div>
   )
 }
@@ -232,7 +238,7 @@ function NoticiasExternas({ items = [], fallback = [] }) {
     <section className="world-news-section">
       <div className="section-title mb-4">
         <h2 className="section-title-text font-grotesk"><Globe size={20} className="text-brand-500"/> Brasil e Mundo</h2>
-        <span className="portal-source-pill">RSS</span>
+        <span className="portal-source-pill">Fontes nacionais</span>
       </div>
       <div className="world-news-layout">
         <a className="world-lead group" href={lead.url} target="_blank" rel="noopener noreferrer">
@@ -658,18 +664,19 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
 
+      {/* Exatamente três destaques em carrossel editorial */}
+      {!emFiltro && isAtivo('hero') && !loading && <CapaJornalistica noticias={noticiasUnicas} cfg={cfg} />}
+
+      {/* Plantão ganha destaque logo após a manchete, sem espaço quando não existe */}
       {!emFiltro && <Plantao noticia={plantao} />}
 
       {/* Atalhos locais — quatro itens na mesma linha no mobile */}
       {!emFiltro && isAtivo('topicos') && topicos.length > 0 && (
-        <div className="py-4"><FaixaTopicos topicos={topicos.slice(0,4)} proximoEvento={proximoEvento} proximoOnibus={proximoOnibus} modulos={modulos}/></div>
+        <div className="py-3"><FaixaTopicos topicos={topicos.slice(0,4)} proximoEvento={proximoEvento} proximoOnibus={proximoOnibus} modulos={modulos}/></div>
       )}
 
-      {/* Exatamente três destaques em carrossel editorial */}
-      {!emFiltro && isAtivo('hero') && !loading && <CapaJornalistica noticias={noticiasUnicas} cfg={cfg} />}
-
       {/* Conteúdo */}
-      <div className="wrap py-8 space-y-10">
+      <div className="wrap py-7 space-y-8">
 
         {/* Filtros ativos */}
         {(q || catSlug || dataInicio || dataFim) && (

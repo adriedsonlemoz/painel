@@ -130,11 +130,21 @@ function BotaoCompartilhar({ titulo, url }) {
   )
 }
 
-// ─── Renderiza conteúdo (markdown ou texto puro) ───────────────
-function renderConteudo(texto) {
+// ─── Renderiza conteúdo (markdown, RSS sanitizado ou texto puro) ───────────────
+function renderConteudo(texto, { htmlSeguro = false } = {}) {
   if (!texto) return null
-  const temMarkdown = /(\*\*|^##|^- )/m.test(texto)
 
+  if (htmlSeguro) {
+    // Conteúdo RSS é sanitizado no backend antes de ser persistido.
+    return (
+      <div
+        className="prose-news rss-article-content"
+        dangerouslySetInnerHTML={{ __html: texto }}
+      />
+    )
+  }
+
+  const temMarkdown = /(\*\*|^##|^- )/m.test(texto)
   if (temMarkdown) {
     return (
       <div
@@ -303,7 +313,7 @@ export default function NoticiaDetalhe() {
 
       <div className="w-12 h-1 bg-brand-500 rounded-full mb-8"/>
 
-      {renderConteudo(noticia.conteudo)}
+      {renderConteudo(noticia.conteudo, { htmlSeguro: Boolean(noticia.importado) })}
 
       {/* ── Rodapé do artigo ─────────────────────────────────── */}
       <div className="mt-12 pt-6 border-t border-gray-100 flex items-center gap-4 flex-wrap">

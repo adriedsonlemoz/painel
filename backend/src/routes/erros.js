@@ -85,7 +85,7 @@ router.get('/central', autenticar, verificarPermissao('erros.ver'), async (_req,
       diagnosticsSnapshot(),
       ErroLog.find({status:{$in:['novo','investigando']}}).sort({criado_em:-1}).limit(30).lean(),
     ])
-    const localEvents=local.map(e=>({id:`al:${e._id}`,source:'al',severity:e.status==='novo'?'critical':'warning',title:e.mensagem,message:e.rota||e.url||'Erro registrado pelo AL Sistemas',createdAt:e.ultima_ocorrencia||e.criado_em,meta:{erroId:String(e._id),tipo:e.tipo,status:e.status,stack:e.stack,dados:e.dados},triage:{status:e.status==='investigando'?'acompanhando':e.status==='resolvido'?'revisado':e.status==='ignorado'?'silenciado':'novo',nota:''}}))
+    const localEvents=local.map(e=>{const ia=e.dados?.source==='ai';return {id:`${ia?'ia':'al'}:${e._id}`,source:ia?'ia':'al',severity:e.status==='novo'?'critical':'warning',title:ia?`IA · ${e.mensagem}`:e.mensagem,message:e.rota||e.url||(ia?'Falha registrada pelo núcleo Gemini/OpenRouter':'Erro registrado pelo AL Sistemas'),createdAt:e.ultima_ocorrencia||e.criado_em,meta:{erroId:String(e._id),tipo:e.tipo,status:e.status,stack:e.stack,dados:e.dados},triage:{status:e.status==='investigando'?'acompanhando':e.status==='resolvido'?'revisado':e.status==='ignorado'?'silenciado':'novo',nota:''}}})
     const merged=[...localEvents,...(live.events||[])]
     const externalIds=merged.filter(e=>e.source!=='al').map(e=>String(e.id||'')).filter(Boolean)
     const triages=externalIds.length?await DiagnosticTriage.find({event_id:{$in:externalIds}}).lean():[]
@@ -98,7 +98,7 @@ router.get('/central', autenticar, verificarPermissao('erros.ver'), async (_req,
 router.post('/central/detalhes', autenticar, verificarPermissao('erros.ver'), async (req,res,next)=>{
   try{
     const event=req.body?.event||{}
-    if(event.source==='al'&&event.meta?.erroId){
+    if(['al','ia'].includes(event.source)&&event.meta?.erroId){
       const doc=await ErroLog.findById(event.meta.erroId).lean()
       return res.json({ok:true,details:doc||null})
     }
@@ -111,7 +111,7 @@ router.post('/central/analisar', autenticar, verificarPermissao('erros.ver'), as
   try{
     const event=req.body?.event||{}
     let details
-    if(event.source==='al'&&event.meta?.erroId) details=await ErroLog.findById(event.meta.erroId).lean()
+    if(['al','ia'].includes(event.source)&&event.meta?.erroId) details=await ErroLog.findById(event.meta.erroId).lean()
     else details=await diagnosticsEventDetails(event)
     const safe=JSON.stringify(details||{}).replace(/(?:gh[pousr]_|github_pat_|sk-or-|cfat_)[A-Za-z0-9_-]{12,}/g,'[SEGREDO]').slice(0,26000)
     const result=await enviarMensagem({

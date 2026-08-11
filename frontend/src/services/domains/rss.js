@@ -10,6 +10,7 @@ export const rssService = {
     return api(`/admin/rss/fontes/${id}/importar`, { method: 'POST', body: JSON.stringify(dados) })
   },
   async importarTodas()        { return api('/admin/rss/importar-todas', { method: 'POST', body: '{}' }) },
+  async reprocessarImportadas() { return api('/admin/rss/reprocessar-importadas', { method: 'POST', body: '{}' }) },
   async testarUrl(url)         { return api('/admin/rss/testar-url', { method: 'POST', body: JSON.stringify({ url }) }) },
   async status()               { return api('/admin/rss/status') },
   async iniciarScheduler(expressao) {

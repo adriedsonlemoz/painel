@@ -1,8 +1,8 @@
 /**
- * useSystemHealth.js — Sprint 2 (atualizado: inclui GitHub e Groq)
+ * useSystemHealth.js — Sprint 2 (atualizado: inclui GitHub e Gemini/OpenRouter)
  *
  * Agrega saúde do sistema a partir de dois endpoints existentes:
- *   - GET /api/health          → MongoDB, Redis, Cloudinary, GitHub, Groq, latência
+ *   - GET /api/health          → MongoDB, Redis, Cloudinary, GitHub, IA, latência
  *   - GET /admin/infraestrutura/sistema/metricas → CPU, memória, uptime
  *
  * Retorna um objeto único pronto para ser renderizado no dashboard.
@@ -62,9 +62,11 @@ export function useSystemHealth() {
     ok:     servicos.github?.ok      ?? false,
     status: servicos.github?.status  ?? 'não verificado',
   }
-  const groq = {
-    ok:     servicos.groq?.ok        ?? false,
-    status: servicos.groq?.status    ?? 'não verificado',
+  const ia = {
+    ok:     servicos.ia?.ok        ?? false,
+    status: servicos.ia?.status    ?? 'não verificado',
+    principal: servicos.ia?.principal ?? null,
+    providers: servicos.ia?.providers ?? [],
   }
   const cloudflare = {
     ok:     servicos.cloudflare?.ok  ?? false,
@@ -99,7 +101,7 @@ export function useSystemHealth() {
     redis,
     cloudinary,
     github,
-    groq,
+    ia,
     cloudflare,
     api,
     uptime,

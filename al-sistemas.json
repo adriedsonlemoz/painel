@@ -1,16 +1,19 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.98",
+  "version": "1.0.99",
   "packageFormat": 2,
   "changelog": [
-    "Central de Erros e logs ganha exportação ZIP unificada com registros do AL Sistemas e snapshots/detalhes disponíveis de GitHub Actions, Vercel, Render e MongoDB, com mascaramento de padrões comuns de credenciais.",
-    "Ao selecionar um pacote na Central de Atualizações, o frontend lê o al-sistemas.json dentro do ZIP e mostra imediatamente a próxima versão e as alterações descritas antes do envio ao backend.",
-    "O botão de nova versão recebe visual mais compacto e o upload continua exibindo progresso real, com bloqueio visual antecipado para versões iguais ou inferiores à instalada.",
-    "A publicação cloud passa a ser apresentada em quatro cards sequenciais: Atualização principal/R2, GitHub, Vercel e Render, cada um com progresso e estado próprios.",
-    "Estados técnicos de Vercel e Render são traduzidos para português na interface: Disponível, Construindo, Iniciando, Na fila, Compilando, Implantando, No ar, Falhou e equivalentes.",
-    "O progresso geral é calculado a partir das quatro etapas, sem tratar o commit do GitHub como conclusão da atualização; cada plataforma termina seu próprio card em 100%.",
-    "O botão Fechar deixa o rodapé dos monitores de atualização e permanece como X no topo somente quando a operação pode ser encerrada.",
-    "O fluxo local de atualização em VPS/Termux permanece compatível; as alterações desta versão concentram-se em diagnóstico/exportação e clareza visual do atualizador cloud."
+    "Home pública reorganizada: carrossel de até 3 destaques vem primeiro, Plantão urgente aparece logo abaixo e História/Belezas naturais/Ônibus/Eventos permanecem em uma linha compacta no mobile.",
+    "Últimas Notícias deixa de expandir editorias extras para baixo: o botão Mais abre um popup/bottom-sheet e o espaçamento vertical da Home foi reduzido para uma leitura mais editorial.",
+    "Brasil e Mundo mantém a hierarquia manchete + chamadas compactas, identifica a fonte real de cada RSS e substitui o selo genérico RSS por uma identificação editorial de fontes nacionais.",
+    "Notícias importadas por RSS passam a renderizar o HTML sanitizado corretamente na matéria; cards usam resumo em texto puro e não exibem tags como <p>, <div> ou <h2>.",
+    "Sanitização RSS remove slots comuns de publicidade/rastreamento e blocos editoriais repetitivos como Leia Mais, Veja também e conteúdos relacionados.",
+    "Admin RSS ganha Reprocessar notícias para reaplicar a limpeza às matérias importadas que já estão no MongoDB e recriar seus resumos sem apagar fonte, URL ou datas.",
+    "Núcleo de IA foi estabilizado em Gemini + OpenRouter: timeout por provedor, fallback automático e mensagens de falha mais claras, com registro das indisponibilidades na Central de Erros.",
+    "Recursos que exigem JSON, como SEO, análise editorial e logs, passam a usar saída estruturada/JSON Schema quando suportada, com fallback compatível quando o modelo não oferece schema nativo.",
+    "Health, Login, Dashboard e Infraestrutura deixam de diagnosticar os antigos Groq/Anthropic e passam a exibir o estado real de Gemini/OpenRouter.",
+    "Integrações e APIs ganha Diagnóstico da IA, testando conexão, geração de texto e resposta JSON estruturada por provedor; falhas do núcleo podem ser filtradas como IA na Central de Erros.",
+    "Compatibilidade de produção Vercel/Render e dos modos VPS/Termux legado foi preservada; nenhuma rota pública existente foi removida."
   ],
   "updatePackages": {
     "full": true,

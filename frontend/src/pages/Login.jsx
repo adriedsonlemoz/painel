@@ -4,7 +4,7 @@
  * Diagnóstico expandido:
  *  - Pré-voo: browser, cookies, variáveis de ambiente
  *  - Latência por etapa em ms
- *  - Todos os serviços do health (MongoDB, Redis, Cloudinary, GitHub, Groq)
+ *  - Todos os serviços do health (MongoDB, Redis, Cloudinary, GitHub, Gemini/OpenRouter)
  *  - Header CORS real da resposta
  *  - Ambiente e latência interna do backend
  */
@@ -235,8 +235,8 @@ export default function Login() {
         if (s.cloudinary) add(s.cloudinary.ok ? '✓' : '✕', `Cloudinary: ${s.cloudinary.status}`)
         // GitHub
         if (s.github)    add(s.github.ok    ? '✓' : '⚠', `GitHub:     ${s.github.status}`)
-        // Groq / IA
-        if (s.groq)      add(s.groq.ok      ? '✓' : '⚠', `IA/Groq:    ${s.groq.status}`)
+        // IA · Gemini/OpenRouter
+        if (s.ia)        add(s.ia.ok        ? '✓' : '⚠', `IA:         ${s.ia.status}`)
 
         // Metadados
         const partes = []

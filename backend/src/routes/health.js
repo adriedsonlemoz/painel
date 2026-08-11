@@ -1,11 +1,12 @@
 /**
- * #9 — Health check detalhado: MongoDB, Redis, Cloudinary, GitHub e Groq/IA.
+ * #9 — Health check detalhado: MongoDB, Redis, Cloudinary, GitHub e IA (Gemini/OpenRouter).
  */
 import { getCredential } from '../utils/credentialStore.js'
 import { Router } from 'express'
 import mongoose from 'mongoose'
 import { isRedisDisponivel } from '../utils/redis.js'
 import { verificarCloudinary } from '../config/index.js'
+import { diagnosticarIA } from '../utils/aiClient.js'
 
 const router = Router()
 
@@ -29,33 +30,6 @@ async function verificarGitHub() {
   return {
     ok: true,
     status: restante !== null ? `${restante} req restantes` : 'conectado',
-  }
-}
-
-/** Verifica se a chave Groq está configurada e válida via /models */
-async function verificarGroq() {
-  const aiProvider = process.env.AI_PROVIDER || 'groq'
-  // Se provedor não for groq, verifica Anthropic
-  if (aiProvider !== 'groq') {
-    const { value: anthropicKey } = await getCredential('anthropic', 'ANTHROPIC_API_KEY')
-    if (!anthropicKey) return { ok: false, status: `${aiProvider}: chave não configurada` }
-    return { ok: true, status: `${aiProvider}: configurado` }
-  }
-  const { value: apiKey } = await getCredential('groq', 'GROQ_API_KEY')
-  if (!apiKey) return { ok: false, status: 'GROQ_API_KEY não configurada' }
-  const res = await Promise.race([
-    fetch('https://api.groq.com/openai/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    }),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
-  ])
-  if (!res.ok) return { ok: false, status: `chave inválida (${res.status})` }
-  const data = await res.json()
-  const modelo = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
-  const disponivel = data?.data?.some?.(m => m.id === modelo)
-  return {
-    ok: true,
-    status: disponivel ? `modelo: ${modelo}` : 'conectado',
   }
 }
 
@@ -117,14 +91,14 @@ router.get('/detalhado', async (_req, res) => {
   const redisOk     = isRedisDisponivel()
   const redisStatus = redisOk ? 'conectado' : 'indisponível (cache em memória ativo)'
 
-  const [cloudinaryResult, githubResult, groqResult, cloudflareResult] = await Promise.allSettled([
+  const [cloudinaryResult, githubResult, iaResult, cloudflareResult] = await Promise.allSettled([
     Promise.race([verificarCloudinary(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]),
-    verificarGitHub(), verificarGroq(), verificarCloudflare(),
+    verificarGitHub(), diagnosticarIA({ deep: false }), verificarCloudflare(),
   ])
 
   const cloudinaryStatus = cloudinaryResult.status === 'fulfilled' ? cloudinaryResult.value : { ok:false, erro:cloudinaryResult.reason?.message ?? 'erro' }
   const githubStatus = githubResult.status === 'fulfilled' ? githubResult.value : { ok:false, status:githubResult.reason?.message ?? 'erro' }
-  const groqStatus = groqResult.status === 'fulfilled' ? groqResult.value : { ok:false, status:groqResult.reason?.message ?? 'erro' }
+  const iaStatus = iaResult.status === 'fulfilled' ? iaResult.value : { ok:false, status:iaResult.reason?.message ?? 'erro', providers:[] }
   const cloudflareStatus = cloudflareResult.status === 'fulfilled' ? cloudflareResult.value : { ok:false, status:cloudflareResult.reason?.message ?? 'erro' }
 
   res.status(mongoOk ? 200 : 503).json({
@@ -133,7 +107,7 @@ router.get('/detalhado', async (_req, res) => {
       mongodb: { ok:mongoOk, status:mongoStatus }, redis:{ ok:redisOk, status:redisStatus },
       cloudinary:{ ok:cloudinaryStatus.ok, status:cloudinaryStatus.ok ? 'conectado' : cloudinaryStatus.erro },
       github:{ ok:githubStatus.ok, status:githubStatus.status },
-      groq:{ ok:groqStatus.ok, status:groqStatus.status },
+      ia:{ ok:iaStatus.ok, status:iaStatus.status, principal:iaStatus.principal || null, providers:(iaStatus.providers || []).map(p=>({ id:p.id, nome:p.nome, ok:p.ok, status:p.status, modelo:p.model, configurado:p.configured, ativo:p.enabled })) },
       cloudflare:{ ok:cloudflareStatus.ok, status:cloudflareStatus.status },
     },
   })

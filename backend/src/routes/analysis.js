@@ -5,7 +5,7 @@
  * Sprint 6-B — Refatorado:
  *   - githubFetch() extraída para utils/githubClient.js (elimina duplicação)
  *   - Limites de custo adicionados (HISTORICO_MAX_MSGS, CONTEXTO_MAX_CHARS)
- *   - Provedor de IA abstraído via utils/aiClient.js (suporta Groq e Anthropic)
+ *   - Provedor de IA abstraído via utils/aiClient.js (usa Gemini e OpenRouter com fallback)
  *
  * Rotas:
  *   GET  /api/analysis/overview            → resumo geral do sistema
@@ -211,8 +211,8 @@ router.get('/ai/info', autenticar, async (req, res, next) => {
 /* ═══════════════════════════════════════════════════════════════
    POST /api/analysis/ai/chat
    IA Assistant — provedor configurável via AI_PROVIDER (.env)
-   Padrão: Groq (llama-3.3-70b-versatile).
-   Fallback: Anthropic (claude-opus-4-6) via AI_PROVIDER=anthropic
+   Provedor principal: Gemini ou OpenRouter, definido em Integrações e APIs.
+   Fallback automático: outro provedor ativo quando o principal falhar
    IA apenas SUGERE, nunca executa ações automaticamente.
 ═══════════════════════════════════════════════════════════════ */
 router.post('/ai/chat', autenticar, async (req, res) => {

@@ -464,6 +464,17 @@ router.get('/sistema/metricas', async (_req, res, next) => {
       versaoApp = req('../../package.json').version || '—'
     } catch { /* ok */ }
 
+    const [geminiCfg, openrouterCfg] = await Promise.all([
+      getCredential('gemini', 'GEMINI_API_KEY'),
+      getCredential('openrouter', 'OPENROUTER_API_KEY'),
+    ])
+    const aiCandidates = [
+      { id:'gemini', nome:'Google Gemini', cfg:geminiCfg, modelo:geminiCfg?.metadata?.model || 'gemini-2.5-flash' },
+      { id:'openrouter', nome:'OpenRouter', cfg:openrouterCfg, modelo:openrouterCfg?.metadata?.model || 'openrouter/free' },
+    ].filter(x => (x.cfg?.value || x.cfg?.locked) && x.cfg?.metadata?.enabled !== false)
+    aiCandidates.sort((a,b)=>Number(Boolean(b.cfg?.metadata?.primary))-Number(Boolean(a.cfg?.metadata?.primary)))
+    const aiPrincipal = aiCandidates[0] || null
+
     res.json({
       // ── CPU ────────────────────────────────────────────────
       cpu: {
@@ -535,8 +546,11 @@ router.get('/sistema/metricas', async (_req, res, next) => {
         nodeEnv:      process.env.NODE_ENV      || '—',
         porta:        process.env.PORT          || '—',
         tz:           process.env.TZ            || Intl.DateTimeFormat().resolvedOptions().timeZone || '—',
-        aiProvider:   process.env.AI_PROVIDER   || '—',
-        groqModel:    process.env.GROQ_MODEL    || '—',
+        aiProvider:   aiPrincipal?.nome || '—',
+        aiModel:      aiPrincipal?.modelo || '—',
+        aiConfigured: Boolean(aiCandidates.length),
+        geminiConfigured: Boolean(geminiCfg?.value || geminiCfg?.locked),
+        openrouterConfigured: Boolean(openrouterCfg?.value || openrouterCfg?.locked),
         logLevel:     process.env.LOG_LEVEL     || '—',
       },
 
@@ -704,8 +718,8 @@ const CREDENTIAL_DEFS = {
   render:    { env: 'RENDER_API_KEY', label: 'Render API Key' },
   vercel:    { env: 'VERCEL_TOKEN', label: 'Vercel Token' },
   github:    { env: 'GITHUB_TOKEN', label: 'GitHub Token' },
-  groq:      { env: 'GROQ_API_KEY', label: 'Groq API Key' },
-  anthropic: { env: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key' },
+  gemini:    { env: 'GEMINI_API_KEY', label: 'Google Gemini API Key' },
+  openrouter:{ env: 'OPENROUTER_API_KEY', label: 'OpenRouter API Key' },
 }
 
 router.get('/credenciais', async (_req, res, next) => {

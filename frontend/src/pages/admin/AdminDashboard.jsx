@@ -26,7 +26,7 @@ export default function AdminDashboard(){
  const noticias=useNoticias({limit:5,status:'publicada',ordem:'-data_publicacao'})
  const eventos=useEventos()
  const services=useMemo(()=>[
-  ['Núcleo',health.api?.ok],['Banco',health.mongodb?.ok],['Cache',health.redis?.ok],['Mídia',health.cloudinary?.ok],['Publicação',health.github?.ok],['IA',health.groq?.ok],['Rede',health.cloudflare?.ok]
+  ['Núcleo',health.api?.ok],['Banco',health.mongodb?.ok],['Cache',health.redis?.ok],['Mídia',health.cloudinary?.ok],['Publicação',health.github?.ok],['IA',health.ia?.ok],['Rede',health.cloudflare?.ok]
  ],[health])
  const serviceOk=services.filter(([,ok])=>ok).length
  const serviceWarn=services.length-serviceOk

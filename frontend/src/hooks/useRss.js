@@ -31,6 +31,7 @@ export function useRss() {
   const [importando,       setImportando]       = useState(null)
   const [importandoTodas,  setImportandoTodas]  = useState(false)
   const [adicionando,      setAdicionando]      = useState(null)
+  const [reprocessando,     setReprocessando]     = useState(false)
   const [resultados,       setResultados]       = useState(null)
 
   const carregar = useCallback(async () => {
@@ -122,6 +123,20 @@ export function useRss() {
     }
   }
 
+
+  async function reprocessarImportadas() {
+    setReprocessando(true)
+    try {
+      const r = await rssService.reprocessarImportadas()
+      toast.success(`${r.atualizadas ?? 0} notícia(s) RSS atualizada(s)`)
+      return r
+    } catch (err) {
+      toast.error('Erro ao reprocessar RSS: ' + err.message)
+    } finally {
+      setReprocessando(false)
+    }
+  }
+
   const temFontesAtivas = fontes.some(f => f.ativa)
 
   return {
@@ -131,6 +146,7 @@ export function useRss() {
     carregando,
     importando,
     importandoTodas,
+    reprocessando,
     adicionando,
     resultados,
     setResultados,
@@ -141,5 +157,6 @@ export function useRss() {
     excluirFonte,
     importarFonte,
     importarTodas,
+    reprocessarImportadas,
   }
 }

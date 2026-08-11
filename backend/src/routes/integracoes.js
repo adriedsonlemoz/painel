@@ -9,6 +9,7 @@ import { getCredential, setCredential, deleteCredential } from '../utils/credent
 import { readBootstrap, writeBootstrap, deleteBootstrapKeys, vaultPaths } from '../utils/localVault.js'
 import { conectarMongo, configurarCloudinary } from '../config/index.js'
 import AuditLog from '../models/AuditLog.js'
+import { diagnosticarIA } from '../utils/aiClient.js'
 
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
@@ -372,11 +373,6 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
   } else if(id==='cloudinary'){
     await configurarCloudinary(); await cloudinary.api.ping()
     result.mensagem='Cloudinary conectado e credenciais válidas.'
-  } else if(id==='groq'){
-    const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:`Bearer ${c.value}`}})
-    if(!r.ok)throw new Error(`Groq respondeu ${r.status}`)
-    const body=await r.json().catch(()=>({}))
-    result.mensagem=`Groq conectado${Array.isArray(body.data)?` • ${body.data.length} modelo(s) disponível(is)`:''}.`
   } else if(id==='cloudflare'){
     const accountId=String(c.metadata?.accountId||'').trim()
     if(!accountId)throw new Error('Informe o Account ID da Cloudflare.')
@@ -538,7 +534,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.98',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.99',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
@@ -612,5 +608,10 @@ router.post('/import', async(req,res,next)=>{ try {
 } catch(e){next(e)} })
 
 router.post('/password/generate', (_req,res)=>{ const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*+-_=?.'; let out=''; do { out=Array.from(crypto.randomBytes(36),b=>chars[b%chars.length]).join('') } while(!/[A-Z]/.test(out)||!/[a-z]/.test(out)||!/[0-9]/.test(out)||!/[!@#$%&*+\-_=?.]/.test(out)); res.json({password:out}) })
-router.get('/diagnostics/run', async(_req,res)=>{ const checks=[]; checks.push({name:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?mongoose.connection.name:'Desconectado'}); try{await configurarCloudinary();await cloudinary.api.ping();checks.push({name:'Cloudinary',ok:true})}catch(e){checks.push({name:'Cloudinary',ok:false,detail:e.message})}; for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);checks.push({name:id,ok:Boolean(c.value),detail:c.locked?'Credencial existe, mas a chave de criptografia não corresponde':c.value?'Configurado':'Ausente'})}; const exposed=['.env','*.pem','*.key','bootstrap.vault.json']; res.json({ok:checks.every(c=>c.ok),checks,secretPatternsProtected:exposed}) })
+router.get('/ai/diagnostics', async(_req,res,next)=>{ try {
+  const d=await diagnosticarIA({deep:true})
+  res.json(d)
+} catch(e){ next(e) } })
+
+router.get('/diagnostics/run', async(_req,res)=>{ const checks=[]; checks.push({name:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?mongoose.connection.name:'Desconectado'}); try{await configurarCloudinary();await cloudinary.api.ping();checks.push({name:'Cloudinary',ok:true})}catch(e){checks.push({name:'Cloudinary',ok:false,detail:e.message})}; for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);checks.push({name:id,ok:Boolean(c.value)||Boolean(c.locked),detail:c.locked?'Credencial existe, mas a chave de criptografia não corresponde':c.value?'Configurado':'Ausente'})}; try{const ia=await diagnosticarIA({deep:false});checks.push({name:'IA · Gemini/OpenRouter',ok:ia.ok,detail:ia.status})}catch(e){checks.push({name:'IA · Gemini/OpenRouter',ok:false,detail:e.message})}; const exposed=['.env','*.pem','*.key','bootstrap.vault.json']; res.json({ok:checks.filter(c=>!['api_ninjas','api_football'].includes(c.name)).every(c=>c.ok),checks,secretPatternsProtected:exposed}) })
 export default router

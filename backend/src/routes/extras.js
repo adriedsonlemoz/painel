@@ -13,7 +13,7 @@ import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { auditLog } from '../middleware/auditLog.js'
 import { cacheGet, cacheSet, cacheDel } from '../utils/cache.js'
-import { enviarMensagem } from '../utils/aiClient.js'
+import { enviarJson } from '../utils/aiClient.js'
 import {
   regraConfiguracao, regraConfiguracaoLote,
   regraNoticiaExterna, regraTopico, regraOnibus, validar,
@@ -126,16 +126,14 @@ router.post('/seo/ia', autenticar, seoPermissao, async (req,res,next)=>{
     const {acao='auditar',configuracoes={}}=req.body||{}
     const allowed={}
     for(const k of SEO_KEYS)if(configuracoes[k]!==undefined)allowed[k]=String(configuracoes[k]??'').slice(0,3000)
-    const systemPrompt='Você é um assistente de SEO editorial para um portal de notícias brasileiro. Não invente fatos, localidades, marcas ou serviços. Trabalhe apenas com os dados fornecidos. Responda exclusivamente em JSON válido, sem markdown. Sugestões não devem ser aplicadas automaticamente.'
+    const systemPrompt='Você é um assistente de SEO editorial para um portal de notícias brasileiro. Não invente fatos, localidades, marcas ou serviços. Trabalhe apenas com os dados fornecidos. Sugestões não devem ser aplicadas automaticamente.'
     const pergunta=`AÇÃO: ${acao}
 CONFIGURAÇÕES ATUAIS: ${JSON.stringify(allowed)}
 
-Retorne JSON com: {"pontuacao":0,"resumo":"","alertas":[""],"sugestoes":{"site_titulo":"","site_descricao":"","site_keywords":""}}. Regras: título SEO preferencialmente até 60 caracteres; descrição entre 120 e 160 caracteres; palavras-chave devem ser específicas e fiéis ao portal. Se um campo já estiver adequado, pode repetir o valor atual.`
-    const out=await enviarMensagem({systemPrompt,pergunta})
-    let data
-    const txt=String(out.resposta||'').replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()
-    try{data=JSON.parse(txt)}catch{const a=txt.indexOf('{'),b=txt.lastIndexOf('}');if(a>=0&&b>a)data=JSON.parse(txt.slice(a,b+1));else throw new Error('A IA não retornou JSON válido.')}
-    res.json({ok:true,...data,_meta:{provedor:out.provedor,modelo:out.modelo}})
+Avalie o SEO atual. Regras: título SEO preferencialmente até 60 caracteres; descrição entre 120 e 160 caracteres; palavras-chave devem ser específicas e fiéis ao portal. Se um campo já estiver adequado, pode repetir o valor atual.`
+    const schema={type:'object',properties:{pontuacao:{type:'number'},resumo:{type:'string'},alertas:{type:'array',items:{type:'string'}},sugestoes:{type:'object',properties:{site_titulo:{type:'string'},site_descricao:{type:'string'},site_keywords:{type:'string'}},required:['site_titulo','site_descricao','site_keywords'],additionalProperties:false}},required:['pontuacao','resumo','alertas','sugestoes'],additionalProperties:false}
+    const out=await enviarJson({systemPrompt,pergunta,schema,schemaName:'seo_portal'})
+    res.json({ok:true,...out.data,_meta:{provedor:out.provedor,modelo:out.modelo,fallback:Boolean(out.fallback),falhasAnteriores:out.falhasAnteriores||[],structuredMode:out.structuredMode}})
   }catch(err){next(err)}
 })
 
