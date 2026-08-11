@@ -312,20 +312,25 @@ router.get('/deployment-check',async(req,res,next)=>{try{
     }catch(e){vercel={configured:true,ok:false,projects:[],message:e.message}}
   }
   const rd=await getCredential('render','RENDER_API_KEY')
-  let render={configured:Boolean(rd.value),ok:null,serviceId:rd.metadata?.primaryServiceId||'',repo:'',branch:'',message:rd.value?'Verificando serviço principal…':'Render não configurada.'}
-  if(rd.value&&rd.metadata?.primaryServiceId){
+  let render={configured:Boolean(rd.value),ok:null,services:[],serviceId:'',repo:'',branch:'',message:rd.value?'Verificando serviços vinculados…':'Render não configurada.'}
+  if(rd.value){
     try{
-      const rr=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(rd.metadata.primaryServiceId)}`,{headers:{Authorization:`Bearer ${rd.value}`,Accept:'application/json'}})
-      const rb=await rr.json().catch(()=>({}))
+      const rr=await fetch('https://api.render.com/v1/services?limit=100',{headers:{Authorization:`Bearer ${rd.value}`,Accept:'application/json'}})
+      const rb=await rr.json().catch(()=>[])
       if(!rr.ok)throw new Error(rb?.message||rb?.error||`Render respondeu ${rr.status}`)
-      const svc=rb?.service||rb||{}
-      const repoUrl=String(svc.repo||'')
-      const normalizedRepo=repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i,'').replace(/\.git$/i,'').replace(/^git@github\.com:/i,'').toLowerCase()
-      const sameRepo=!normalizedRepo||normalizedRepo===repository.toLowerCase()
-      const sameBranch=!svc.branch||String(svc.branch).toLowerCase()===branch.toLowerCase()
-      render={configured:true,ok:sameRepo&&sameBranch,serviceId:svc.id||rd.metadata.primaryServiceId,repo:repoUrl,branch:svc.branch||'',message:sameRepo&&sameBranch?'Serviço Render principal acompanha este repositório/branch.':`Render principal aponta para ${repoUrl||'outro repositório'}${svc.branch?` @ ${svc.branch}`:''}.`}
+      const services=(Array.isArray(rb)?rb:[]).map(row=>row?.service||row||{}).filter(Boolean)
+      const repoLower=repository.toLowerCase()
+      const matches=services.filter(s=>{
+        const repoUrl=String(s.repo||'')
+        const normalized=repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i,'').replace(/\.git$/i,'').replace(/^git@github\.com:/i,'').toLowerCase()
+        const sameRepo=normalized===repoLower
+        const sameBranch=!s.branch||String(s.branch).toLowerCase()===branch.toLowerCase()
+        return sameRepo&&sameBranch
+      }).map(s=>({id:s.id,name:s.name,type:s.type||'',repo:s.repo||'',branch:s.branch||'',autoDeploy:s.autoDeploy,url:s.url||s.serviceDetails?.url||null}))
+      const first=matches[0]||null
+      render={configured:true,ok:true,services:matches,serviceId:first?.id||'',repo:first?.repo||'',branch:first?.branch||'',message:matches.length?`${matches.length} serviço(s) Render vinculado(s) a este repositório/branch.`:'Render conectada, mas nenhum serviço vinculado a este repositório/branch foi identificado.'}
     }catch(e){render={...render,ok:false,message:e.message}}
-  }else if(rd.value){render={...render,ok:false,message:'Selecione o serviço Render principal na Central de Plataformas.'}}
+  }
   res.json({ok:github.writable,github,vercel,render})
 }catch(e){next(e)}})
 

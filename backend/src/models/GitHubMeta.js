@@ -24,8 +24,17 @@ const gitHubMetaSchema = new mongoose.Schema({
   },
   observacoes:  { type: String, default: null },
 
-  // Vinculação com projeto local
+  // Vinculação com projeto local (legado/VPS; não é requisito para o módulo GitHub)
   projetoLocal: { type: String, default: null },  // nome da pasta em /projetos
+
+  // Preferências de publicação GitHub/cloud. O GitHub é o destino principal;
+  // Vercel/Render são detectados posteriormente pela integração central.
+  publicacao: {
+    repository: { type: String, default: null },
+    branch:     { type: String, default: 'main' },
+    path:       { type: String, default: '' },
+    snapshotR2: { type: Boolean, default: false },
+  },
 
 }, {
   timestamps: { createdAt: 'criado_em', updatedAt: 'atualizado_em' },

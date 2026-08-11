@@ -21,7 +21,7 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 - **Painel admin** com multi-tema (light, dark, ocean, rose)
 - **Gestão de notícias** com editor Markdown, categorias e badges coloridos
 - **Módulo GitHub** — visualização de repositórios e commits em tempo real
-- **Projetos locais** — sync e acompanhamento de projetos internos
+- **Projetos e GitHub** — gerenciamento GitHub-first, publicação por repositório/branch/pasta e vínculo opcional com Vercel/Render; pastas locais ficam como legado para VPS
 - **IA Assistant** — integração com Groq (llama-3.3) para análise de conteúdo
 - **RSS Importer** — importação automática de feeds com scheduler
 - **Infraestrutura** — monitoramento de MongoDB, Cloudinary e Redis pelo painel
@@ -174,17 +174,19 @@ Em Render/Vercel, novas mídias do portal usam **MongoDB GridFS** por padrão, e
 
 ### Atualizar o portal
 
-Em produção, **Atualizações** não substitui arquivos dentro da instância Render/Vercel:
+Em produção gerenciada, **Atualizações** não substitui arquivos dentro da instância Render/Vercel. O pacote é persistido antes da publicação:
 
 ```text
 Enviar ZIP completo
-→ validar
+→ validar versão, manifesto e SHA-256
+→ armazenar o pacote no R2
+→ registrar a release no MongoDB
 → publicar no GitHub
-→ Render/Vercel detectam o commit
-→ novas releases são construídas
+→ acompanhar o mesmo commit na Vercel e na Render
+→ verificar produção
 ```
 
-No VPS, o atualizador local com staging/snapshot/rollback continua disponível.
+O navegador pode ser fechado depois que o pacote foi armazenado. No VPS, o atualizador local com staging/snapshot/rollback continua disponível como modo legado.
 
 ### MongoDB: Atlas ou VPS
 
@@ -200,7 +202,7 @@ Isso permite que uma nova instância Render reconheça o mesmo administrador e a
 
 ### Atualizações do próprio sistema
 
-O painel inclui **Admin → Desenvolvimento → Atualizações** para preparar e instalar pacotes versionados `alsistemas-X.Y.Z.zip`. O fluxo valida identidade/versão, mostra changelog, cria snapshot, preserva dados persistentes, evita reinstalação desnecessária de dependências, suporta migrations e pode reiniciar via PM2/systemd com health check e rollback automático.
+O painel inclui **Admin → Desenvolvimento → Atualizações** para preparar pacotes versionados `alsistemas-X.Y.Z.zip`. Em Render/Vercel, o pacote validado fica no R2, o estado da release no MongoDB e o código publicado no GitHub; o painel acompanha Vercel e Render até a verificação da produção. Em VPS persistente, permanece disponível o motor local com staging, snapshot, migrations, health check e rollback.
 
 ### Fluxo editorial e capa jornalística (1.0.17)
 
@@ -219,10 +221,17 @@ O AL Sistemas valida o token, identifica a conta e lista os repositórios permit
 
 Em **Admin → Desenvolvimento → Atualizações**, um pacote completo pode seguir dois fluxos:
 
-- **Termux/VPS persistente:** simulação, staging, snapshot, instalação e rollback local.
-- **Render/Vercel:** o navegador mantém o ZIP temporariamente, o AL valida o pacote e publica a release no GitHub. As plataformas constroem novas releases a partir do commit.
+- **VPS persistente (legado):** simulação, staging, snapshot, instalação e rollback local.
+- **Render/Vercel:** validação → R2 → MongoDB → GitHub → acompanhamento Vercel/Render. O ZIP não depende do filesystem efêmero nem precisa permanecer preso ao navegador após o armazenamento.
 
-Em Render/Vercel não existe staging permanente nem tentativa de substituir os arquivos da instância em execução.
+Em Render/Vercel não existe instalação física sobre a instância em execução. O GitHub é a origem do código; R2 preserva o pacote e MongoDB preserva o estado da publicação.
+
+
+### GitHub-first para vários projetos (1.0.89)
+
+O módulo **Admin → GitHub** não depende do cadastro em Projetos. Qualquer repositório acessível pelo token central pode ser administrado. Na seção **Publicar**, escolha um ZIP, confira explicitamente **repositório → branch → pasta** e só então crie o commit. A opção de substituição remove arquivos apenas dentro da pasta escolhida; o restante do repositório não é tocado.
+
+O snapshot no R2 é opcional para esse fluxo. Depois do commit, o AL identifica vínculos do mesmo repositório com Vercel e Render e oferece acompanhamento/deploy quando aplicável. A tela também mostra a pasta raiz configurada na Vercel para facilitar monorepos como `/frontend` e `/backend`. Todas as chamadas usam as credenciais armazenadas em **Integrações e APIs**.
 
 ### Persistência das credenciais
 

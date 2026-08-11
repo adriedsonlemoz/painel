@@ -83,6 +83,19 @@ export const githubService = {
     return `${BASE_URL}/github/repos/${owner}/${repo}/download-zip${q}`
   },
 
+  /** Publica um ZIP diretamente em repository/branch/path, sem depender do módulo Projetos. */
+  async publicarPacote(owner, repo, file, config = {}) {
+    const form = new FormData()
+    form.append('package', file)
+    for (const [k, v] of Object.entries(config)) form.append(k, String(v ?? ''))
+    const resp = await fetch(`${BASE_URL}/github/repos/${owner}/${repo}/publicar-pacote`, {
+      method: 'POST', body: form, credentials: 'include',
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) throw new Error(data.erro || `Erro ${resp.status}`)
+    return data
+  },
+
   /** Cria um novo repositório na conta autenticada */
   criarRepo: (nome, descricao = '', privado = true, org = null) =>
     api('/github/repos/criar', {

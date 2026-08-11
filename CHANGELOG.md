@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.89
+- GitHub: removido o seletor vertical de seções dentro do repositório. A navegação volta a usar cards compactos e permanentes; no mobile são 3 cards por linha e cada toque troca somente a seção exibida.
+- Visão geral foi condensada: Dados no GitHub e Informações do repositório ficam lado a lado, com Branch, Linguagem, Tamanho, Último push, Stars, Forks, Issues e data apresentados de forma compacta.
+- README continua usando o HTML GFM renderizado pelo GitHub, agora dentro de uma área de documentação própria e mais limpa.
+- Botão `ZIP` foi renomeado para `Baixar projeto`; o AL continua gerando/baixando o zipball do branch/commit pelo backend autenticado.
+- `Salvar em Projetos` deixa de ser a ação principal do módulo GitHub. A nova área `Publicar` funciona sem qualquer pasta local e aceita um ZIP escolhido no aparelho/PC.
+- Nova publicação GitHub-first permite selecionar qualquer repositório acessível pelo token, a branch de destino e a pasta exata dentro do repositório (`/`, `frontend`, `backend` ou outra).
+- O destino fica visível antes do commit como `repositório → branch → pasta`; antes de gravar, um modal confirma arquivo, repositório, branch, pasta, modo de substituição e uso de snapshot R2.
+- Modo padrão mescla/atualiza os arquivos. A opção de substituição apaga somente arquivos antigos dentro da pasta escolhida e preserva o restante do repositório.
+- Upload ZIP é processado no backend sem depender de Projeto local; `.git`, `node_modules` e entradas inseguras/path traversal são descartados, com limites de arquivo, quantidade e tamanho descompactado.
+- Repositórios vazios recebem a primeira publicação pela branch padrão via inicialização segura; depois disso o fluxo normal de árvore/commit assume as publicações seguintes.
+- Publicação usa exclusivamente o `GITHUB_TOKEN` armazenado em Integrações e APIs; nenhuma credencial paralela foi criada.
+- Snapshot no Cloudflare R2 é opcional antes do commit e usa as mesmas credenciais R2 de Integrações e APIs, armazenando os pacotes em `projects/<owner>/<repo>/snapshots/...`.
+- Metadados internos de cada repositório guardam a última preferência de publicação: repositório, branch, pasta e uso de snapshot R2.
+- Verificação de deploy foi generalizada para múltiplos projetos: Vercel continua procurando todos os projetos ligados ao repositório e a Render passa a procurar todos os serviços compatíveis, não apenas o serviço principal do AL Sistemas.
+- Na área Publicar, vínculos Vercel mostram `rootDirectory`/branch de produção e vínculos Render mostram serviço/branch. Após um commit, é possível iniciar na Render um deploy do mesmo SHA.
+- Projeto local permanece apenas como metadado opcional/legado de VPS; não é requisito para gerenciar, baixar ou publicar repositórios GitHub.
+- Pacote completo 1.0.89 inclui integralmente o atualizador cloud persistente da 1.0.88 e todas as melhorias visuais/R2/GitHub anteriores.
+
 ## 1.0.88
 - Central de Plataformas corrige a distinção entre domínio público da Vercel e URL única de deployment. O portal passa a usar exclusivamente um domínio associado ao projeto, preferindo o `<projeto>.vercel.app` estável ou domínio de produção verificado.
 - A URL técnica do deployment atual continua visível para diagnóstico, mas não é mais usada em `site_url`, botão Abrir portal ou origem pública.

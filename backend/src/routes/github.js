@@ -31,10 +31,138 @@ import GitHubMeta       from '../models/GitHubMeta.js'
 import fs               from 'fs'
 import path             from 'path'
 import sanitizeHtml     from 'sanitize-html'
+import multer           from 'multer'
+import JSZip            from 'jszip'
+import crypto           from 'node:crypto'
 import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient.js'
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
+import { storeProjectSnapshot } from '../services/cloudUpdateStorage.js'
 
 const router = Router()
+
+const publishUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Number(process.env.AL_GITHUB_PACKAGE_MAX_BYTES || 80 * 1024 * 1024) },
+})
+
+function normalizarTargetPath(value='') {
+  const raw=String(value||'').trim().replace(/\\/g,'/').replace(/^\/+|\/+$/g,'')
+  if(!raw) return ''
+  const parts=raw.split('/').filter(Boolean)
+  if(parts.some(p=>p==='.'||p==='..'||p==='.git')) {
+    const e=new Error('Pasta de destino inválida.'); e.status=400; throw e
+  }
+  if(parts.length>12){const e=new Error('Pasta de destino profunda demais.');e.status=400;throw e}
+  return parts.join('/')
+}
+
+function encodeGitPath(rel='') {
+  return String(rel||'').split('/').filter(Boolean).map(encodeURIComponent).join('/')
+}
+
+function arquivoPermitido(rel='') {
+  const parts=rel.split('/').filter(Boolean)
+  if(parts.some(p=>p==='.git'||p==='node_modules'||p==='.DS_Store')) return false
+  return !rel.includes('..') && !rel.startsWith('/')
+}
+
+async function extrairZipPublicavel(buffer) {
+  const zip=await JSZip.loadAsync(buffer,{checkCRC32:true})
+  const entries=Object.values(zip.files).filter(e=>!e.dir)
+  if(!entries.length){const e=new Error('O ZIP não contém arquivos.');e.status=400;throw e}
+  const normalized=entries.map(e=>({entry:e,path:String(e.name||'').replace(/\\/g,'/').replace(/^\/+/, '')})).filter(x=>x.path)
+  const firstParts=normalized.map(x=>x.path.split('/').filter(Boolean))
+  const commonRoot=firstParts.length>0 && firstParts.every(p=>p.length>1 && p[0]===firstParts[0][0]) ? firstParts[0][0] : ''
+  const out=[]
+  let totalBytes=0
+  for(const item of normalized){
+    let rel=item.path
+    if(commonRoot && rel.startsWith(commonRoot+'/')) rel=rel.slice(commonRoot.length+1)
+    rel=rel.replace(/^\/+|\/+$/g,'')
+    if(!rel||!arquivoPermitido(rel)) continue
+    const data=await item.entry.async('nodebuffer')
+    if(data.length>Number(process.env.AL_GITHUB_MAX_SINGLE_FILE_BYTES||95*1024*1024)){const e=new Error(`Arquivo grande demais para publicação pelo GitHub: ${rel}`);e.status=413;throw e}
+    totalBytes+=data.length
+    if(totalBytes>Number(process.env.AL_GITHUB_UNPACKED_MAX_BYTES||160*1024*1024)){const e=new Error('Conteúdo descompactado excede o limite de segurança.');e.status=413;throw e}
+    out.push({path:rel,data})
+    if(out.length>Number(process.env.AL_GITHUB_MAX_FILES||2500)){const e=new Error('O pacote possui arquivos demais para uma única publicação.');e.status=413;throw e}
+  }
+  if(!out.length){const e=new Error('Nenhum arquivo publicável foi encontrado no ZIP.');e.status=400;throw e}
+  return {files:out,totalBytes,commonRoot}
+}
+
+async function obterBranchBase(owner,repo,branch) {
+  const repoInfo=await githubFetch(`/repos/${owner}/${repo}`)
+  const wanted=String(branch||repoInfo.default_branch||'main').trim()||'main'
+  try{
+    const ref=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(wanted)}`)
+    const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${ref.object.sha}`)
+    return {repoInfo,branch:wanted,exists:true,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||''}
+  }catch(err){
+    if(err.status!==404) throw err
+    try{
+      const ref=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(repoInfo.default_branch||'main')}`)
+      const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${ref.object.sha}`)
+      return {repoInfo,branch:wanted,exists:false,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||''}
+    }catch(baseErr){
+      if(baseErr.status!==404) throw baseErr
+      return {repoInfo,branch:wanted,exists:false,parentSha:'',baseTreeSha:''}
+    }
+  }
+}
+
+async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false}) {
+  let base=await obterBranchBase(owner,repo,branch)
+  const prefix=normalizarTargetPath(targetPath)
+
+  // Git Database API retorna conflito em repositórios totalmente vazios.
+  // Inicializamos a branch padrão pela Contents API e, a partir daí, todo o
+  // restante segue pelo mesmo commit/tree transacional usado em repos normais.
+  if(!base.parentSha){
+    const defaultBranch=base.repoInfo.default_branch||'main'
+    if(base.branch!==defaultBranch){
+      const e=new Error(`O repositório está vazio. Faça a primeira publicação na branch padrão (${defaultBranch}); depois outras branches poderão ser criadas.`);e.status=409;throw e
+    }
+    const first=[...files].sort((a,b)=>a.data.length-b.data.length)[0]
+    const firstDest=prefix?`${prefix}/${first.path}`:first.path
+    await githubFetch(`/repos/${owner}/${repo}/contents/${encodeGitPath(firstDest)}`,{method:'PUT',body:JSON.stringify({
+      message:String(message||'Inicializa repositório pelo AL Sistemas').slice(0,240),
+      content:first.data.toString('base64'),
+    })})
+    base=await obterBranchBase(owner,repo,base.branch)
+  }
+  const tree=[]
+  const incomingPaths=new Set(files.map(file=>prefix?`${prefix}/${file.path}`:file.path))
+  let removidos=0
+  if(replacePath && base.baseTreeSha){
+    const current=await githubFetch(`/repos/${owner}/${repo}/git/trees/${base.baseTreeSha}?recursive=1`)
+    const pathPrefix=prefix?`${prefix}/`:''
+    for(const item of current.tree||[]){
+      if(item.type!=='blob') continue
+      const within=prefix ? item.path.startsWith(pathPrefix) : true
+      if(within && !incomingPaths.has(item.path)){tree.push({path:item.path,mode:'100644',type:'blob',sha:null});removidos++}
+    }
+  }
+  let enviados=0
+  for(const file of files){
+    const blob=await githubFetch(`/repos/${owner}/${repo}/git/blobs`,{method:'POST',body:JSON.stringify({content:file.data.toString('base64'),encoding:'base64'})})
+    const dest=prefix?`${prefix}/${file.path}`:file.path
+    tree.push({path:dest,mode:'100644',type:'blob',sha:blob.sha})
+    enviados++
+  }
+  const treeBody={tree}
+  if(base.baseTreeSha) treeBody.base_tree=base.baseTreeSha
+  const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{method:'POST',body:JSON.stringify(treeBody)})
+  if(base.baseTreeSha && newTree.sha===base.baseTreeSha) return {changed:false,branch:base.branch,commitSha:base.parentSha,commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,enviados:0,removidos:0}
+  const commitBody={message:String(message||'Publicação pelo AL Sistemas').slice(0,240),tree:newTree.sha,parents:base.parentSha?[base.parentSha]:[]}
+  const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{method:'POST',body:JSON.stringify(commitBody)})
+  if(base.exists){
+    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false})})
+  }else{
+    await githubFetch(`/repos/${owner}/${repo}/git/refs`,{method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha})})
+  }
+  return {changed:true,branch:base.branch,commitSha:commit.sha,commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,enviados,removidos}
+}
 
 const PROJETOS_DIR = process.env.PROJETOS_PATH
   ? path.resolve(process.cwd(), process.env.PROJETOS_PATH)
@@ -653,16 +781,24 @@ router.get('/meta/:repoId', autenticar, async (req, res) => {
 
 /* PUT /api/github/meta/:repoId */
 router.put('/meta/:repoId', autenticar, auditLog('github_meta'), async (req, res) => {
-  const { alias, tags, favorito, statusInterno, observacoes, projetoLocal, nomeCompleto } = req.body
+  const { alias, tags, favorito, statusInterno, observacoes, projetoLocal, nomeCompleto, publicacao } = req.body
   try {
+    const $set = { alias, tags, favorito, statusInterno, observacoes, projetoLocal, nomeCompleto }
+    if (publicacao && typeof publicacao === 'object') {
+      const repository = String(publicacao.repository || '').trim()
+      const branch = String(publicacao.branch || 'main').trim() || 'main'
+      const targetPath = normalizarTargetPath(publicacao.path || '')
+      if (repository && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return res.status(400).json({ erro: 'Repositório de publicação inválido.' })
+      $set.publicacao = { repository: repository || null, branch, path: targetPath, snapshotR2: Boolean(publicacao.snapshotR2) }
+    }
     const meta = await GitHubMeta.findOneAndUpdate(
       { repoId: Number(req.params.repoId) },
-      { $set: { alias, tags, favorito, statusInterno, observacoes, projetoLocal, nomeCompleto } },
+      { $set },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     )
     res.json(meta)
   } catch (err) {
-    res.status(500).json({ erro: err.message })
+    res.status(err.status || 500).json({ erro: err.message })
   }
 })
 
@@ -674,6 +810,83 @@ router.get('/projetos-locais', autenticar, async (req, res) => {
     res.json({ projetos: itens.filter(i => i.isDirectory()).map(i => ({ nome: i.name })) })
   } catch {
     res.json({ projetos: [] })
+  }
+})
+
+/* POST /api/github/repos/:owner/:repo/publicar-pacote
+   Publicação independente do módulo Projetos. O arquivo ZIP é enviado pelo
+   navegador, descompactado apenas em memória e aplicado ao caminho GitHub
+   escolhido. Vercel/Render permanecem uma etapa posterior e opcional. */
+router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.single('package'), async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Repositório de origem inválido.' })
+  if (!req.file?.buffer) return res.status(400).json({ erro: 'Selecione um arquivo ZIP para publicar.' })
+  const original = String(req.file.originalname || 'projeto.zip')
+  if (!/\.zip$/i.test(original)) return res.status(400).json({ erro: 'O pacote precisa ser um arquivo .zip.' })
+
+  const repository = String(req.body?.repository || `${owner}/${repo}`).trim()
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return res.status(400).json({ erro: 'Selecione um repositório GitHub válido.' })
+  const [destOwner, destRepo] = repository.split('/')
+  const branch = String(req.body?.branch || 'main').trim() || 'main'
+  if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch.includes('..')) return res.status(400).json({ erro: 'Branch de destino inválida.' })
+  let targetPath = ''
+  try { targetPath = normalizarTargetPath(req.body?.targetPath || '') } catch (e) { return res.status(e.status || 400).json({ erro: e.message }) }
+  const replacePath = String(req.body?.replacePath || '').toLowerCase() === 'true'
+  const snapshotR2 = String(req.body?.snapshotR2 || '').toLowerCase() === 'true'
+  const commitMessage = String(req.body?.commitMessage || `Publica ${original} pelo AL Sistemas`).trim().slice(0, 240)
+
+  try {
+    const [sourceRepo, destination] = await Promise.all([
+      githubFetch(`/repos/${owner}/${repo}`),
+      githubFetch(`/repos/${destOwner}/${destRepo}`),
+    ])
+    const writable = Boolean(destination.permissions?.push || destination.permissions?.maintain || destination.permissions?.admin)
+    if (!writable) return res.status(403).json({ erro: `O token salvo em Integrações e APIs não possui escrita em ${repository}.` })
+
+    const unpacked = await extrairZipPublicavel(req.file.buffer)
+    const sha256 = crypto.createHash('sha256').update(req.file.buffer).digest('hex')
+    let snapshot = null
+    if (snapshotR2) {
+      snapshot = await storeProjectSnapshot(req.file.buffer, {
+        owner: destOwner, repo: destRepo, branch, filename: original, sha256,
+      })
+    }
+
+    const result = await publicarPacoteNoGitHub({
+      owner: destOwner, repo: destRepo, branch, targetPath,
+      files: unpacked.files, message: commitMessage, replacePath,
+    })
+
+    await GitHubMeta.findOneAndUpdate(
+      { repoId: Number(sourceRepo.id) },
+      { $set: {
+        nomeCompleto: sourceRepo.full_name,
+        publicacao: { repository, branch: result.branch || branch, path: targetPath, snapshotR2 },
+      } },
+      { upsert: true, setDefaultsOnInsert: true }
+    ).catch(() => {})
+
+    await AuditLog.create({
+      admin_id: req.usuario._id, admin_email: req.usuario.email,
+      acao: 'publicar', recurso: 'github_pacote', recurso_id: repository,
+      payload: { source: `${owner}/${repo}`, repository, branch: result.branch || branch, targetPath, replacePath, snapshotR2, files: unpacked.files.length, bytes: unpacked.totalBytes, sha256 },
+      ip: req.ip, request_id: req.requestId || null,
+    }).catch(() => {})
+
+    repoInsightCache.delete(`${destOwner}/${destRepo}@${result.branch || branch}`)
+    res.status(201).json({
+      ok: true,
+      mensagem: result.changed ? `Pacote publicado em ${repository} com sucesso.` : 'O conteúdo enviado já corresponde ao conteúdo do GitHub.',
+      destino: { repository, branch: result.branch || branch, path: targetPath || '/', replacePath },
+      pacote: { nome: original, sha256, arquivos: unpacked.files.length, bytes: unpacked.totalBytes, raizRemovida: unpacked.commonRoot || null },
+      snapshot,
+      commit: result,
+    })
+  } catch (err) {
+    const msg = err.status === 403
+      ? `GitHub recusou a gravação em ${repository}. Confira Contents: Read and write para o token salvo em Integrações e APIs.`
+      : err.message
+    res.status(err.status || 500).json({ erro: msg })
   }
 })
 

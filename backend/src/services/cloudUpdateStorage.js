@@ -59,6 +59,25 @@ export async function storeUpdatePackage(filePath,{version,filename,sha256}) {
   return {bucket:cfg.bucket,objectKey:key,bytes:Number(head.ContentLength||stat.size),etag:String(head.ETag||'').replaceAll('"',''),endpoint:cfg.endpoint}
 }
 
+export async function storeProjectSnapshot(buffer,{owner,repo,branch='main',filename='project.zip',sha256=''}) {
+  if(!Buffer.isBuffer(buffer)||buffer.length===0) throw new Error('Snapshot vazio.')
+  const cfg=await getR2UpdateConfig()
+  const safeOwner=String(owner||'owner').replace(/[^A-Za-z0-9._-]+/g,'-')
+  const safeRepo=String(repo||'repo').replace(/[^A-Za-z0-9._-]+/g,'-')
+  const safeBranch=String(branch||'main').replace(/[^A-Za-z0-9._-]+/g,'-')
+  const safeName=path.basename(filename).replace(/[^A-Za-z0-9._-]+/g,'-')
+  const digest=String(sha256||'').replace(/[^a-f0-9]/gi,'').slice(0,16)||'snapshot'
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-')
+  const key=`projects/${safeOwner}/${safeRepo}/snapshots/${safeBranch}/${stamp}-${digest}-${safeName}`
+  const client=createR2Client(cfg)
+  await client.send(new PutObjectCommand({
+    Bucket:cfg.bucket,Key:key,Body:buffer,ContentLength:buffer.length,ContentType:'application/zip',
+    Metadata:{owner:safeOwner,repo:safeRepo,branch:safeBranch,sha256:String(sha256||'')},
+  }))
+  const head=await client.send(new HeadObjectCommand({Bucket:cfg.bucket,Key:key}))
+  return {bucket:cfg.bucket,objectKey:key,bytes:Number(head.ContentLength||buffer.length),etag:String(head.ETag||'').replaceAll('"',''),endpoint:cfg.endpoint}
+}
+
 export async function downloadUpdatePackage({bucket,objectKey},destination) {
   const cfg=await getR2UpdateConfig()
   if(bucket && bucket!==cfg.bucket) throw new Error(`O pacote está no bucket ${bucket}, mas Integrações e APIs aponta para ${cfg.bucket}.`)
