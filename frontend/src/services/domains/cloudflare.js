@@ -1,7 +1,7 @@
 /**
  * cloudflare.js — Serviço de acesso à API Cloudflare (via backend proxy).
  */
-import { api } from './http.js'
+import { api, BASE_URL, withAuthHeaders } from './http.js'
 
 export const cloudflareService = {
   /** Verifica token e retorna info da conta */
@@ -153,14 +153,29 @@ export const cloudflareService = {
   },
 
   /** Upload de um arquivo direto para o R2 via S3 API */
-  async uploadObjeto(bucket, prefix, file) {
+  async uploadObjeto(bucket, prefix, file, onProgress = null) {
     const fd = new FormData()
     fd.append('file', file)
     if (prefix) fd.append('prefix', prefix)
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/upload`, {
-      method: 'POST',
-      body:   fd,
-      headers: {},
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BASE_URL}/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/upload`)
+      xhr.withCredentials = true
+      const headers = withAuthHeaders()
+      headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+      xhr.upload.onprogress = ev => {
+        if (!ev.lengthComputable || typeof onProgress !== 'function') return
+        onProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)))
+      }
+      xhr.onerror = () => reject(new Error(`Não foi possível conectar ao backend em ${BASE_URL}.`))
+      xhr.onload = () => {
+        let data = {}
+        try { data = JSON.parse(xhr.responseText || '{}') } catch { /* noop */ }
+        if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(data.erro || `Erro ${xhr.status}`))
+        onProgress?.(100)
+        resolve(data)
+      }
+      xhr.send(fd)
     })
   },
 

@@ -1,17 +1,16 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.92",
+  "version": "1.0.93",
   "packageFormat": 2,
   "changelog": [
-    "GitHub Actions: cada execução passa a oferecer Resumo, Analisar IA, Sugestão e download ZIP de logs no mesmo painel.",
-    "Resumo estrutural contabiliza jobs, etapas concluídas, falhas e etapas ignoradas sem consumir IA.",
-    "Analisar IA busca os logs no backend, prioriza jobs/etapas com falha e envia apenas trechos relevantes para Gemini/OpenRouter configurados em Integrações e APIs.",
-    "Sugestão de correção por IA apresenta causa provável, evidências, arquivos prováveis, risco e passos de validação sem alterar arquivos ou workflows automaticamente.",
-    "Logs são tratados como conteúdo não confiável e possíveis segredos não devem ser reproduzidos pela análise.",
-    "O download ZIP de logs continua disponível integralmente para backup, compartilhamento e diagnóstico manual.",
-    "A interface de análise abre em popup responsivo; no mobile os controles da execução reorganizam sem criar vazamento horizontal.",
-    "O uso da IA fica registrado no AuditLog com repositório, run, modo e provedor, sem registrar o conteúdo completo dos logs.",
-    "Pacote completo 1.0.92 inclui integralmente o Wizard de publicação 1.0.91, autenticação cloud/diagnóstico 1.0.90, GitHub-first 1.0.89 e atualizador R2 da 1.0.88."
+    "Cloudflare R2: a tela passa a priorizar buckets e objetos; DNS, SSL, Workers, Analytics e demais recursos ficam reunidos em uma engrenagem no topo.",
+    "R2: resumo compacto de armazenamento, objetos e buckets; dentro de cada bucket são exibidos uso, quantidade de objetos e uploads retornados pela integração atual.",
+    "R2: upload direto passa a exibir progresso real no celular/computador e atualiza a listagem e as métricas após concluir.",
+    "GitHub Publicar: envio de ZIP passa a exibir progresso real; após 100% a interface informa que o backend está validando o pacote, criando snapshot e commit.",
+    "GitHub Publicar: snapshot R2 passa a vir ativado por padrão para novos destinos, continuando opcional e podendo ser desmarcado no Wizard.",
+    "Snapshots de publicação são armazenados em projects/<conta>/<repositorio>/snapshots/<branch>/ no bucket R2 configurado em Integrações e APIs.",
+    "A reorganização preserva Termux/VPS, GitHub, Vercel e Render; nenhuma credencial paralela foi criada.",
+    "Pacote completo 1.0.93 inclui todas as melhorias das versões anteriores."
   ],
   "updatePackages": {
     "full": true,

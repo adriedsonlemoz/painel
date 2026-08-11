@@ -6,7 +6,7 @@
  *
  * Todas as chamadas passam pelo proxy backend. Token NUNCA exposto no frontend.
  */
-import { api, BASE_URL, authFetch } from './http.js'
+import { api, BASE_URL, authFetch, withAuthHeaders } from './http.js'
 
 
 
@@ -119,16 +119,34 @@ export const githubService = {
   },
 
   /** Publica um ZIP diretamente em repository/branch/path, sem depender do módulo Projetos. */
-  async publicarPacote(owner, repo, file, config = {}) {
+  async publicarPacote(owner, repo, file, config = {}, onProgress = null) {
     const form = new FormData()
     form.append('package', file)
     for (const [k, v] of Object.entries(config)) form.append(k, String(v ?? ''))
-    const resp = await authFetch(`${BASE_URL}/github/repos/${owner}/${repo}/publicar-pacote`, {
-      method: 'POST', body: form, credentials: 'include',
+
+    // XMLHttpRequest é usado aqui de propósito: fetch não expõe progresso de upload.
+    // Isso evita que, especialmente no celular, um ZIP grande pareça não ter iniciado.
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BASE_URL}/github/repos/${owner}/${repo}/publicar-pacote`)
+      xhr.withCredentials = true
+      const headers = withAuthHeaders()
+      headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+      xhr.upload.onprogress = ev => {
+        if (!ev.lengthComputable || typeof onProgress !== 'function') return
+        onProgress({ loaded: ev.loaded, total: ev.total, percent: Math.min(100, Math.round((ev.loaded / ev.total) * 100)) })
+      }
+      xhr.onerror = () => reject(new Error(`Não foi possível conectar ao backend em ${BASE_URL}.`))
+      xhr.onabort = () => reject(new Error('Envio cancelado.'))
+      xhr.onload = () => {
+        let data = {}
+        try { data = JSON.parse(xhr.responseText || '{}') } catch { /* resposta inesperada */ }
+        if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(data.erro || `Erro ${xhr.status}`))
+        if (typeof onProgress === 'function') onProgress({ loaded: file.size, total: file.size, percent: 100, uploaded: true })
+        resolve(data)
+      }
+      xhr.send(form)
     })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) throw new Error(data.erro || `Erro ${resp.status}`)
-    return data
   },
 
   /** Cria um novo repositório na conta autenticada */

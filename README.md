@@ -293,3 +293,8 @@ O pré-check valida espaço, permissões, Node.js, dependências, migrações, M
 ## AL Sistemas 1.0.92 — Diagnóstico inteligente de GitHub Actions
 
 O painel GitHub mantém o ZIP de logs e adiciona resumo estrutural, análise por IA e sugestões de correção para cada execução. A IA usa apenas Gemini/OpenRouter configurados em Integrações e APIs, recebe trechos relevantes selecionados no backend e nunca altera workflows automaticamente.
+
+
+## AL Sistemas 1.0.93 — R2 focado e uploads com progresso
+
+A tela Cloudflare prioriza R2/buckets e move os demais recursos para a engrenagem. Uploads diretos ao R2 e publicações ZIP no GitHub exibem progresso real. O snapshot R2 do Wizard GitHub fica habilitado por padrão, podendo ser desativado antes do commit.

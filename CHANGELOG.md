@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.93
+
+- Cloudflare R2 passa a ser o foco da tela Cloudflare; recursos avançados foram movidos para uma engrenagem/modal.
+- Resumo compacto de uso do R2 e métricas por bucket.
+- Upload R2 com progresso real e atualização automática da listagem após concluir.
+- Wizard GitHub exibe progresso real do ZIP e estado de processamento após o upload.
+- Snapshot R2 fica habilitado por padrão para novas publicações GitHub, mas permanece opcional.
+- Snapshots ficam em `projects/<conta>/<repositorio>/snapshots/<branch>/`.
+- Compatibilidade com Termux/VPS e fluxo cloud Vercel/Render preservada.
+
 ## 1.0.92
 - GitHub Actions: cada execução passa a ter quatro ações no mesmo ponto do painel: `Resumo`, `Analisar IA`, `Sugestão` e `ZIP`.
 - `Resumo` é determinístico e não consome IA: contabiliza jobs, etapas concluídas, falhas, ignoradas e mostra exatamente quais etapas falharam.

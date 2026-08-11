@@ -243,3 +243,8 @@ Dados persistentes como `.env`, `backend/.al-sistemas/`, uploads, backups e logs
 ### Diagnóstico de GitHub Actions (1.0.92)
 
 A análise de logs é feita no backend usando o token GitHub do cofre central. O ZIP completo continua disponível. Gemini/OpenRouter são opcionais: o resumo estrutural funciona sem IA; diagnóstico e sugestão exigem ao menos um provedor ativo em Integrações e APIs.
+
+
+### Publicação GitHub/R2 (1.0.93)
+
+O Wizard mostra o progresso de upload do ZIP. Com snapshot R2 habilitado, o pacote é salvo em `projects/<owner>/<repo>/snapshots/<branch>/` antes do commit. Após o upload chegar a 100%, o backend ainda valida/descompacta e publica no GitHub.

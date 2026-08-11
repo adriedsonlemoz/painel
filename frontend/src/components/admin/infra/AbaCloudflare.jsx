@@ -957,18 +957,20 @@ function AbaR2({ status, onRefreshStatus }) {
 
   // Upload
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = React.useRef(null)
 
   async function uploadArquivo(e) {
     const file = e.target.files?.[0]
     if (!file || !bucketSel) return
-    setUploading(true)
+    setUploading(true); setUploadProgress(0)
     try {
-      await cloudflareService.uploadObjeto(bucketSel.nome, prefix, file)
+      await cloudflareService.uploadObjeto(bucketSel.nome, prefix, file, setUploadProgress)
       toast.success(`"${file.name}" enviado para R2!`)
-      carregarObjetos(bucketSel, prefix, '')
+      await carregarObjetos(bucketSel, prefix, '')
+      await carregarOverview()
     } catch (err) { toast.error(err.message) }
-    finally { setUploading(false); e.target.value = '' }
+    finally { setUploading(false); setUploadProgress(0); e.target.value = '' }
   }
 
   // ── Carrega buckets + usage ─────────────────────────────────
@@ -1152,20 +1154,15 @@ function AbaR2({ status, onRefreshStatus }) {
         </div>
       )}
 
-      {/* Cards de uso total */}
+      {/* Resumo compacto — conteúdo do R2 primeiro, sem ocupar a tela com cards grandes */}
       {usage && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px,1fr))', gap: 10 }}>
-          {[
-            { l: 'Armazenamento', v: bytes(usage.totalBytes),   c: CF.orange },
-            { l: 'Objetos',       v: (usage.totalObjetos||0).toLocaleString('pt-BR'), c: C.blue },
-            { l: 'Buckets',       v: String(buckets.length),   c: C.purple },
-          ].map(({ l, v, c }) => (
-            <PageCard key={l} style={{ padding: '12px 14px', background: C.surface }}>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{l}</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: c }}>{v}</div>
-            </PageCard>
-          ))}
-        </div>
+        <PageCard style={{ padding: '10px 12px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6 }}>
+            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Armazenamento</span><b style={{display:'block',fontSize:13,color:CF.orange,overflow:'hidden',textOverflow:'ellipsis'}}>{bytes(usage.totalBytes)}</b></div>
+            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Objetos</span><b style={{display:'block',fontSize:13,color:C.text}}>{(usage.totalObjetos||0).toLocaleString('pt-BR')}</b></div>
+            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Buckets</span><b style={{display:'block',fontSize:13,color:C.text}}>{buckets.length}</b></div>
+          </div>
+        </PageCard>
       )}
 
       {/* Header + botão criar */}
@@ -1242,8 +1239,17 @@ function AbaR2({ status, onRefreshStatus }) {
   )
 
   // ═══ BROWSER ═════════════════════════════════════════════════
+  const bucketUsage = usage?.buckets?.find(x => x.nome === bucketSel?.nome) || null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {bucketUsage && <PageCard style={{padding:'9px 12px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:6}}>
+          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>USO DO BUCKET</span><b style={{display:'block',fontSize:12,color:CF.orange}}>{bytes(bucketUsage.bytes||0)}</b></div>
+          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>OBJETOS</span><b style={{display:'block',fontSize:12,color:C.text}}>{(bucketUsage.objetos||0).toLocaleString('pt-BR')}</b></div>
+          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>UPLOADS</span><b style={{display:'block',fontSize:12,color:C.text}}>{(bucketUsage.uploads||0).toLocaleString('pt-BR')}</b></div>
+        </div>
+        <div style={{fontSize:8.5,color:C.muted,marginTop:6}}>Tráfego/egress não é inventado: esta tela mostra apenas métricas retornadas pela integração atual.</div>
+      </PageCard>}
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Btn onClick={() => { setView('overview'); setBucketSel(null) }} variant="secondary"
@@ -1262,7 +1268,7 @@ function AbaR2({ status, onRefreshStatus }) {
           <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={uploadArquivo} />
           <Btn onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="secondary"
             style={{ width: 'auto', padding: '5px 12px', fontSize: 12 }}>
-            {uploading ? <Spin size={12} /> : '⬆ Upload'}
+            {uploading ? `⬆ ${uploadProgress}%` : '⬆ Upload'}
           </Btn>
           <Btn onClick={() => carregarObjetos(bucketSel, prefix, '')} variant="secondary"
             style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }}>
@@ -1659,7 +1665,8 @@ function AbaPageRules({ zona }) {
 }
 
 export default function AbaCloudflare() {
-  const [abaAtiva,      setAbaAtiva]      = useState('geral')
+  const [abaAtiva,      setAbaAtiva]      = useState('r2')
+  const [configAberta, setConfigAberta] = useState(false)
   const [statusCF,      setStatusCF]      = useState(null)
   const [loadingStatus, setLoadingStatus] = useState(true)
   const [zonaSelecionada, setZonaSelecionada] = useState(null)
@@ -1734,30 +1741,24 @@ export default function AbaCloudflare() {
         )}
       </div>
 
-      {/* Tabs */}
-      <div style={{
-        display: 'flex', gap: 4, flexWrap: 'wrap',
-        padding: '6px 8px', background: C.surface2,
-        borderRadius: RADIUS.md, border: `1px solid ${C.border}`,
-      }}>
-        {ABAS.filter(a => a.req !== false).map(a => (
-          <button
-            key={a.id}
-            onClick={() => setAbaAtiva(a.id)}
-            disabled={a.req === false}
-            style={{
-              padding: '5px 14px', borderRadius: RADIUS.sm, cursor: 'pointer',
-              border: 'none', fontSize: 12, fontWeight: abaAtiva === a.id ? 700 : 400,
-              background: abaAtiva === a.id ? CF.orange : 'transparent',
-              color: abaAtiva === a.id ? '#fff' : a.req === false ? C.muted : C.text,
-              transition: 'all 0.15s',
-            }}
-          >
-            {a.label}
-            {a.sub && <span style={{ fontSize: 10, opacity: 0.8, marginLeft: 4 }}>({a.sub})</span>}
-          </button>
-        ))}
+      {/* Navegação compacta: R2 fica no foco; demais superfícies ficam na engrenagem. */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'7px 9px',background:C.surface2,borderRadius:RADIUS.md,border:`1px solid ${C.border}`}}>
+        <button type="button" onClick={()=>setAbaAtiva('r2')} style={{border:0,borderRadius:RADIUS.sm,padding:'6px 10px',background:abaAtiva==='r2'?CF.orange:'transparent',color:abaAtiva==='r2'?'#fff':C.text,fontWeight:800,fontSize:12,cursor:'pointer'}}>🪣 R2 Storage</button>
+        <div style={{display:'flex',alignItems:'center',gap:7,minWidth:0}}>
+          {abaAtiva!=='r2'&&<span style={{fontSize:10,color:C.muted,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ABAS.find(a=>a.id===abaAtiva)?.label}</span>}
+          <button type="button" onClick={()=>setConfigAberta(true)} aria-label="Abrir recursos Cloudflare" title="Recursos e configurações Cloudflare" style={{width:34,height:34,borderRadius:10,border:`1px solid ${C.border}`,background:C.surface,color:C.text,cursor:'pointer',fontSize:16}}>⚙</button>
+        </div>
       </div>
+
+      {configAberta&&<div role="dialog" aria-modal="true" aria-label="Recursos Cloudflare" onClick={e=>e.target===e.currentTarget&&setConfigAberta(false)} style={{position:'fixed',inset:0,zIndex:1200,background:'#0008',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+        <div style={{width:'min(620px,100%)',maxHeight:'88vh',overflow:'auto',background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:14,boxShadow:'0 24px 70px #0006'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:12}}><div><b style={{fontSize:15,color:C.text}}>Cloudflare · Recursos</b><div style={{fontSize:10,color:C.muted,marginTop:3}}>Abra somente quando precisar administrar DNS, SSL, Workers e demais recursos.</div></div><button onClick={()=>setConfigAberta(false)} style={{border:0,background:'transparent',fontSize:20,color:C.muted,cursor:'pointer'}}>×</button></div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:7}}>
+            {ABAS.filter(a=>a.req!==false).map(a=><button key={a.id} type="button" onClick={()=>{setAbaAtiva(a.id);setConfigAberta(false)}} style={{minHeight:62,borderRadius:11,border:`1px solid ${abaAtiva===a.id?CF.orange:C.border}`,background:abaAtiva===a.id?CF.orangeL:C.surface2,color:C.text,padding:'8px 6px',fontSize:10,fontWeight:750,cursor:'pointer',overflowWrap:'anywhere'}}>{a.label}{a.sub&&<small style={{display:'block',fontSize:8,color:C.muted,marginTop:3}}>{a.sub}</small>}</button>)}
+          </div>
+          <button type="button" onClick={()=>{setConfigAberta(false);window.location.href='/admin/integracoes'}} style={{width:'100%',marginTop:10,minHeight:38,borderRadius:10,border:`1px solid ${C.border}`,background:C.surface2,color:C.text,fontSize:10,fontWeight:800,cursor:'pointer'}}>🔐 Credenciais em Integrações e APIs</button>
+        </div>
+      </div>}
 
       {/* Conteúdo */}
       {abaAtiva === 'geral'      && <AbaGeral     status={statusCF} carregando={loadingStatus} recarregar={carregarStatus} />}
