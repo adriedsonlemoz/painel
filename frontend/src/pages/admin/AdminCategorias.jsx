@@ -250,7 +250,7 @@ export default function AdminCategorias() {
       <ConfirmModal
         aberto={confirm.aberto}
         titulo={`Excluir "${confirm.cat?.nome}"?`}
-        mensagem="As notícias desta categoria ficarão sem categoria. Esta ação é irreversível."
+        mensagem="Só é possível excluir uma categoria sem notícias e sem feeds RSS vinculados."
         labelConfirmar="Excluir"
         carregando={confirm.carregando}
         onConfirmar={confirmarExclusao}

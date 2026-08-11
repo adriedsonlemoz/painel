@@ -1,74 +1,83 @@
 /**
- * rssImporter.js  — v2.2
- * ─────────────────────────────────────
- * Serviço central de importação de notícias via RSS.
- *
- * CORREÇÕES v2.1:
- *  1. parseFeed: wrapping de erro com mensagem clara + fallback via fetch nativo
- *     quando rss-parser é bloqueado pelo servidor remoto.
- *  2. importarTodasFontes: respeita auto_update e intervalo_min por fonte,
- *     comportamento antes feito pelo rssScheduler.js (agora descontinuado).
- *  3. Erros de fetch remoto são distinguidos de erros de configuração local.
- *
- * CORREÇÕES v2.2:
- *  4. fetchFeedXmlFallback: remove BOM UTF-8 (\uFEFF) e whitespace antes do XML.
- *     Corrige "Non-whitespace before first tag. Line: 0, Column: 1" em feeds de
- *     servidores Windows/IIS e geradores PHP legados.
- *  5. parseFeed fallback: em vez de re-lançar o erro original, agora tenta
- *     parser.parseString(xml) com o XML já limpo do BOM, permitindo importar
- *     feeds que o rss-parser recusava por esse motivo.
- *
- * Estratégia de deduplicação:
- *   ┌─────────────────────────────────────────────────────────────────┐
- *   │  Índice único no campo `guid` do model Noticia                  │
- *   │  + insertMany({ ordered: false })                               │
- *   │  O MongoDB rejeita silenciosamente os docs já existentes        │
- *   └─────────────────────────────────────────────────────────────────┘
+ * Importador RSS integrado ao módulo Conteúdo.
+ * - fetch remoto protegido contra SSRF e com limite de tamanho
+ * - decoding por charset + correção de mojibake
+ * - Fonte e Categoria editoriais obrigatórias
+ * - imagens copiadas para Cloudflare R2 quando disponível
+ * - IA executada depois da persistência, sem bloquear a importação
  */
 import Parser from 'rss-parser'
 import slugify from 'slugify'
-import crypto  from 'node:crypto'
+import crypto from 'node:crypto'
 
 import RssFonte from '../models/RssFonte.js'
-import Noticia  from '../models/Noticia.js'
-import Fonte    from '../models/Fonte.js'
+import Noticia from '../models/Noticia.js'
+import Fonte from '../models/Fonte.js'
 import Categoria from '../models/Categoria.js'
 import { analisarNoticiaEditorial } from '../utils/aiClient.js'
 import { sanitizeContent, makeExcerpt, extractFirstImage } from './rssSanitizer.js'
+import { uploadRssNewsImage, getR2MediaConfig } from './r2MediaStorage.js'
+import { fetchRemoteText } from '../utils/remoteFetch.js'
 import { logger } from '../utils/logger.js'
 
-// ─── Constantes ───────────────────────────────────────────────────────────────
-
-const USER_AGENT = 'Mozilla/5.0 (compatible; ALSistemas/2.1 RSS Importer; +https://alsistemas.com.br)'
-
+const USER_AGENT = 'Mozilla/5.0 (compatible; ALSistemas/1.0 RSS Importer)'
 const FETCH_HEADERS = {
   'User-Agent': USER_AGENT,
-  'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-  'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+  Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, text/plain;q=0.8, */*;q=0.2',
+  'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7',
+  'Cache-Control': 'no-cache',
 }
 
-// ─── Parser RSS (rss-parser) ─────────────────────────────────────────────────
-
 const parser = new Parser({
-  timeout: 15_000,
-  headers: FETCH_HEADERS,
-  requestOptions: {
-    // Segue redirecionamentos automaticamente
-    rejectUnauthorized: false, // tolera SSL self-signed em fontes locais
-  },
   customFields: {
     feed: [],
     item: [
-      ['media:content',   'mediaContent',   { keepArray: false }],
-      ['media:thumbnail', 'mediaThumbnail',  { keepArray: false }],
+      ['media:content', 'mediaContent', { keepArray: false }],
+      ['media:thumbnail', 'mediaThumbnail', { keepArray: false }],
+      ['media:credit', 'mediaCredit'],
+      ['media:description', 'mediaDescription'],
+      ['media:title', 'mediaTitle'],
       ['content:encoded', 'contentEncoded'],
       ['dc:creator', 'creator'],
-      ['dc:date',    'dcDate'],
+      ['dc:date', 'dcDate'],
     ],
   },
 })
 
-// ─── Helpers internos ─────────────────────────────────────────────────────────
+const MOJIBAKE_MAP = new Map([
+  ['â€™', '’'], ['â€˜', '‘'], ['â€œ', '“'], ['â€', '”'], ['â€“', '–'], ['â€”', '—'],
+  ['â€¦', '…'], ['Âº', 'º'], ['Âª', 'ª'], ['Â°', '°'], ['Â·', '·'], ['Â ', ' '],
+])
+
+function textBadness(value = '') {
+  const s = String(value)
+  return (s.match(/�/g) || []).length * 5 + (s.match(/(?:Ã.|Â.|â€|â€™|â€œ|â€|â€“|â€”)/g) || []).length * 2
+}
+
+export function normalizeFeedText(value = '') {
+  if (value == null) return value
+  let text = String(value).replace(/^\uFEFF/, '')
+  for (const [bad, good] of MOJIBAKE_MAP) text = text.split(bad).join(good)
+  if (/[ÃÂ]/.test(text)) {
+    try {
+      const candidate = Buffer.from(text, 'latin1').toString('utf8')
+      if (textBadness(candidate) < textBadness(text)) text = candidate
+    } catch {}
+  }
+  return text.normalize('NFC')
+}
+
+function normalizeObjectStrings(value, depth = 0) {
+  if (depth > 8 || value == null) return value
+  if (typeof value === 'string') return normalizeFeedText(value)
+  if (Array.isArray(value)) return value.map(v => normalizeObjectStrings(v, depth + 1))
+  if (typeof value === 'object') {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) out[k] = normalizeObjectStrings(v, depth + 1)
+    return out
+  }
+  return value
+}
 
 function normalizeArticleUrl(raw = '') {
   const value = String(raw || '').trim()
@@ -76,30 +85,22 @@ function normalizeArticleUrl(raw = '') {
   try {
     const u = new URL(value)
     u.hash = ''
-    const tracking = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','utm_id','fbclid','gclid','mc_cid','mc_eid']
-    for (const key of tracking) u.searchParams.delete(key)
+    for (const key of ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','utm_id','fbclid','gclid','mc_cid','mc_eid']) u.searchParams.delete(key)
     u.hostname = u.hostname.toLowerCase()
     u.pathname = u.pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/'
     u.searchParams.sort()
     return u.toString()
-  } catch {
-    return value
-  }
+  } catch { return value }
 }
 
-
 function normalizeTitleTokens(value = '') {
-  return String(value || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
     .filter(t => t.length >= 4 && !['para','como','mais','sobre','pela','pelo','entre','apos','ainda','esta','este','essa','esse','isso','uma','com','sem','dos','das','nos','nas'].includes(t))
 }
 
 function titleSimilarity(a, b) {
-  const A = new Set(normalizeTitleTokens(a))
-  const B = new Set(normalizeTitleTokens(b))
+  const A = new Set(normalizeTitleTokens(a)); const B = new Set(normalizeTitleTokens(b))
   if (!A.size || !B.size) return 0
   let inter = 0
   for (const token of A) if (B.has(token)) inter++
@@ -111,513 +112,256 @@ async function removerSemelhantes(docs = [], janelaHoras = 72, limite = 0.72) {
   if (!docs.length) return { docs, semelhantes: 0 }
   const desde = new Date(Date.now() - janelaHoras * 60 * 60 * 1000)
   const existentes = await Noticia.find({
-    status: { $in: ['rascunho','revisao','agendado','publicado'] },
-    criado_em: { $gte: desde },
+    status: { $in: ['rascunho','revisao','agendado','publicado'] }, criado_em: { $gte: desde },
   }).select('titulo').sort({ criado_em: -1 }).limit(400).lean()
-
-  const aceitos = []
-  let semelhantes = 0
+  const aceitos = []; let semelhantes = 0
   for (const doc of docs) {
-    const candidatos = [...existentes, ...aceitos]
-    const parecida = candidatos.some(n => titleSimilarity(doc.titulo, n.titulo) >= limite)
-    if (parecida) semelhantes++
+    if ([...existentes, ...aceitos].some(n => titleSimilarity(doc.titulo, n.titulo) >= limite)) semelhantes++
     else aceitos.push(doc)
   }
   return { docs: aceitos, semelhantes }
 }
 
 function buildGuid(item) {
-  // Link canônico primeiro: vários feeds atribuem GUIDs diferentes à mesma matéria.
-  const canonicalLink = normalizeArticleUrl(item.link)
-  const raw = canonicalLink || String(item.guid || item.id || item.title || '').trim()
-  if (!raw) return null
-  return crypto.createHash('md5').update(raw).digest('hex')
+  const raw = normalizeArticleUrl(item.link) || String(item.guid || item.id || item.title || '').trim()
+  return raw ? crypto.createHash('md5').update(raw).digest('hex') : null
 }
 
-function buildSlug(title = '') {
-  const base = slugify(title, {
-    lower:  true,
-    strict: true,
-    locale: 'pt',
-    trim:   true,
-  }).substring(0, 80)
-
-  const suffix = Date.now().toString(36)
+function buildSlug(title = '', suffix = Date.now().toString(36)) {
+  const base = slugify(title, { lower: true, strict: true, locale: 'pt', trim: true }).substring(0, 80)
   return `${base || 'noticia'}-${suffix}`
 }
 
 function extractBestImage(item, rawContent = '') {
-  return (
-    item.enclosure?.url                          ||
-    item.mediaContent?.$?.url                    ||
-    item['media:content']?.$?.url                ||
-    item.mediaThumbnail?.$?.url                  ||
-    item['media:thumbnail']?.$?.url              ||
-    extractFirstImage(rawContent)                ||
-    extractFirstImage(item.contentSnippet || item.summary || '') ||
-    null
-  )
+  const raw = item.enclosure?.url || item.mediaContent?.$?.url || item['media:content']?.$?.url ||
+    item.mediaThumbnail?.$?.url || item['media:thumbnail']?.$?.url || extractFirstImage(rawContent) ||
+    extractFirstImage(item.contentSnippet || item.summary || '') || null
+  if (!raw) return null
+  try { return new URL(String(raw).trim(), item.link || undefined).toString() } catch { return String(raw).trim() || null }
+}
+
+function extractImageAlt(rawContent = '', item = {}) {
+  const fromMedia = item.mediaDescription || item.mediaTitle || ''
+  if (fromMedia) return makeExcerpt(String(fromMedia), 220)
+  const m = String(rawContent).match(/<img[^>]*\balt=["']([^"']+)["']/i)
+  return normalizeFeedText(m?.[1] || '').slice(0, 220)
+}
+
+function extractImageCredit(item = {}) {
+  const raw = item.mediaCredit
+  if (typeof raw === 'string') return normalizeFeedText(raw).slice(0, 220)
+  return normalizeFeedText(raw?._ || raw?.$?.role || '').slice(0, 220)
 }
 
 function parsePublishedAt(item) {
-  const raw = item.pubDate || item.isoDate || item.dcDate || ''
-  if (!raw) return new Date()
-  const d = new Date(raw)
-  return isNaN(d.getTime()) ? new Date() : d
+  const d = new Date(item.pubDate || item.isoDate || item.dcDate || '')
+  return Number.isNaN(d.getTime()) ? new Date() : d
 }
 
-function buildDoc(item, { fonteRssId, fonteId, categoriaId }) {
+function buildDoc(item, { fonteRssId, fonteId, categoriaId, fonteNome }) {
   const guid = buildGuid(item)
-  if (!guid) return null
-
-  const titulo = item.title?.trim()
-  if (!titulo) return null
-
-  const rawContent =
-    item.contentEncoded              ||
-    item['content:encoded']          ||
-    item.content                     ||
-    item.summary                     ||
-    item.description                 ||
-    ''
-
-  const conteudoSanitizado = sanitizeContent(rawContent)
-  const resumo = makeExcerpt(conteudoSanitizado || item.contentSnippet || '', 300)
+  const titulo = normalizeFeedText(item.title || '').trim()
+  if (!guid || !titulo) return null
+  const rawContent = normalizeFeedText(item.contentEncoded || item['content:encoded'] || item.content || item.summary || item.description || '')
+  const conteudo = sanitizeContent(rawContent)
+  const resumo = makeExcerpt(conteudo || normalizeFeedText(item.contentSnippet || ''), 300)
   const imagem = extractBestImage(item, rawContent)
-
   return {
-    guid,
-    titulo,
-    slug:        buildSlug(titulo),
-    conteudo:    conteudoSanitizado || resumo || '(conteúdo não disponível)',
-    resumo:      resumo || '',
-    imagem_url:  imagem,
-    url_original: normalizeArticleUrl(item.link),
-    publicado_em: parsePublishedAt(item),
-    fonte_id:    fonteId,
-    categoria_id: categoriaId ?? null,
-    rss_fonte_id: fonteRssId,
-    status:    'rascunho',
-    importado: true,
-    autor:     item.creator || item.author || null,
+    guid, titulo, slug: buildSlug(titulo), conteudo: conteudo || resumo || '(conteúdo não disponível)', resumo: resumo || '',
+    imagem_url: imagem, imagem_storage: imagem ? 'external' : null,
+    imagem_alt: extractImageAlt(rawContent, item) || titulo.slice(0, 220),
+    imagem_credito: extractImageCredit(item) || normalizeFeedText(fonteNome || '').slice(0, 220),
+    imagem_fonte_url: imagem || null,
+    url_original: normalizeArticleUrl(item.link), publicado_em: parsePublishedAt(item),
+    fonte_id: fonteId, categoria_id: categoriaId, rss_fonte_id: fonteRssId,
+    status: 'rascunho', importado: true, autor: normalizeFeedText(item.creator || item.author || '') || null,
   }
 }
 
-// ─── FIX: Fallback fetch para feeds que bloqueiam rss-parser ─────────────────
-
-/**
- * Tenta buscar o feed via fetch nativo (fallback quando rss-parser é bloqueado).
- * Retorna o XML bruto como string ou lança erro.
- */
-async function fetchFeedXmlFallback(url) {
-  const res = await fetch(url, {
-    headers: {
-      ...FETCH_HEADERS,
-      // Header extra que alguns servidores exigem
-      'Cache-Control': 'no-cache',
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(15_000),
-  })
-
-  if (!res.ok) {
-    // FIX: mensagem clara distinguindo erro remoto de erro local
-    const detail = res.status === 404
-      ? 'Feed não encontrado (HTTP 404) — verifique se a URL do feed ainda é válida'
-      : res.status === 403
-        ? 'Acesso negado pelo servidor do feed (HTTP 403) — o site pode bloquear importadores'
-        : res.status === 401
-          ? 'Feed requer autenticação (HTTP 401)'
-          : `Servidor do feed retornou HTTP ${res.status}`
-    throw new Error(detail)
-  }
-
-  // FIX v2.2: Remove BOM UTF-8 (\uFEFF) e qualquer whitespace antes do primeiro '<'.
-  // Isso resolve "Non-whitespace before first tag" — feeds que emitem BOM ou espaços
-  // antes do prólogo XML, algo comum em servidores Windows/IIS e geradores PHP legados.
-  let text = await res.text()
-  text = text.replace(/^\uFEFF/, '').trimStart()
-
-  if (!text.startsWith('<')) {
-    throw new Error('Resposta do feed não é um XML válido — verifique se a URL é um feed RSS ou Atom')
-  }
-  return text
-}
-
-// ─── API pública ──────────────────────────────────────────────────────────────
-
-/**
- * Faz o parse de um feed RSS/Atom e retorna os itens brutos.
- *
- * FIX v2.1: Wrapping de erro com mensagem amigável + fallback via fetch nativo.
- * O fallback é acionado quando rss-parser falha (ex.: o servidor remoto bloqueia
- * o User-Agent do rss-parser mas aceita um User-Agent de navegador).
- *
- * @param {string} url
- * @returns {Promise<Object[]>}
- */
 export async function parseFeed(url) {
-  // Tentativa 1: rss-parser (suporte completo a RSS 2.0 + Atom + namespaces)
-  try {
-    const feed = await parser.parseURL(url)
-    return feed.items ?? []
-  } catch (errPrimario) {
-    const msg = errPrimario.message || ''
-
-    // FIX: identifica se o erro é HTTP do servidor remoto (não de configuração)
-    const isHttpError = /status code \d{3}/i.test(msg)
-    const isNetworkError = /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|socket hang up/i.test(msg)
-
-    if (isHttpError) {
-      // Reformata o erro para ser mais claro ao usuário
-      const statusMatch = msg.match(/(\d{3})/)
-      const httpStatus  = statusMatch ? parseInt(statusMatch[1]) : 0
-
-      if (httpStatus === 404) {
-        throw new Error('Feed não encontrado (HTTP 404) — verifique se a URL do feed ainda é válida')
-      }
-      if (httpStatus === 403) {
-        // 403 pode ser contorno via User-Agent de navegador — tenta fallback
-        logger.warn({ url, err: msg }, '⚠️  rss-parser recebeu 403 — tentando fallback via fetch')
-      } else {
-        throw new Error(`Servidor do feed retornou HTTP ${httpStatus}`)
-      }
-    }
-
-    if (isNetworkError) {
-      throw new Error(`Não foi possível conectar ao feed: ${msg}`)
-    }
-
-    // Tentativa 2 (fallback): fetch nativo com User-Agent de navegador + stripagem de BOM.
-    // FIX v2.2: Antes apenas validava o acesso HTTP e re-lançava o erro original.
-    // Agora busca o XML, remove o BOM/whitespace e tenta parseString() diretamente.
-    // Isso corrige feeds com BOM UTF-8 ou espaços antes do prólogo XML que causam
-    // "Non-whitespace before first tag. Line: 0, Column: 1".
-    logger.warn({ url, err: msg }, '⚠️  rss-parser falhou — tentando fallback com fetch nativo + BOM strip')
-    try {
-      const xml = await fetchFeedXmlFallback(url)  // já remove BOM e valida que começa com '<'
-
-      // Tenta parsear o XML limpo diretamente (sem re-fetch pelo rss-parser)
-      try {
-        const feedFallback = await parser.parseString(xml)
-        logger.info({ url }, '✅ Fallback com parseString bem-sucedido após remoção de BOM')
-        return feedFallback.items ?? []
-      } catch (parseErr) {
-        // XML acessível mas estruturalmente inválido para RSS/Atom
-        throw new Error(
-          `Feed acessível, mas não pôde ser interpretado: ${parseErr.message}. Verifique se é RSS.`
-        )
-      }
-    } catch (errFallback) {
-      // Fallback de fetch também falhou (HTTP error, sem conectividade, XML inválido)
-      const finalMsg = errFallback.message.startsWith('Feed')
-        ? errFallback.message
-        : `Falha ao importar feed: ${errPrimario.message}`
-      throw new Error(finalMsg)
-    }
-  }
+  const remote = await fetchRemoteText(url, { headers: FETCH_HEADERS, timeoutMs: 15_000, maxBytes: 5 * 1024 * 1024 })
+  let xml = remote.text.trimStart()
+  if (!xml.startsWith('<')) throw new Error('A resposta não parece ser um feed RSS/Atom XML válido')
+  let feed
+  try { feed = await parser.parseString(xml) } catch (err) { throw new Error(`Feed acessível, mas não pôde ser interpretado: ${err.message}`) }
+  return (feed.items || []).map(item => normalizeObjectStrings(item))
 }
 
-/**
- * Importa notícias de uma única fonte RSS e persiste no banco.
- *
- * @param {mongoose.Document} rssFonte
- * @param {Object}  [opts]
- * @param {string}  [opts.categoria_id]
- * @returns {Promise<{ importadas, ignoradas, erros, total }>}
- */
-export async function importarFonte(rssFonte, opts = {}) {
-  const inicio = Date.now()
-  const ctx = { fonte: rssFonte.nome }
-  await RssFonte.findByIdAndUpdate(rssFonte._id, { ultima_tentativa: new Date() })
+function baseFonteName(nome = '') {
+  return String(nome || '').split(/\s+[—–-]\s+/)[0].trim() || String(nome || '').trim() || 'Fonte RSS'
+}
 
-  // ── 1. Resolve (ou cria) o documento Fonte correspondente ──────────────────
-  let fonteDoc = await Fonte.findOne({ nome: rssFonte.nome })
-  if (!fonteDoc) {
-    fonteDoc = await Fonte.create({ nome: rssFonte.nome, url: rssFonte.url ?? null })
-    logger.info({ ...ctx, fonteId: fonteDoc._id }, '🆕 Fonte criada automaticamente')
+async function resolveLegacyFonte(rssFonte) {
+  if (rssFonte.fonte_id) {
+    const found = await Fonte.findById(rssFonte.fonte_id)
+    if (found) return found
   }
+  const nome = baseFonteName(rssFonte.nome)
+  let fonte = await Fonte.findOne({ nome: new RegExp(`^${nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
+  if (!fonte) fonte = await Fonte.create({ nome, url: null })
+  await RssFonte.findByIdAndUpdate(rssFonte._id, { fonte_id: fonte._id })
+  return fonte
+}
 
-  // Toda notícia importada também pertence a uma categoria do módulo Conteúdo.
-  // Fontes RSS antigas sem categoria caem em “Geral”; a IA pode reclassificar depois.
-  let categoriaResolvida = opts.categoria_id ?? rssFonte.categoria_id ?? null
-  if (!categoriaResolvida) {
-    const geral = await Categoria.findOneAndUpdate(
-      { slug: 'geral' },
-      { $setOnInsert: { nome: 'Geral', slug: 'geral', cor: '#607D8B', descricao: 'Notícias gerais do portal.' } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    )
-    categoriaResolvida = geral._id
+async function resolveLegacyCategoria(rssFonte) {
+  if (rssFonte.categoria_id) {
+    const found = await Categoria.findById(rssFonte.categoria_id)
+    if (found) return found
   }
+  const geral = await Categoria.findOneAndUpdate(
+    { slug: 'geral' },
+    { $setOnInsert: { nome: 'Geral', slug: 'geral', cor: '#607D8B', descricao: 'Notícias gerais do portal.' } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  )
+  await RssFonte.findByIdAndUpdate(rssFonte._id, { categoria_id: geral._id })
+  return geral
+}
 
-  // ── 2. Parse do feed ───────────────────────────────────────────────────────
-  let rawItems
-  try {
-    rawItems = await parseFeed(rssFonte.url)
-  } catch (err) {
-    const mensagem = String(err.message || err).slice(0, 500)
-    const erroPermanente = /HTTP 404|Feed não encontrado|HTTP 410/i.test(mensagem)
-    const update = {
-      ultimo_erro: mensagem,
-      ultima_duracao_ms: Date.now() - inicio,
-      ...(erroPermanente ? {
-        ativa: false,
-        auto_update: false,
-        desativada_automaticamente: true,
-        motivo_desativacao: 'Feed indisponível permanentemente (404/410). Atualize a URL e teste antes de reativar.',
-      } : {}),
-      $inc: { falhas_consecutivas: 1 },
+async function mirrorImagesToR2(docs, rssFonte, fonteDoc) {
+  if (!rssFonte.copiar_imagem_r2 || !docs.some(d => d.imagem_url)) return
+  try { await getR2MediaConfig() } catch (err) {
+    logger.info({ fonte: rssFonte.nome, motivo: err.code || err.message }, 'RSS: R2 indisponível; imagens permanecerão externas')
+    return
+  }
+  const queue = docs.filter(d => d.imagem_url)
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const doc = queue[cursor++]
+      const originalUrl = doc.imagem_url
+      try {
+        const img = await uploadRssNewsImage(originalUrl, { fonteNome: fonteDoc.nome, titulo: doc.titulo })
+        doc.imagem_url = img.public_url
+        doc.imagem_public_id = img.public_id
+        doc.imagem_storage = 'r2'
+        doc.imagem_key = img.key
+        doc.imagem_mime = img.mime
+        doc.imagem_tamanho = img.size
+        doc.imagem_largura = img.width || null
+        doc.imagem_altura = img.height || null
+        doc.imagem_nome_original = img.original_name
+        doc.imagem_fonte_url = originalUrl
+      } catch (err) {
+        logger.warn({ fonte: rssFonte.nome, imagem: originalUrl, err: err.message }, 'RSS: falha ao copiar capa para R2; URL externa preservada')
+      }
     }
-    await RssFonte.findByIdAndUpdate(rssFonte._id, update)
-    logger.error({ ...ctx, err: err.message, erroPermanente }, erroPermanente
-      ? '⛔ Feed desativado automaticamente após erro permanente'
-      : '❌ Falha ao buscar/parsear feed')
+  }
+  await Promise.all([worker(), worker()])
+}
+
+async function processarIaDepoisDaImportacao(insertedDocs, rssFonte, fonteDoc, categoriaDoc) {
+  if (!rssFonte.ia_ativa || !insertedDocs.length) return
+  const limite = Math.min(Math.max(1, Number(rssFonte.ia_max_itens) || 3), insertedDocs.length, 10)
+  try {
+    const categorias = await Categoria.find().select('nome').lean()
+    const mapa = new Map(categorias.map(c => [String(c.nome || '').toLowerCase(), c._id]))
+    for (const doc of insertedDocs.slice(0, limite)) {
+      try {
+        const ai = await analisarNoticiaEditorial({
+          titulo: doc.titulo, resumo: doc.resumo, conteudo: doc.conteudo,
+          categorias: categorias.map(c => c.nome), acao: 'rss',
+          categoriaAtual: categoriaDoc?.nome || '', fonte: fonteDoc?.nome || '',
+        })
+        const update = {}
+        if (rssFonte.ia_resumo && ai.resumo) update.resumo = String(ai.resumo).slice(0, 300)
+        if (rssFonte.ia_tags && Array.isArray(ai.tags)) update.tags = ai.tags.map(x => String(x).trim()).filter(Boolean).slice(0, 8)
+        if (rssFonte.ia_categoria && ai.categoria) {
+          const id = mapa.get(String(ai.categoria).toLowerCase())
+          if (id) update.categoria_id = id
+        }
+        if (rssFonte.ia_titulo && ai.titulo) {
+          const titulo = String(ai.titulo).trim().slice(0, 200)
+          if (titulo && titulo !== doc.titulo) {
+            update.titulo = titulo
+            update.slug = buildSlug(titulo, String(doc._id).slice(-8))
+          }
+        }
+        if (Object.keys(update).length) await Noticia.findByIdAndUpdate(doc._id, { $set: update })
+      } catch (err) { logger.warn({ fonte: rssFonte.nome, noticia: doc._id, err: err.message }, 'RSS: IA editorial ignorada para uma matéria') }
+    }
+  } catch (err) { logger.warn({ fonte: rssFonte.nome, err: err.message }, 'RSS: processamento de IA em background falhou') }
+}
+
+export async function importarFonte(rssFonte) {
+  const inicio = Date.now(); const ctx = { fonte: rssFonte.nome }
+  await RssFonte.findByIdAndUpdate(rssFonte._id, { ultima_tentativa: new Date() })
+  const [fonteDoc, categoriaDoc] = await Promise.all([resolveLegacyFonte(rssFonte), resolveLegacyCategoria(rssFonte)])
+
+  let rawItems
+  try { rawItems = await parseFeed(rssFonte.url) } catch (err) {
+    const mensagem = String(err.message || err).slice(0, 500)
+    const erroPermanente = /HTTP 404|HTTP 410|não encontrado|removido permanentemente/i.test(mensagem)
+    await RssFonte.findByIdAndUpdate(rssFonte._id, {
+      ultimo_erro: mensagem, ultima_duracao_ms: Date.now() - inicio,
+      ...(erroPermanente ? { ativa: false, auto_update: false, desativada_automaticamente: true, motivo_desativacao: 'Feed indisponível permanentemente. Atualize e teste a URL antes de reativar.' } : {}),
+      $inc: { falhas_consecutivas: 1 },
+    })
     throw err
   }
 
-  const max   = Math.min(Number(rssFonte.max_items) || 10, rawItems.length)
-  const slice = rawItems.slice(0, max)
-  logger.debug({ ...ctx, total: rawItems.length, processando: slice.length }, '📥 Feed obtido')
-
-  // ── 3. Conversão de itens → documentos ────────────────────────────────────
-  const docs              = []
-  const errosConversao    = []
-
+  const slice = rawItems.slice(0, Math.min(Number(rssFonte.max_items) || 10, rawItems.length))
+  const docs = []; const errosConversao = []
   for (const item of slice) {
     try {
-      const doc = buildDoc(item, {
-        fonteRssId:  rssFonte._id,
-        fonteId:     fonteDoc._id,
-        categoriaId: categoriaResolvida,
-      })
-      if (doc) {
-        docs.push(doc)
-      } else {
-        errosConversao.push({
-          item: item?.title ?? '(sem título)',
-          motivo: 'GUID ou título ausente',
-        })
-      }
-    } catch (err) {
-      errosConversao.push({ item: item?.title ?? '(sem título)', motivo: err.message })
-      logger.warn({ ...ctx, item: item?.title, err: err.message }, '⚠️ Erro ao converter item')
-    }
+      const doc = buildDoc(item, { fonteRssId: rssFonte._id, fonteId: fonteDoc._id, categoriaId: categoriaDoc._id, fonteNome: fonteDoc.nome })
+      if (doc) docs.push(doc); else errosConversao.push({ item: item?.title || '(sem título)', motivo: 'GUID ou título ausente' })
+    } catch (err) { errosConversao.push({ item: item?.title || '(sem título)', motivo: err.message }) }
   }
 
-  // Deduplicação preventiva no próprio lote e contra registros já existentes.
-  const vistos = new Set()
-  let duplicadas = 0
-  let docsUnicos = docs.filter(doc => {
-    const chave = `${doc.guid}|${doc.url_original || ''}`
-    if (vistos.has(chave)) { duplicadas++; return false }
-    vistos.add(chave)
-    return true
-  })
-
+  const vistos = new Set(); let duplicadas = 0
+  let docsUnicos = docs.filter(doc => { const k = `${doc.guid}|${doc.url_original || ''}`; if (vistos.has(k)) { duplicadas++; return false } vistos.add(k); return true })
   if (docsUnicos.length) {
-    const guids = docsUnicos.map(d => d.guid)
-    const urls = docsUnicos.map(d => d.url_original).filter(Boolean)
-    const existentes = await Noticia.find({
-      $or: [
-        { guid: { $in: guids } },
-        ...(urls.length ? [{ url_original: { $in: urls } }] : []),
-      ],
-    }).select('guid url_original').lean()
-    const guidsExistentes = new Set(existentes.map(n => n.guid).filter(Boolean))
-    const urlsExistentes = new Set(existentes.map(n => normalizeArticleUrl(n.url_original)).filter(Boolean))
-    docsUnicos = docsUnicos.filter(doc => {
-      const jaExiste = guidsExistentes.has(doc.guid) || (doc.url_original && urlsExistentes.has(doc.url_original))
-      if (jaExiste) duplicadas++
-      return !jaExiste
-    })
+    const guids = docsUnicos.map(d => d.guid); const urls = docsUnicos.map(d => d.url_original).filter(Boolean)
+    const existentes = await Noticia.find({ $or: [{ guid: { $in: guids } }, ...(urls.length ? [{ url_original: { $in: urls } }] : [])] }).select('guid url_original').lean()
+    const eg = new Set(existentes.map(n => n.guid).filter(Boolean)); const eu = new Set(existentes.map(n => normalizeArticleUrl(n.url_original)).filter(Boolean))
+    docsUnicos = docsUnicos.filter(doc => { const hit = eg.has(doc.guid) || (doc.url_original && eu.has(doc.url_original)); if (hit) duplicadas++; return !hit })
   }
+  if (docsUnicos.length) { const sem = await removerSemelhantes(docsUnicos); docsUnicos = sem.docs; duplicadas += sem.semelhantes }
 
-  // Deduplicação semântica leve: evita republicar a mesma pauta com URL/GUID diferentes.
-  // Compara títulos das últimas 72h e também itens aceitos no próprio lote.
+  if (docsUnicos.length) await mirrorImagesToR2(docsUnicos, rssFonte, fonteDoc)
+
+  let importadas = 0; let ignoradas = errosConversao.length + duplicadas; const errosBulk = []; let insertedDocs = []
   if (docsUnicos.length) {
-    const sem = await removerSemelhantes(docsUnicos)
-    docsUnicos = sem.docs
-    duplicadas += sem.semelhantes
-  }
-
-  // Enriquecimento editorial opcional. Processa poucos itens para respeitar cotas gratuitas.
-  if (rssFonte.ia_ativa && docsUnicos.length) {
     try {
-      const categorias=await Categoria.find().select('nome').lean()
-      const mapaCategorias=new Map(categorias.map(c=>[String(c.nome||'').toLowerCase(),c._id]))
-      const limite=Math.min(Number(rssFonte.ia_max_itens)||3, docsUnicos.length, 5)
-      for(let i=0;i<limite;i++){
-        const doc=docsUnicos[i]
-        try{
-          const ai=await analisarNoticiaEditorial({titulo:doc.titulo,resumo:doc.resumo,conteudo:doc.conteudo,categorias:categorias.map(c=>c.nome),acao:'rss'})
-          if(rssFonte.ia_resumo && ai.resumo) doc.resumo=String(ai.resumo).slice(0,300)
-          if(rssFonte.ia_tags && Array.isArray(ai.tags)) doc.tags=ai.tags.slice(0,8)
-          if(rssFonte.ia_titulo && ai.titulo) doc.titulo=String(ai.titulo).slice(0,200)
-          if(rssFonte.ia_categoria && ai.categoria){ const id=mapaCategorias.get(String(ai.categoria).toLowerCase()); if(id) doc.categoria_id=id }
-        }catch(aiErr){ logger.warn({...ctx,item:doc.titulo,err:aiErr.message},'IA editorial do RSS ignorada para este item') }
-      }
-    } catch(aiErr) { logger.warn({...ctx,err:aiErr.message},'Enriquecimento por IA do RSS indisponível; importação continuará normalmente') }
-  }
-
-  if (!docsUnicos.length) {
-    const duracao = Date.now() - inicio
-    await RssFonte.findByIdAndUpdate(rssFonte._id, {
-      ultima_importacao: new Date(), ultimo_total_feed: rawItems.length,
-      ultima_importadas: 0, ultima_duplicadas: duplicadas, ultima_duracao_ms: duracao,
-      ultimo_erro: null, falhas_consecutivas: 0,
-    })
-    logger.info({ ...ctx, duplicadas, invalidas: errosConversao.length }, 'ℹ️ Feed sem notícias novas')
-    return { importadas: 0, duplicadas, ignoradas: duplicadas + errosConversao.length, erros: errosConversao, total: slice.length }
-  }
-
-  // ── 4. Bulk insert com tolerância a duplicatas ─────────────────────────────
-  let importadas  = 0
-  let ignoradas   = errosConversao.length + duplicadas
-  const errosBulk = []
-
-  try {
-    const result = await Noticia.insertMany(docsUnicos, { ordered: false })
-    importadas = result.length
-    const bulkDuplicadas = docsUnicos.length - result.length
-    duplicadas += bulkDuplicadas
-    ignoradas += bulkDuplicadas
-  } catch (err) {
-    const isDuplicateOrBulk =
-      err.name === 'BulkWriteError'      ||
-      err.name === 'MongoBulkWriteError' ||
-      err.code  === 11000
-
-    if (!isDuplicateOrBulk) {
-      logger.error({ ...ctx, err: err.message }, '❌ Erro inesperado no bulk insert')
-      throw err
-    }
-
-    importadas =
-      err.insertedDocs?.length ??
-      err.result?.nInserted    ??
-      0
-
-    const writeErrors =
-      err.writeErrors                              ??
-      err.result?.getWriteErrors?.()              ??
-      []
-
-    for (const we of writeErrors) {
-      const code  = we.code ?? we.err?.code
-      const errmsg = we.errmsg ?? we.err?.errmsg ?? ''
-      if (code === 11000) {
-        ignoradas++
-        duplicadas++
-      } else {
-        errosBulk.push({ code, motivo: errmsg.substring(0, 200) })
-        logger.warn({ ...ctx, code, errmsg }, '⚠️ Erro de escrita não-duplicata no bulk')
+      insertedDocs = await Noticia.insertMany(docsUnicos, { ordered: false })
+      importadas = insertedDocs.length
+      const bulkDup = docsUnicos.length - insertedDocs.length; duplicadas += bulkDup; ignoradas += bulkDup
+    } catch (err) {
+      const bulk = err.name === 'BulkWriteError' || err.name === 'MongoBulkWriteError' || err.code === 11000
+      if (!bulk) throw err
+      insertedDocs = err.insertedDocs || []
+      importadas = insertedDocs.length || err.result?.nInserted || 0
+      for (const we of err.writeErrors || err.result?.getWriteErrors?.() || []) {
+        const code = we.code ?? we.err?.code; const msg = we.errmsg ?? we.err?.errmsg ?? ''
+        if (code === 11000) { duplicadas++; ignoradas++ } else { errosBulk.push({ code, motivo: msg.slice(0, 200) }); ignoradas++ }
       }
     }
   }
 
-  // ── 5. Atualiza estatísticas da fonte RSS ──────────────────────────────────
   const duracao = Date.now() - inicio
   await RssFonte.findByIdAndUpdate(rssFonte._id, {
-    ultima_importacao: new Date(),
-    ultimo_total_feed: rawItems.length,
-    ultima_importadas: importadas,
-    ultima_duplicadas: duplicadas,
-    ultima_duracao_ms: duracao,
-    ultimo_erro: null,
-    falhas_consecutivas: 0,
-    $inc: { total_importadas: importadas },
+    ultima_importacao: new Date(), ultimo_total_feed: rawItems.length, ultima_importadas: importadas,
+    ultima_duplicadas: duplicadas, ultima_duracao_ms: duracao, ultimo_erro: null, falhas_consecutivas: 0,
+    desativada_automaticamente: false, motivo_desativacao: null, $inc: { total_importadas: importadas },
   })
 
-  const todosErros = [...errosConversao, ...errosBulk]
-  logger.info(
-    { ...ctx, importadas, ignoradas, erros: todosErros.length },
-    '📰 Feed importado com sucesso'
-  )
-
-  return { importadas, duplicadas, ignoradas, erros: todosErros, total: slice.length, duracao_ms: duracao }
+  if (rssFonte.ia_ativa && insertedDocs.length) {
+    setImmediate(() => processarIaDepoisDaImportacao(insertedDocs, rssFonte, fonteDoc, categoriaDoc).catch(err => logger.warn({ ...ctx, err: err.message }, 'RSS: IA pós-importação falhou')))
+  }
+  logger.info({ ...ctx, importadas, duplicadas, ignoradas, iaEmBackground: Boolean(rssFonte.ia_ativa && insertedDocs.length) }, 'RSS importado')
+  return { importadas, duplicadas, ignoradas, erros: [...errosConversao, ...errosBulk], total: slice.length, duracao_ms: duracao, ia_em_background: Boolean(rssFonte.ia_ativa && insertedDocs.length) }
 }
 
-/**
- * Importa todas as fontes RSS ativas em paralelo controlado.
- *
- * FIX v2.1: Respeita auto_update e intervalo_min por fonte — comportamento
- * antes implementado pelo rssScheduler.js (agora descontinuado). Isso garante
- * que fontes configuradas com auto_update=false NÃO sejam importadas pelo
- * scheduler automático, apenas pela importação manual do admin.
- *
- * @param {number}  [concorrencia=3]
- * @param {boolean} [respeitarIntervalo=false]
- *   Se true (uso pelo scheduler), respeita intervalo_min e auto_update por fonte.
- *   Se false (importação manual via admin), importa todas as fontes ativas.
- * @returns {Promise<Array>}
- */
 export async function importarTodasFontes(concorrencia = 3, respeitarIntervalo = false) {
-  // FIX: quando chamado pelo scheduler automático, filtra fontes com auto_update
-  const query = respeitarIntervalo
-    ? { ativa: true, auto_update: true }
-    : { ativa: true }
-
-  const fontes = await RssFonte.find(query).lean()
-
-  if (!fontes.length) {
-    logger.info('📭 Nenhuma fonte RSS ativa encontrada')
-    return []
-  }
-
-  // FIX: quando chamado pelo scheduler, filtra fontes cujo intervalo ainda não venceu
+  const fontes = await RssFonte.find(respeitarIntervalo ? { ativa: true, auto_update: true } : { ativa: true }).lean()
   const agora = Date.now()
-  const fontesParaImportar = respeitarIntervalo
-    ? fontes.filter(f => {
-        const ultimaMs    = f.ultima_importacao ? new Date(f.ultima_importacao).getTime() : 0
-        const intervaloMs = (f.intervalo_min || 60) * 60 * 1_000
-        return agora - ultimaMs >= intervaloMs
-      })
-    : fontes
-
-  if (!fontesParaImportar.length) {
-    logger.info('⏳ Nenhuma fonte RSS com intervalo vencido neste ciclo')
-    return []
-  }
-
-  logger.info({ total: fontesParaImportar.length, concorrencia }, '🚀 Iniciando importação em massa')
-
+  const aptas = respeitarIntervalo ? fontes.filter(f => agora - (f.ultima_importacao ? new Date(f.ultima_importacao).getTime() : 0) >= (f.intervalo_min || 60) * 60_000) : fontes
   const resultados = []
-
-  for (let i = 0; i < fontesParaImportar.length; i += concorrencia) {
-    const lote = fontesParaImportar.slice(i, i + concorrencia)
-
-    const loteResultados = await Promise.all(
-      lote.map(async fonte => {
-        try {
-          const r = await importarFonte(fonte)
-          return { fonte: fonte.nome, ...r, erro: null }
-        } catch (err) {
-          return {
-            fonte:      fonte.nome,
-            importadas: 0,
-            duplicadas: 0,
-            ignoradas:  0,
-            erros:      [],
-            total:      0,
-            erro:       err.message,
-          }
-        }
-      })
-    )
-
-    resultados.push(...loteResultados)
+  for (let i = 0; i < aptas.length; i += concorrencia) {
+    resultados.push(...await Promise.all(aptas.slice(i, i + concorrencia).map(async fonte => {
+      try { return { fonte: fonte.nome, ...(await importarFonte(fonte)), erro: null } }
+      catch (err) { return { fonte: fonte.nome, importadas: 0, duplicadas: 0, ignoradas: 0, erros: [], total: 0, erro: err.message } }
+    })))
   }
-
-  const totais = resultados.reduce(
-    (acc, r) => ({
-      importadas:    acc.importadas    + (r.importadas    ?? 0),
-      ignoradas:     acc.ignoradas     + (r.ignoradas     ?? 0),
-      duplicadas:    acc.duplicadas    + (r.duplicadas    ?? 0),
-      fontesComErro: acc.fontesComErro + (r.erro ? 1 : 0),
-    }),
-    { importadas: 0, ignoradas: 0, duplicadas: 0, fontesComErro: 0 }
-  )
-
-  logger.info({ ...totais, fontes: fontesParaImportar.length }, '✅ Importação em massa concluída')
   return resultados
 }

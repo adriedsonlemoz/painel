@@ -231,7 +231,7 @@ function formatAgo(date) {
 }
 
 function NoticiasExternas({ items = [], fallback = [] }) {
-  const rss = items.length ? items : fallback.map(x => ({ id:x._id||x.id, title:x.titulo, url:x.url_externa, source:x.fonte_nome, image:x.imagem_url, publishedAt:x.criado_em }))
+  const rss = items.length ? items : fallback.map(x => ({ id:x._id||x.id, title:x.titulo, url:x.url_externa, source:x.fonte_nome, image:x.imagem_url, publishedAt:x.criado_em, internal:false }))
   if (!rss.length) return null
   const [lead, ...rest] = rss.slice(0, 7)
   return (
@@ -241,16 +241,16 @@ function NoticiasExternas({ items = [], fallback = [] }) {
         <span className="portal-source-pill">Fontes nacionais</span>
       </div>
       <div className="world-news-layout">
-        <a className="world-lead group" href={lead.url} target="_blank" rel="noopener noreferrer">
+        <a className="world-lead group" href={lead.url} {...(!lead.internal ? { target:'_blank', rel:'noopener noreferrer' } : {})}>
           {lead.image ? <img src={lead.image} alt=""/> : <div className="world-image-fallback"><Globe size={28}/></div>}
           <div className="world-lead-body">
             <div className="world-meta"><b>{lead.source || 'RSS'}</b><span>{formatAgo(lead.publishedAt)}</span></div>
             <h3>{lead.title}</h3>
-            <span className="world-open">Abrir na fonte <ExternalLink size={13}/></span>
+            <span className="world-open">{lead.internal ? 'Ler notícia' : <>Abrir na fonte <ExternalLink size={13}/></>}</span>
           </div>
         </a>
         <div className="world-list">
-          {rest.map(item => <a key={item.id || item.url} href={item.url} target="_blank" rel="noopener noreferrer" className="world-row group">
+          {rest.map(item => <a key={item.id || item.url} href={item.url} {...(!item.internal ? { target:'_blank', rel:'noopener noreferrer' } : {})} className="world-row group">
             {item.image && <img src={item.image} alt=""/>}
             <div className="min-w-0"><div className="world-meta"><b>{item.source || 'RSS'}</b><span>{formatAgo(item.publishedAt)}</span></div><h4>{item.title}</h4></div>
             <ChevronRight size={16} className="world-chevron"/>

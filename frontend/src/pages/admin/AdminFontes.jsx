@@ -74,7 +74,7 @@ export default function AdminFontes() {
   return (
     <>
       <ConfirmModal aberto={confirm.aberto} titulo={`Excluir "${confirm.fonte?.nome}"?`}
-        mensagem="Notícias desta fonte ficarão sem fonte. Ação irreversível."
+        mensagem="Só é possível excluir uma fonte sem notícias e sem feeds RSS vinculados."
         labelConfirmar="Excluir" carregando={confirm.carregando}
         onConfirmar={confirmarExclusao} onCancelar={() => setConfirm({aberto:false,fonte:null,carregando:false})}/>
 

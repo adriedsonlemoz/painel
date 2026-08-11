@@ -39,6 +39,8 @@ router.post('/noticias', autenticar, uploadLimiter, upload.single('imagem'), asy
       key: resultado.key,
       mime: resultado.mime,
       size: resultado.size,
+      largura: resultado.width || null,
+      altura: resultado.height || null,
       original_name: resultado.original_name,
     })
   } catch (err) { next(err) }

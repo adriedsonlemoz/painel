@@ -1,16 +1,18 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.117",
+  "version": "1.0.118",
   "packageFormat": 2,
   "changelog": [
-    "Editor Nova/Editar notícia redesenhado e compactado para celular.",
-    "Categoria obrigatória, com migração de notícias antigas sem categoria para Geral e RSS integrado ao mesmo fluxo.",
-    "Categoria e Fonte integradas aos seus gerenciadores, com criação rápida e proteção contra exclusão em uso.",
-    "Capas de notícias agora usam Cloudflare R2 pela configuração central de Integrações e APIs, organizadas em alsistemas/noticias/capas/AAAA/MM/.",
-    "Imagem ganha texto alternativo, legenda, crédito, link de fonte e metadados técnicos; capas substituídas são limpas do storage.",
-    "Editor Markdown modernizado e mais compacto no mobile.",
-    "Assistente editorial de IA separado por tarefas e com aplicação seletiva das sugestões.",
-    "Frontend, backend, Setup, backup/exportação e manifesto sincronizados em 1.0.117."
+    "RSS agora é vinculado diretamente às Fontes editoriais do módulo Conteúdo; uma Fonte pode possuir vários feeds.",
+    "Categoria padrão passou a ser obrigatória em cada feed, com migração segura para instalações existentes.",
+    "A Home não consulta mais feeds externos diretamente: RSS é somente entrada editorial e apenas notícias publicadas aparecem no portal.",
+    "Feed RSS público do portal agora inclui somente notícias publicadas e usa o MIME real das imagens.",
+    "Capas importadas por RSS são copiadas para Cloudflare R2 em alsistemas/noticias/rss/fonte/AAAA/MM, preservando URL original e metadados.",
+    "Importador passou a detectar charset e corrigir mojibake/UTF-8 quebrado; reprocessamento também corrige notícias antigas.",
+    "IA do RSS roda após a persistência, em background, com título desligado por padrão e reclassificação restrita às categorias existentes.",
+    "Tela RSS redesenhada: cards compactos expansíveis, cadastro curto, configurações avançadas e integração direta com Fontes/Categorias.",
+    "Cadastro de feed agora segue URL → teste → Fonte → Categoria → automação, com criação rápida de Fonte e Categoria sem sair do formulário.",
+    "Fetch RSS endurecido contra SSRF, redes privadas, redirecionamentos perigosos e XML excessivo; exclusão de feed preserva notícias sem referência quebrada."
   ],
   "updatePackages": {
     "full": true,

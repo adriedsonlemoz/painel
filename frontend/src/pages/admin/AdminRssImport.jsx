@@ -1,557 +1,142 @@
-/**
- * AdminRssImport.jsx — Importação de Notícias via RSS
- *
- * MIGRADO: DS Sprint
- *   - ModalFonte inline (position:fixed)  → DSModal
- *   - Banner informativo inline            → DSAlert variant="blue"
- *   - Badges PADRÃO/INATIVA/AUTO inline   → DSBadge
- *   - Confirmação excluir inline           → DSBadge + DSBtn pattern
- *   - Cores hex hardcoded                  → T.*
- *   - borderRadius arbitrários            → RADIUS.*
- *   - Espaçamentos                        → SPACE.*
- *   - Tipografia                          → FONT.*
- *
- * Funcionalidades preservadas integralmente:
- *  - Listar fontes RSS (padrão + customizadas)
- *  - Adicionar fontes padrão com um clique
- *  - Cadastrar fontes customizadas manualmente
- *  - Testar URL de feed antes de salvar
- *  - Importar individual e em massa
- *  - Configurar auto-atualização periódica
- *  - Ver histórico de última importação
- */
-import { useState } from 'react'
-import { rssService, categoriasService } from '../../services/api'
+import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useRss } from '../../hooks/useRss'
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal, DSBtn, DSBadge, DSAlert } from '../../components/admin/ui/DS'
+import { DSModal, DSBtn, DSBadge, DSAlert, DSToggle } from '../../components/admin/ui/DS'
+import { rssService } from '../../services/api'
 
-// ─── Helpers ──────────────────────────────────────────────────
 function formatarData(iso) {
-  if (!iso) return '—'
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  }).format(new Date(iso))
+  if (!iso) return 'Nunca importado'
+  return new Intl.DateTimeFormat('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(iso))
 }
-
 function formatarIntervalo(min) {
-  if (!min) return '—'
+  if (!min) return 'manual'
   if (min < 60) return `${min} min`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m > 0 ? `${h}h ${m}min` : `${h}h`
+  const h = Math.floor(min / 60); const m = min % 60
+  return m ? `${h}h ${m}min` : `${h}h`
+}
+function slugifyLocal(value='') {
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,100)
 }
 
-// ─── Modal de cadastro / edição ───────────────────────────────
-function ModalFonte({ fonte, categorias, onSalvar, onFechar }) {
-  const editando = !!fonte?.id
+function MiniCreate({ tipo, onCreate, onDone }) {
+  const [nome, setNome] = useState('')
+  const [url, setUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  async function save() {
+    if (!nome.trim()) return toast.error(`Nome da ${tipo === 'fonte' ? 'fonte' : 'categoria'} é obrigatório`)
+    setSaving(true)
+    try {
+      const out = tipo === 'fonte'
+        ? await onCreate({ nome:nome.trim(), url:url.trim() || null })
+        : await onCreate({ nome:nome.trim(), slug:slugifyLocal(nome), descricao:'' })
+      onDone(out)
+    } catch (e) { toast.error(e.message) }
+    finally { setSaving(false) }
+  }
+  return <div className="rss-quick-create">
+    <input className="adm-input" value={nome} onChange={e=>setNome(e.target.value)} placeholder={tipo==='fonte'?'Nome da fonte editorial':'Nome da categoria'} autoFocus/>
+    {tipo==='fonte' && <input className="adm-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="Site da fonte (opcional)"/>}
+    <div className="rss-inline-actions"><DSBtn size="sm" variant="primary" loading={saving} onClick={save}>Criar</DSBtn><DSBtn size="sm" variant="ghost" onClick={()=>onDone(null)}>Cancelar</DSBtn></div>
+  </div>
+}
 
+function ModalFeed({ feed, sugerido, categorias, fontesEditoriais, onSalvar, onCriarFonte, onCriarCategoria, onFechar }) {
+  const editando = Boolean(feed?.id)
+  const initial = feed || sugerido || {}
+  const suggestedFonte = fontesEditoriais.find(f => String(f.nome||'').toLowerCase() === String(sugerido?.fonte_nome||'').toLowerCase())
+  const suggestedCat = categorias.find(c => String(c.nome||'').toLowerCase() === String(sugerido?.categoria_sugerida||'').toLowerCase())
   const [form, setForm] = useState({
-    nome:          fonte?.nome          || '',
-    url:           fonte?.url           || '',
-    ativa:         fonte?.ativa         ?? true,
-    categoria_id:  fonte?.categoria_id?.id || fonte?.categoria_id || '',
-    max_items:     fonte?.max_items     || 10,
-    auto_update:   fonte?.auto_update   ?? false,
-    intervalo_min: fonte?.intervalo_min || 60,
-    ia_ativa:      fonte?.ia_ativa      ?? false,
-    ia_resumo:     fonte?.ia_resumo     ?? true,
-    ia_tags:       fonte?.ia_tags       ?? true,
-    ia_categoria:  fonte?.ia_categoria  ?? true,
-    ia_titulo:     fonte?.ia_titulo     ?? false,
-    ia_max_itens:  fonte?.ia_max_itens  || 3,
+    nome: initial.nome || '', url: initial.url || '',
+    fonte_id: feed?.fonte_id?.id || feed?.fonte_id || suggestedFonte?.id || '',
+    categoria_id: feed?.categoria_id?.id || feed?.categoria_id || suggestedCat?.id || '',
+    ativa: initial.ativa ?? true, auto_update: initial.auto_update ?? false,
+    intervalo_min: initial.intervalo_min || 60, max_items: initial.max_items || 10,
+    copiar_imagem_r2: initial.copiar_imagem_r2 ?? true,
+    ia_ativa: initial.ia_ativa ?? false, ia_resumo: initial.ia_resumo ?? true,
+    ia_tags: initial.ia_tags ?? true, ia_categoria: initial.ia_categoria ?? true,
+    ia_titulo: initial.ia_titulo ?? false, ia_max_itens: initial.ia_max_itens || 3,
+    padrao: Boolean(!editando && sugerido),
   })
-  const [testando,  setTestando]  = useState(false)
-  const [salvando,  setSalvando]  = useState(false)
-  const [testeOk,   setTesteOk]   = useState(null)
+  const [testando,setTestando]=useState(false), [teste,setTeste]=useState(null), [salvando,setSalvando]=useState(false)
+  const [quick,setQuick]=useState(null)
+  const set=(k,v)=>{setForm(f=>({...f,[k]:v})); if(k==='url')setTeste(null)}
 
-  function set(campo, valor) {
-    setForm(f => ({ ...f, [campo]: valor }))
-    setTesteOk(null)
-  }
-
-  async function handleTestar() {
-    if (!form.url.trim()) return toast.error('Informe a URL do feed RSS')
+  async function testar(){
+    if(!form.url.trim()) return toast.error('Informe a URL do feed')
     setTestando(true)
-    try {
-      const r = await rssService.testarUrl(form.url.trim())
-      setTesteOk(r)
-      toast.success(`Feed válido — ${r.total_itens} item(ns) encontrado(s)`)
-    } catch (err) {
-      setTesteOk(null)
-      toast.error(err.message || 'Feed inválido ou inacessível')
-    } finally { setTestando(false) }
+    try { const r=await rssService.testarUrl(form.url.trim()); setTeste(r); toast.success(`Feed válido · ${r.total_itens} item(ns)`) }
+    catch(e){setTeste(null);toast.error(e.message)} finally{setTestando(false)}
   }
-
-  async function handleSalvar(e) {
-    e?.preventDefault()
-    if (!form.nome.trim()) return toast.error('Nome é obrigatório')
-    if (!form.url.trim())  return toast.error('URL é obrigatória')
+  async function salvar(){
+    if(!form.url.trim()||!form.nome.trim()) return toast.error('Informe nome e URL do feed')
+    if(!form.fonte_id) return toast.error('Selecione a Fonte editorial')
+    if(!form.categoria_id) return toast.error('Selecione a Categoria padrão')
     setSalvando(true)
-    try {
-      await onSalvar({
-        ...form,
-        max_items:     Number(form.max_items),
-        intervalo_min: Number(form.intervalo_min),
-      })
-    } finally { setSalvando(false) }
+    try { await onSalvar({...form,max_items:Number(form.max_items),intervalo_min:Number(form.intervalo_min),ia_max_itens:Number(form.ia_max_itens)}); onFechar() }
+    finally{setSalvando(false)}
   }
+  return <DSModal open onClose={onFechar} title={editando?'Editar feed RSS':'Novo feed RSS'} size="md" footer={<><DSBtn variant="primary" loading={salvando} onClick={salvar}>{editando?'Salvar':'Adicionar feed'}</DSBtn><DSBtn onClick={onFechar}>Cancelar</DSBtn></>}>
+    <div className="rss-form">
+      <div className="rss-field rss-url-field"><label>URL do feed *</label><div className="rss-input-action"><input className="adm-input" value={form.url} onChange={e=>set('url',e.target.value)} placeholder="https://site.com/feed.xml"/><DSBtn size="sm" variant="secondary" loading={testando} onClick={testar}>Testar</DSBtn></div>{teste&&<small className="rss-ok">✓ Feed válido · {teste.total_itens} itens · {teste.preview?.[0]?.titulo}</small>}</div>
+      <div className="rss-field"><label>Nome do feed *</label><input className="adm-input" value={form.nome} onChange={e=>set('nome',e.target.value)} placeholder="Ex.: CNN Brasil — Política"/></div>
 
-  const labelSty = { fontSize: FONT.sm, fontWeight: 600, color: 'var(--adm-muted)', display: 'block', marginBottom: SPACE.xs + 1, textTransform: 'uppercase', letterSpacing: '.04em' }
-
-  return (
-    <DSModal
-      open
-      onClose={onFechar}
-      title={editando ? 'Editar Fonte RSS' : 'Nova Fonte RSS'}
-      size="md"
-      footer={
-        <>
-          <DSBtn variant="primary" loading={salvando} onClick={handleSalvar}>
-            {editando ? 'Salvar alterações' : 'Cadastrar fonte'}
-          </DSBtn>
-          <DSBtn onClick={onFechar} disabled={salvando}>Cancelar</DSBtn>
-        </>
-      }
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg }}>
-        {/* Nome */}
-        <div>
-          <label style={labelSty}>Nome da fonte *</label>
-          <input className="adm-input" value={form.nome} onChange={e => set('nome', e.target.value)} placeholder="Ex: CNN Brasil" required />
-        </div>
-
-        {/* URL + testar */}
-        <div>
-          <label style={labelSty}>URL do feed RSS *</label>
-          <div style={{ display: 'flex', gap: SPACE.md }}>
-            <input className="adm-input" value={form.url} onChange={e => set('url', e.target.value)}
-              placeholder="https://exemplo.com/feed.xml" required style={{ flex: 1, minWidth: 0 }} />
-            <DSBtn variant="secondary" size="sm" onClick={handleTestar} loading={testando} style={{ flexShrink: 0 }}>
-              {testando ? 'Testando…' : 'Testar'}
-            </DSBtn>
-          </div>
-          {testeOk && (
-            <div style={{
-              marginTop: SPACE.md, padding: `${SPACE.md}px ${SPACE.lg}px`,
-              background: C.greenBg, border: `1px solid ${C.greenBorder}`,
-              borderRadius: RADIUS.md, fontSize: FONT.base, color: 'var(--adm-text)',
-            }}>
-              <span style={{ color: C.greenSolid, fontWeight: 700 }}>✓ Feed válido</span>
-              {' — '}{testeOk.total_itens} item(ns) encontrado(s)
-              {testeOk.preview?.length > 0 && (
-                <div style={{ marginTop: SPACE.sm, color: 'var(--adm-muted)' }}>
-                  Prévia: <em>{testeOk.preview[0]?.titulo}</em>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Categoria + Máx. itens */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SPACE.lg }}>
-          <div>
-            <label style={labelSty}>Categoria padrão</label>
-            <select className="adm-input" value={form.categoria_id} onChange={e => set('categoria_id', e.target.value)}>
-              <option value="">— Sem categoria —</option>
-              {categorias.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelSty}>Máx. itens/importação</label>
-            <input className="adm-input" type="number" min={1} max={100} value={form.max_items} onChange={e => set('max_items', e.target.value)} />
-          </div>
-        </div>
-
-        {/* Ativa */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: SPACE.md + 2, cursor: 'pointer' }}>
-          <input type="checkbox" checked={form.ativa} onChange={e => set('ativa', e.target.checked)}
-            style={{ width: 16, height: 16, accentColor: 'var(--adm-accent)', cursor: 'pointer' }} />
-          <span style={{ fontSize: FONT.md, color: 'var(--adm-text)' }}>Fonte ativa</span>
-        </label>
-
-        {/* Auto-atualização */}
-        <div style={{ borderTop: '1px solid var(--adm-border)', paddingTop: SPACE.lg }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: SPACE.md + 2, cursor: 'pointer', marginBottom: SPACE.lg }}>
-            <input type="checkbox" checked={form.auto_update} onChange={e => set('auto_update', e.target.checked)}
-              style={{ width: 16, height: 16, accentColor: 'var(--adm-accent)', cursor: 'pointer' }} />
-            <div>
-              <div style={{ fontSize: FONT.md, fontWeight: 600, color: 'var(--adm-text)' }}>Atualização automática</div>
-              <div style={{ fontSize: FONT.base, color: 'var(--adm-muted)' }}>Importa automaticamente em intervalos periódicos</div>
-            </div>
-          </label>
-          {form.auto_update && (
-            <div>
-              <label style={labelSty}>Intervalo (minutos)</label>
-              <select className="adm-input" value={form.intervalo_min} onChange={e => set('intervalo_min', Number(e.target.value))}>
-                <option value={15}>A cada 15 minutos</option>
-                <option value={30}>A cada 30 minutos</option>
-                <option value={60}>A cada 1 hora</option>
-                <option value={120}>A cada 2 horas</option>
-                <option value={360}>A cada 6 horas</option>
-                <option value={720}>A cada 12 horas</option>
-                <option value={1440}>A cada 24 horas</option>
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* Enriquecimento por IA */}
-        <div style={{ borderTop:'1px solid var(--adm-border)', paddingTop:SPACE.lg }}>
-          <label style={{display:'flex',alignItems:'center',gap:SPACE.md+2,cursor:'pointer',marginBottom:SPACE.md}}>
-            <input type="checkbox" checked={form.ia_ativa} onChange={e=>set('ia_ativa',e.target.checked)} style={{width:16,height:16,accentColor:'var(--adm-accent)'}}/>
-            <div><div style={{fontSize:FONT.md,fontWeight:700,color:'var(--adm-text)'}}>✨ Enriquecer com IA</div><div style={{fontSize:FONT.base,color:'var(--adm-muted)'}}>Usa o provedor priorizado em Integrações e APIs. Se a IA falhar, o RSS continua importando normalmente.</div></div>
-          </label>
-          {form.ia_ativa&&<div style={{display:'grid',gap:8,padding:12,borderRadius:RADIUS.md,background:'var(--adm-surface2)'}}>
-            {[['ia_resumo','Gerar resumo'],['ia_tags','Gerar tags'],['ia_categoria','Sugerir categoria'],['ia_titulo','Melhorar título']].map(([key,label])=><label key={key} style={{display:'flex',gap:8,alignItems:'center',fontSize:FONT.base}}><input type="checkbox" checked={!!form[key]} onChange={e=>set(key,e.target.checked)} style={{width:15,height:15}}/>{label}</label>)}
-            <label style={labelSty}>Máximo de matérias com IA por importação</label>
-            <select className="adm-input" value={form.ia_max_itens} onChange={e=>set('ia_max_itens',Number(e.target.value))}><option value={1}>1 matéria</option><option value={2}>2 matérias</option><option value={3}>3 matérias</option><option value={5}>5 matérias</option></select>
-            <div style={{fontSize:11,color:'var(--adm-muted)',lineHeight:1.45}}>O limite protege a cota gratuita. A fonte e a URL original continuam preservadas.</div>
-          </div>}
-        </div>
+      <div className="rss-two">
+        <div className="rss-field"><div className="rss-label-row"><label>Fonte editorial *</label><button type="button" onClick={()=>setQuick(quick==='fonte'?null:'fonte')}>+ criar</button></div><select className="adm-input" value={form.fonte_id} onChange={e=>set('fonte_id',e.target.value)}><option value="">Selecione…</option>{fontesEditoriais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}</select>{quick==='fonte'&&<MiniCreate tipo="fonte" onCreate={onCriarFonte} onDone={out=>{if(out?.id)set('fonte_id',out.id);setQuick(null)}}/>}</div>
+        <div className="rss-field"><div className="rss-label-row"><label>Categoria padrão *</label><button type="button" onClick={()=>setQuick(quick==='categoria'?null:'categoria')}>+ criar</button></div><select className="adm-input" value={form.categoria_id} onChange={e=>set('categoria_id',e.target.value)}><option value="">Selecione…</option>{categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>{quick==='categoria'&&<MiniCreate tipo="categoria" onCreate={onCriarCategoria} onDone={out=>{if(out?.id)set('categoria_id',out.id);setQuick(null)}}/>}</div>
       </div>
-    </DSModal>
-  )
+
+      <div className="rss-automation"><DSToggle checked={form.auto_update} onChange={v=>set('auto_update',v)} label="Importação automática" desc={form.auto_update?`Executar a cada ${formatarIntervalo(form.intervalo_min)}`:'Somente quando você mandar importar'}/>{form.auto_update&&<select className="adm-input rss-interval" value={form.intervalo_min} onChange={e=>set('intervalo_min',Number(e.target.value))}>{[[15,'15 min'],[30,'30 min'],[60,'1 hora'],[120,'2 horas'],[360,'6 horas'],[720,'12 horas'],[1440,'24 horas']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}</div>
+
+      <details className="rss-advanced"><summary>Configurações avançadas</summary><div className="rss-advanced-body">
+        <div className="rss-two"><div className="rss-field"><label>Máx. por importação</label><input className="adm-input" type="number" min="1" max="100" value={form.max_items} onChange={e=>set('max_items',e.target.value)}/></div><div className="rss-field"><label>Estado</label><select className="adm-input" value={form.ativa?'1':'0'} onChange={e=>set('ativa',e.target.value==='1')}><option value="1">Ativo</option><option value="0">Inativo</option></select></div></div>
+        <DSToggle checked={form.copiar_imagem_r2} onChange={v=>set('copiar_imagem_r2',v)} label="Guardar capas no Cloudflare R2" desc="Copia a imagem externa para alsistemas/noticias/rss/...; se falhar, mantém a URL original."/>
+        <div className="rss-ai-box"><DSToggle checked={form.ia_ativa} onChange={v=>set('ia_ativa',v)} label="IA editorial após importar" desc="Roda em background; a importação não fica esperando a IA."/>{form.ia_ativa&&<div className="rss-ai-options">
+          <label><input type="checkbox" checked={form.ia_resumo} onChange={e=>set('ia_resumo',e.target.checked)}/> resumo</label>
+          <label><input type="checkbox" checked={form.ia_tags} onChange={e=>set('ia_tags',e.target.checked)}/> tags</label>
+          <label><input type="checkbox" checked={form.ia_categoria} onChange={e=>set('ia_categoria',e.target.checked)}/> reclassificar categoria</label>
+          <label title="Desligado por padrão para preservar o título da fonte"><input type="checkbox" checked={form.ia_titulo} onChange={e=>set('ia_titulo',e.target.checked)}/> sugerir/aplicar título</label>
+          <select className="adm-input" value={form.ia_max_itens} onChange={e=>set('ia_max_itens',Number(e.target.value))}>{[1,2,3,5,10].map(v=><option key={v} value={v}>IA em até {v} matéria(s)</option>)}</select>
+        </div>}</div>
+      </div></details>
+    </div>
+  </DSModal>
 }
 
-// ─── Card de cada fonte RSS ───────────────────────────────────
-function CardFonte({ fonte, onImportar, onEditar, onExcluir, importando }) {
-  const [confirmExcluir, setConfirmExcluir] = useState(false)
-
-  return (
-    <div style={{
-      background: 'var(--adm-surface)',
-      border: `1px solid var(--adm-border)`,
-      borderRadius: RADIUS.xl,
-      padding: SPACE.xl,
-      display: 'flex', flexDirection: 'column', gap: SPACE.lg,
-      opacity: fonte.ativa ? 1 : 0.6,
-    }}>
-      {/* Linha superior */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: SPACE.md + 2 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: RADIUS.md, flexShrink: 0,
-          background: 'rgba(var(--adm-accent-rgb, 99,102,241),.12)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--adm-accent)" strokeWidth="2" width="18" height="18">
-            <path d="M4 11a9 9 0 019 9M4 4a16 16 0 0116 16"/>
-            <circle cx="5" cy="19" r="1" fill="var(--adm-accent)" stroke="none"/>
-          </svg>
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap', marginBottom: SPACE.xs }}>
-            <span style={{ fontWeight: 700, fontSize: FONT.lg - 1, color: 'var(--adm-text)', wordBreak: 'break-word' }}>
-              {fonte.nome}
-            </span>
-            {fonte.padrao    && <DSBadge variant="blue">PADRÃO</DSBadge>}
-            {!fonte.ativa    && <DSBadge variant="red">INATIVA</DSBadge>}
-            {fonte.desativada_automaticamente && <DSBadge variant="red">AUTO-DESATIVADA</DSBadge>}
-            {fonte.auto_update && <DSBadge variant="green">AUTO ⏱ {formatarIntervalo(fonte.intervalo_min)}</DSBadge>}
-            {fonte.ia_ativa && <DSBadge variant="blue">✨ IA</DSBadge>}
-            {fonte.ultimo_erro && <DSBadge variant="red">COM ERRO</DSBadge>}
-            {!fonte.ultimo_erro && fonte.ultima_importacao && <DSBadge variant="green">SAUDÁVEL</DSBadge>}
-          </div>
-          <a href={fonte.url} target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', wordBreak: 'break-all', textDecoration: 'none', display: 'block' }}
-            title={fonte.url}>
-            {fonte.url.length > 60 ? fonte.url.slice(0, 60) + '…' : fonte.url}
-          </a>
-        </div>
-      </div>
-
-      {/* Estatísticas */}
-      <div style={{ display: 'flex', gap: SPACE.xl, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Última importação', value: formatarData(fonte.ultima_importacao) },
-          { label: 'Total importadas',  value: fonte.total_importadas ?? 0 },
-          { label: 'Último ciclo',       value: `${fonte.ultima_importadas ?? 0} novas · ${fonte.ultima_duplicadas ?? 0} dup.` },
-          { label: 'Itens no feed',       value: fonte.ultimo_total_feed ?? '—' },
-          { label: 'Duração',             value: fonte.ultima_duracao_ms ? `${(fonte.ultima_duracao_ms / 1000).toFixed(1)}s` : '—' },
-          { label: 'Máx./vez',            value: fonte.max_items ?? 10 },
-          ...(fonte.categoria_id ? [{ label: 'Categoria', value: fonte.categoria_id?.nome || fonte.categoria_id }] : []),
-        ].map(({ label, value }) => (
-          <div key={label} style={{ fontSize: FONT.base }}>
-            <span style={{ color: 'var(--adm-muted)' }}>{label}: </span>
-            <span style={{ color: 'var(--adm-text)', fontWeight: 500 }}>{value}</span>
-          </div>
-        ))}
-      </div>
-
-      {fonte.ultimo_erro && (
-        <DSAlert variant="red">
-          <strong>{fonte.desativada_automaticamente ? 'Fonte desativada automaticamente:' : 'Última falha:'}</strong> {fonte.ultimo_erro}
-          {fonte.falhas_consecutivas > 1 ? ` · ${fonte.falhas_consecutivas} falhas consecutivas` : ''}
-          {fonte.motivo_desativacao ? <div style={{ marginTop: 6 }}>{fonte.motivo_desativacao}</div> : null}
-        </DSAlert>
-      )}
-
-      {/* Ações */}
-      {confirmExcluir ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: SPACE.md, padding: `${SPACE.md}px ${SPACE.lg}px`,
-          background: C.redBg, borderRadius: RADIUS.md, border: `1px solid ${C.redBorder}`,
-        }}>
-          <span style={{ fontSize: FONT.base, color: 'var(--adm-text)', flex: 1 }}>Confirmar exclusão?</span>
-          <DSBtn variant="ghost" size="sm" onClick={() => setConfirmExcluir(false)}>Cancelar</DSBtn>
-          <DSBtn variant="danger" size="sm" onClick={() => { setConfirmExcluir(false); onExcluir(fonte) }}>Excluir</DSBtn>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: SPACE.md, flexWrap: 'wrap' }}>
-          <DSBtn variant="primary" size="sm" loading={importando === fonte.id}
-            onClick={() => onImportar(fonte)} style={{ flex: 1, minWidth: 100, justifyContent: 'center' }}>
-            {importando === fonte.id ? 'Importando…' : <>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-              Importar agora
-            </>}
-          </DSBtn>
-          <DSBtn variant="secondary" size="sm" onClick={() => onEditar(fonte)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
-            Editar
-          </DSBtn>
-          <DSBtn variant="ghost" size="icon" onClick={() => setConfirmExcluir(true)}
-            title="Excluir fonte" style={{ color: 'var(--adm-red)' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-              <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
-            </svg>
-          </DSBtn>
-        </div>
-      )}
-    </div>
-  )
+function FeedCard({feed,onImportar,onEditar,onExcluir,importando}){
+  const [open,setOpen]=useState(false), [confirm,setConfirm]=useState(false)
+  const fonte=feed.fonte_id?.nome||'Fonte não vinculada', cat=feed.categoria_id?.nome||'Sem categoria'
+  return <article className={`rss-card ${!feed.ativa?'rss-card-off':''}`}>
+    <button className="rss-card-main" onClick={()=>setOpen(v=>!v)} aria-expanded={open}>
+      <span className={`rss-health ${feed.ultimo_erro?'bad':feed.ativa?'good':'idle'}`}/><span className="rss-card-copy"><strong>{feed.nome}</strong><small>{fonte} · {cat}</small><span className="rss-card-meta">{formatarData(feed.ultima_importacao)} · {feed.total_importadas||0} importadas</span></span><span className="rss-chevron">{open?'⌃':'⌄'}</span>
+    </button>
+    <div className="rss-card-badges">{feed.auto_update&&<DSBadge variant="green">AUTO · {formatarIntervalo(feed.intervalo_min)}</DSBadge>}{feed.ia_ativa&&<DSBadge variant="blue">IA</DSBadge>}{!feed.ativa&&<DSBadge variant="red">INATIVO</DSBadge>}{feed.ultimo_erro&&<DSBadge variant="red">ERRO</DSBadge>}{feed.padrao&&<DSBadge variant="blue">PADRÃO</DSBadge>}</div>
+    {open&&<div className="rss-card-details"><div className="rss-detail-grid"><div><span>Feed</span><a href={feed.url} target="_blank" rel="noreferrer">{feed.url}</a></div><div><span>Último ciclo</span><b>{feed.ultima_importadas||0} novas · {feed.ultima_duplicadas||0} duplicadas</b></div><div><span>Capas</span><b>{feed.copiar_imagem_r2!==false?'Cloudflare R2':'URL externa'}</b></div><div><span>Limite</span><b>{feed.max_items||10} itens</b></div></div>{feed.ultimo_erro&&<DSAlert variant="red"><strong>Última falha:</strong> {feed.ultimo_erro}</DSAlert>}
+      {confirm?<div className="rss-confirm"><span>Excluir este feed? As notícias já importadas serão preservadas.</span><DSBtn size="sm" variant="danger" onClick={()=>onExcluir(feed)}>Excluir</DSBtn><DSBtn size="sm" variant="ghost" onClick={()=>setConfirm(false)}>Cancelar</DSBtn></div>:<div className="rss-card-actions"><DSBtn size="sm" variant="primary" loading={importando===feed.id} onClick={()=>onImportar(feed)}>Importar agora</DSBtn><DSBtn size="sm" onClick={()=>onEditar(feed)}>Editar</DSBtn>{!feed.padrao&&<DSBtn size="sm" variant="ghost" onClick={()=>setConfirm(true)}>Excluir</DSBtn>}</div>}
+    </div>}
+  </article>
 }
 
-// ─── Painel de fontes padrão ──────────────────────────────────
-function PainelFontesPadrao({ padrao, existentes, onAdicionar, adicionando }) {
-  const existentesUrls = new Set(existentes.map(f => f.url))
-  const disponiveis    = padrao.filter(p => !existentesUrls.has(p.url))
-  if (!disponiveis.length) return null
-
-  return (
-    <div className="adm-card" style={{ marginBottom: SPACE.xl3 }}>
-      <div style={{ fontSize: FONT.md, fontWeight: 700, color: 'var(--adm-text)', marginBottom: SPACE.lg }}>
-        📡 Fontes RSS sugeridas — adicione com um clique
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
-        {disponiveis.map(p => (
-          <div key={p.url} style={{
-            display: 'flex', alignItems: 'center', gap: SPACE.md + 2,
-            padding: `${SPACE.md + 2}px ${SPACE.lg}px`,
-            background: 'var(--adm-surface2)', borderRadius: RADIUS.md,
-          }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: FONT.md, fontWeight: 600, color: 'var(--adm-text)' }}>{p.nome}</div>
-              <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', wordBreak: 'break-all' }}>{p.url}</div>
-              {p.destaque && <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginTop: 4 }}>{p.destaque}</div>}
-            </div>
-            <DSBtn variant="secondary" size="sm" loading={adicionando === p.url}
-              onClick={() => onAdicionar(p)} style={{ flexShrink: 0 }}>
-              {adicionando === p.url ? 'Adicionando…' : '+ Adicionar'}
-            </DSBtn>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+function Results({value,onClose}){
+  if(!value)return null
+  const total=value.totalImportadas??value.importadas??0, dup=value.totalDuplicadas??value.duplicadas??0
+  return <div className="rss-result"><span>✓ <b>{total}</b> nova(s) · {dup} duplicada(s){value.ia_em_background?' · IA em background':''}</span><button onClick={onClose}>×</button></div>
 }
 
-// ─── Painel de resultados da importação ──────────────────────
-function PainelResultados({ resultados, onFechar }) {
-  if (!resultados) return null
-  return (
-    <div className="adm-card" style={{ marginBottom: SPACE.xl3 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACE.lg }}>
-        <span style={{ fontSize: FONT.md, fontWeight: 700, color: 'var(--adm-text)' }}>Resultado da importação</span>
-        <DSBtn variant="ghost" size="icon" onClick={onFechar}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </DSBtn>
-      </div>
-
-      {resultados.resultados ? (
-        <>
-          <div style={{ display: 'flex', gap: SPACE.xl2, marginBottom: SPACE.lg }}>
-            <div style={{ fontSize: FONT.base }}>
-              <span style={{ color: 'var(--adm-muted)' }}>Importadas: </span>
-              <span style={{ fontWeight: 700, color: C.greenSolid, fontSize: FONT.xl }}>{resultados.totalImportadas}</span>
-            </div>
-            <div style={{ fontSize: FONT.base }}>
-              <span style={{ color: 'var(--adm-muted)' }}>Duplicadas: </span>
-              <span style={{ fontWeight: 700, color: 'var(--adm-muted)', fontSize: FONT.xl }}>{resultados.totalDuplicadas}</span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
-            {resultados.resultados.map((r, i) => (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: SPACE.md, fontSize: FONT.base,
-                padding: `${SPACE.sm}px ${SPACE.md + 2}px`,
-                background: 'var(--adm-surface2)', borderRadius: RADIUS.sm,
-              }}>
-                <span style={{ flex: 1, color: 'var(--adm-text)', fontWeight: 500 }}>{r.fonte}</span>
-                {r.erro
-                  ? <span style={{ color: C.red }}>❌ {r.erro}</span>
-                  : <span style={{ color: C.greenSolid }}>✓ {r.importadas} novas, {r.duplicadas} dup.</span>}
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div style={{ display: 'flex', gap: SPACE.xl2 }}>
-          {[
-            { label: 'Novas',      value: resultados.importadas, cor: C.greenSolid },
-            { label: 'Duplicadas', value: resultados.duplicadas, cor: 'var(--adm-muted)' },
-            { label: 'Verificadas', value: resultados.total,     cor: 'var(--adm-text)' },
-          ].map(({ label, value, cor }) => (
-            <div key={label} style={{ fontSize: FONT.base }}>
-              <span style={{ color: 'var(--adm-muted)' }}>{label}: </span>
-              <span style={{ fontWeight: 700, color: cor, fontSize: FONT.xl }}>{value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{ marginTop: SPACE.md + 2, fontSize: FONT.base, color: 'var(--adm-muted)' }}>
-        ℹ️ Notícias importadas chegam como <strong>rascunho</strong> para revisão editorial antes de publicar.
-      </div>
-    </div>
-  )
-}
-
-// ─── Componente principal ─────────────────────────────────────
-export default function AdminRssImport() {
-  const {
-    fontes, padrao, categorias,
-    carregando, importando, importandoTodas, reprocessando, adicionando, resultados,
-    setResultados, temFontesAtivas,
-    adicionarPadrao, salvarFonte, excluirFonte, importarFonte, importarTodas, reprocessarImportadas,
-  } = useRss()
-
-  const [modal, setModal] = useState(null)
-
-  async function handleSalvar(dados) {
-    try {
-      await salvarFonte(dados, modal?.id)
-      setModal(null)
-    } catch (err) {
-      toast.error(err.message || 'Erro ao salvar fonte')
-      throw err
-    }
-  }
-
-  return (
-    <div style={{ maxWidth: 860, margin: '0 auto' }}>
-      {/* Modal de fonte */}
-      {modal !== null && (
-        <ModalFonte
-          fonte={modal?.id ? modal : null}
-          categorias={categorias}
-          onSalvar={handleSalvar}
-          onFechar={() => setModal(null)}
-        />
-      )}
-
-      {/* Cabeçalho */}
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Importar via RSS</div>
-          <div className="adm-page-sub">
-            Busque notícias automaticamente de feeds RSS externos e importe para o banco de dados.
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: SPACE.md + 2, flexWrap: 'wrap' }}>
-          <DSBtn variant="ghost" size="sm" loading={reprocessando} disabled={reprocessando || importandoTodas || !!importando} onClick={reprocessarImportadas}>
-            {reprocessando ? 'Limpando…' : 'Reprocessar notícias'}
-          </DSBtn>
-          <DSBtn variant="secondary" size="sm" loading={importandoTodas}
-            disabled={importandoTodas || !temFontesAtivas || !!importando}
-            onClick={importarTodas}>
-            {importandoTodas ? 'Importando…' : <>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
-                <path d="M23 4v6h-6M1 20v-6h6"/>
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-              </svg>
-              Atualizar todas
-            </>}
-          </DSBtn>
-          <DSBtn variant="primary" size="sm" onClick={() => setModal({})}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-            Nova fonte
-          </DSBtn>
-        </div>
-      </div>
-
-      {/* Banner informativo — antes era inline rgba, agora DSAlert */}
-      <DSAlert variant="blue" style={{ marginBottom: SPACE.xl2 }}>
-        Notícias importadas são salvas como <strong>rascunho</strong> e incluem automaticamente a fonte.
-        Revise e publique cada uma pelo menu <strong>Notícias → Todas as Notícias</strong>.
-        A deduplicação usa link canônico + GUID e remove parâmetros de rastreamento para reduzir notícias repetidas entre feeds.
-        Novas fontes agora são testadas antes de salvar; feeds que retornarem 404/410 são desativados automaticamente para não gerar erro em todos os ciclos.
-      </DSAlert>
-
-      {/* Resultados da última importação */}
-      <PainelResultados resultados={resultados} onFechar={() => setResultados(null)} />
-
-      {/* Fontes padrão disponíveis */}
-      {!carregando && (
-        <PainelFontesPadrao
-          padrao={padrao}
-          existentes={fontes}
-          onAdicionar={adicionarPadrao}
-          adicionando={adicionando}
-        />
-      )}
-
-      {/* Lista de fontes cadastradas */}
-      {carregando ? (
-        <div style={{ textAlign: 'center', padding: `${SPACE.xl5}px 0`, color: 'var(--adm-muted)', fontSize: FONT.lg - 1 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24"
-            className="adm-spin" style={{ marginBottom: SPACE.lg, display: 'block', margin: `0 auto ${SPACE.lg}px` }}>
-            <path d="M21 12a9 9 0 11-18 0"/>
-          </svg>
-          Carregando fontes RSS…
-        </div>
-      ) : fontes.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: `${SPACE.xl5}px 0` }}>
-          <div style={{ fontSize: 40, marginBottom: SPACE.lg }}>📡</div>
-          <div style={{ fontSize: FONT.lg, fontWeight: 600, color: 'var(--adm-text)', marginBottom: SPACE.sm }}>
-            Nenhuma fonte RSS cadastrada
-          </div>
-          <div style={{ fontSize: FONT.md, color: 'var(--adm-muted)', marginBottom: SPACE.xl }}>
-            Adicione uma fonte sugerida acima ou cadastre manualmente.
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ fontSize: FONT.base, fontWeight: 600, color: 'var(--adm-muted)', marginBottom: SPACE.lg, textTransform: 'uppercase', letterSpacing: .5 }}>
-            {fontes.length} fonte(s) cadastrada(s)
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: SPACE.lg }}>
-            {fontes.map(fonte => (
-              <CardFonte
-                key={fonte.id}
-                fonte={fonte}
-                onImportar={importarFonte}
-                onEditar={setModal}
-                onExcluir={excluirFonte}
-                importando={importando}
-              />
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
+export default function AdminRssImport(){
+  const rss=useRss(); const [modal,setModal]=useState(null)
+  const existingUrls=useMemo(()=>new Set(rss.fontes.map(f=>f.url)),[rss.fontes])
+  const suggestions=rss.padrao.filter(p=>!existingUrls.has(p.url))
+  async function salvar(dados){return rss.salvarFonte(dados,modal?.feed?.id)}
+  return <div className="rss-page">
+    <style>{`
+      .rss-page{max-width:900px;margin:0 auto}.rss-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.rss-head h1{margin:0;font-size:24px}.rss-head p{margin:5px 0 0;color:var(--adm-muted);font-size:14px}.rss-head-actions{display:flex;gap:8px;flex-wrap:wrap}.rss-result{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;margin-bottom:14px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface);font-size:13px}.rss-result button{border:0;background:none;font-size:22px;color:var(--adm-muted);cursor:pointer}.rss-list{display:grid;gap:10px}.rss-card{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;overflow:hidden}.rss-card-off{opacity:.72}.rss-card-main{width:100%;border:0;background:transparent;display:flex;align-items:center;gap:12px;text-align:left;padding:14px;cursor:pointer;color:var(--adm-text)}.rss-health{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#94a3b8}.rss-health.good{background:#22c55e}.rss-health.bad{background:#ef4444}.rss-card-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}.rss-card-copy strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rss-card-copy small,.rss-card-meta{font-size:12px;color:var(--adm-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rss-chevron{color:var(--adm-muted)}.rss-card-badges{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 12px 35px}.rss-card-details{border-top:1px solid var(--adm-border);padding:13px 14px 14px}.rss-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;margin-bottom:12px}.rss-detail-grid>div{min-width:0}.rss-detail-grid span{display:block;color:var(--adm-muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}.rss-detail-grid b,.rss-detail-grid a{font-size:13px;color:var(--adm-text);font-weight:600;word-break:break-word}.rss-card-actions,.rss-confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}.rss-confirm span{font-size:13px;flex:1}.rss-suggestions{margin:14px 0}.rss-suggestions summary,.rss-maint summary{cursor:pointer;color:var(--adm-muted);font-size:13px;padding:8px 2px}.rss-suggestion-list{display:grid;gap:8px;margin-top:8px}.rss-suggestion{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 12px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:12px}.rss-suggestion strong{display:block;font-size:13px}.rss-suggestion small{color:var(--adm-muted);font-size:11px}.rss-maint{margin-top:18px}.rss-maint-body{padding:10px 0}.rss-form{display:grid;gap:15px}.rss-field label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--adm-muted);margin-bottom:6px}.rss-input-action{display:flex;gap:8px}.rss-input-action .adm-input{min-width:0;flex:1}.rss-ok{display:block;margin-top:6px;color:#16a34a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rss-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rss-label-row{display:flex;justify-content:space-between;align-items:center}.rss-label-row button{border:0;background:none;color:var(--adm-accent);font-size:11px;cursor:pointer}.rss-quick-create{display:grid;gap:7px;margin-top:7px;padding:9px;background:var(--adm-surface2);border-radius:10px}.rss-inline-actions{display:flex;gap:6px}.rss-automation{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--adm-border)}.rss-interval{width:150px}.rss-advanced{border-top:1px solid var(--adm-border);padding-top:8px}.rss-advanced summary{cursor:pointer;font-weight:650;font-size:13px;color:var(--adm-text);padding:7px 0}.rss-advanced-body{display:grid;gap:12px;padding-top:8px}.rss-ai-box{padding:10px;background:var(--adm-surface2);border-radius:10px}.rss-ai-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;font-size:13px}.rss-ai-options label{display:flex;gap:6px;align-items:center}.rss-ai-options select{grid-column:1/-1}.rss-empty{text-align:center;padding:36px 10px;color:var(--adm-muted)}
+      @media(max-width:640px){.rss-head{align-items:stretch}.rss-head h1{font-size:22px}.rss-head p{font-size:13px}.rss-head-actions{flex-direction:column;min-width:124px}.rss-head-actions .adm-btn{width:100%;justify-content:center}.rss-two{grid-template-columns:1fr}.rss-detail-grid{grid-template-columns:1fr}.rss-card-main{padding:12px}.rss-card-badges{padding-left:33px}.rss-input-action{align-items:stretch}.rss-input-action .adm-btn{padding-left:10px;padding-right:10px}.rss-automation{align-items:flex-start;flex-direction:column}.rss-interval{width:100%}.rss-ai-options{grid-template-columns:1fr}.rss-ai-options select{grid-column:auto}.rss-suggestion{align-items:flex-start}.rss-suggestion .adm-btn{flex-shrink:0}}
+    `}</style>
+    {modal&&<ModalFeed feed={modal.feed} sugerido={modal.sugerido} categorias={rss.categorias} fontesEditoriais={rss.fontesEditoriais} onSalvar={salvar} onCriarFonte={rss.criarFonteEditorial} onCriarCategoria={rss.criarCategoria} onFechar={()=>setModal(null)}/>} 
+    <header className="rss-head"><div><h1>RSS</h1><p>Feeds entram como rascunho no fluxo editorial de Notícias.</p></div><div className="rss-head-actions"><DSBtn size="sm" variant="secondary" loading={rss.importandoTodas} disabled={!rss.temFontesAtivas||rss.importandoTodas} onClick={rss.importarTodas}>Importar todas</DSBtn><DSBtn size="sm" variant="primary" onClick={()=>setModal({})}>+ Nova fonte</DSBtn></div></header>
+    <Results value={rss.resultados} onClose={()=>rss.setResultados(null)}/>
+    {suggestions.length>0&&<details className="rss-suggestions"><summary>Feeds sugeridos ({suggestions.length})</summary><div className="rss-suggestion-list">{suggestions.map(p=><div className="rss-suggestion" key={p.url}><div><strong>{p.nome}</strong><small>{p.fonte_nome} · categoria sugerida: {p.categoria_sugerida}</small></div><DSBtn size="sm" onClick={()=>setModal({sugerido:p})}>Configurar</DSBtn></div>)}</div></details>}
+    {rss.carregando?<div className="rss-empty">Carregando feeds…</div>:rss.fontes.length===0?<div className="rss-empty">Nenhum feed cadastrado. Adicione uma fonte para começar.</div>:<div className="rss-list">{rss.fontes.map(f=><FeedCard key={f.id} feed={f} onImportar={rss.importarFonte} onEditar={feed=>setModal({feed})} onExcluir={rss.excluirFonte} importando={rss.importando}/>)}</div>}
+    <details className="rss-maint"><summary>Manutenção</summary><div className="rss-maint-body"><DSBtn size="sm" variant="ghost" loading={rss.reprocessando} onClick={rss.reprocessarImportadas}>Reprocessar textos importados</DSBtn><p style={{fontSize:12,color:'var(--adm-muted)',marginTop:8}}>Corrige sanitização e caracteres quebrados em notícias RSS antigas sem alterar a fonte original.</p></div></details>
+  </div>
 }

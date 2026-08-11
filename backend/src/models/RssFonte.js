@@ -8,7 +8,8 @@ const rssFonteSchema = new mongoose.Schema({
   nome:          { type: String, required: true, trim: true },
   url:           { type: String, required: true, trim: true },
   ativa:         { type: Boolean, default: true },
-  categoria_id:  { type: mongoose.Schema.Types.ObjectId, ref: 'Categoria', default: null },
+  fonte_id:      { type: mongoose.Schema.Types.ObjectId, ref: 'Fonte', required: true, index: true },
+  categoria_id:  { type: mongoose.Schema.Types.ObjectId, ref: 'Categoria', required: true, index: true },
   max_items:     { type: Number, default: 10, min: 1, max: 100 },
   // Configuração de atualização automática
   auto_update:   { type: Boolean, default: false },
@@ -19,7 +20,8 @@ const rssFonteSchema = new mongoose.Schema({
   ia_tags: { type: Boolean, default: true },
   ia_categoria: { type: Boolean, default: true },
   ia_titulo: { type: Boolean, default: false },
-  ia_max_itens: { type: Number, default: 3, min: 1, max: 5 },
+  ia_max_itens: { type: Number, default: 3, min: 1, max: 10 },
+  copiar_imagem_r2: { type: Boolean, default: true },
   // Histórico
   ultima_importacao: { type: Date, default: null },
   ultima_tentativa:  { type: Date, default: null },

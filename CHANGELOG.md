@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.118 — RSS integrado ao Conteúdo, R2 e fluxo editorial
+
+- Fonte RSS vinculada a uma Fonte editorial real; vários feeds podem compartilhar a mesma Fonte.
+- Categoria padrão obrigatória por feed, com migração de dados antigos.
+- Home deixou de consultar RSS externo diretamente e passa a exibir somente matérias RSS já publicadas.
+- `/rss` público agora filtra apenas conteúdo publicado e informa MIME/tamanho de capa quando disponível.
+- Capas RSS podem ser espelhadas no Cloudflare R2 em `alsistemas/noticias/rss/<fonte>/AAAA/MM/`.
+- Charset, UTF-8 e mojibake normalizados durante importação e reprocessamento.
+- IA editorial executada em background após a importação; título fica desativado por padrão.
+- Administração RSS redesenhada com cards compactos, detalhes sob demanda e formulário curto.
+- Fonte e Categoria podem ser criadas diretamente do formulário RSS.
+- Proteções de SSRF, rede privada, redirect, TLS normal e limite de XML/imagens adicionadas.
+- Exclusão de feed preserva as notícias e remove a referência RSS órfã; Fontes/Categorias em uso por RSS não podem ser excluídas.
+
+
 ## 1.0.117 — Editor de notícias integrado ao Conteúdo e Cloudflare R2
 
 - Tela **Nova/Editar notícia** redesenhada para ocupar menos espaço no celular: status compacto, identificação direta e um único conjunto de ações por tamanho de tela.

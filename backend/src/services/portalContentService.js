@@ -1,6 +1,5 @@
 import ConfiguracaoHome from '../models/ConfiguracaoHome.js'
-import RssFonte from '../models/RssFonte.js'
-import { parseFeed } from './rssImporter.js'
+import Noticia from '../models/Noticia.js'
 import { cacheGet, cacheSet } from '../utils/cache.js'
 import { getCredential } from '../utils/credentialStore.js'
 import { enviarMensagem } from '../utils/aiClient.js'
@@ -289,55 +288,32 @@ export async function getFootball() {
   return { available: true, mode: 'today', matches: filterFixtures(todayPayload.rows, footballMetadata), quota: todayPayload.quota || null, source: 'API-Football', fetchedAt: new Date().toISOString() }
 }
 
-function itemImage(item = {}) {
-  const raw = item.content || item.contentEncoded || item['content:encoded'] || item.summary || item.description || ''
-  const htmlImg = String(raw).match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]
-  return item.enclosure?.url || item.mediaContent?.$?.url || item['media:content']?.$?.url || item.mediaThumbnail?.$?.url || item['media:thumbnail']?.$?.url || htmlImg || null
-}
-
-function itemDate(item = {}) {
-  const raw = item.isoDate || item.pubDate || item.date || ''
-  const d = raw ? new Date(raw) : new Date()
-  return Number.isNaN(d.getTime()) ? new Date() : d
-}
-
 export async function getRssWorld() {
   const cfg = await contentConfig()
   if (!boolValue(cfg.portal_rss_world_enabled, true)) return { available: false, reason: 'disabled', items: [] }
-  const fontes = await RssFonte.find({ ativa: true }).sort({ padrao: -1, nome: 1 }).limit(8).lean()
-  if (!fontes.length) return { available: true, items: [], reason: 'no-sources' }
-  const sourceFingerprint = fontes.map(f => `${f._id}:${new Date(f.atualizado_em || f.criado_em || 0).getTime()}`).join('|')
-  const rssCacheKey = `${RSS_CACHE}:${sourceFingerprint}`
-  const cached = await cacheGet(rssCacheKey)
-  if (cached) return cached
 
-  const settled = await Promise.allSettled(fontes.map(async fonte => {
-    const items = await parseFeed(fonte.url)
-    return items.slice(0, Math.min(5, fonte.max_items || 5)).map(item => ({
-      id: item.guid || item.id || item.link || `${fonte._id}:${item.title}`,
-      title: String(item.title || '').trim(),
-      url: item.link || null,
-      source: fonte.nome,
-      image: itemImage(item),
-      publishedAt: itemDate(item).toISOString(),
-      category: fonte.categoria_id ? String(fonte.categoria_id) : null,
-    })).filter(x => x.title && x.url)
+  // RSS é somente uma porta de entrada editorial. A Home nunca consulta feeds externos:
+  // ela mostra apenas matérias já importadas e publicadas pelo módulo Notícias.
+  const noticias = await Noticia.find({ importado: true, status: 'publicado' })
+    .select('_id titulo imagem_url publicado_em criado_em fonte_id categoria_id')
+    .populate('fonte_id', 'nome')
+    .populate('categoria_id', 'nome')
+    .sort({ publicado_em: -1, criado_em: -1 })
+    .limit(12)
+    .lean()
+
+  const items = noticias.map(n => ({
+    id: String(n._id),
+    title: n.titulo,
+    url: `/noticia/${n._id}`,
+    source: n.fonte_id?.nome || 'Redação',
+    image: n.imagem_url || null,
+    publishedAt: (n.publicado_em || n.criado_em || new Date()).toISOString?.() || new Date(n.publicado_em || n.criado_em).toISOString(),
+    category: n.categoria_id?.nome || null,
+    internal: true,
   }))
 
-  const all = settled.flatMap(x => x.status === 'fulfilled' ? x.value : [])
-  const seen = new Set()
-  const items = all
-    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
-    .filter(x => {
-      const key = String(x.url || x.title).toLowerCase().replace(/[?#].*$/, '')
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .slice(0, 12)
-  const out = { available: true, items, sources: fontes.length, fetchedAt: new Date().toISOString() }
-  await cacheSet(rssCacheKey, out, 10 * 60)
-  return out
+  return { available: true, items, sources: new Set(items.map(x => x.source)).size, fetchedAt: new Date().toISOString(), editorial: true }
 }
 
 export async function getPortalHomeContent() {

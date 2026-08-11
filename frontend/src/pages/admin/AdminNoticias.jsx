@@ -188,7 +188,7 @@ function AbaCategorias() {
     <>
       {modal!==null&&<CategoriaModal categoria={modal.categoria} onSalvar={handleSalvar} onFechar={()=>!salvando&&setModal(null)} salvando={salvando}/>}
       <ConfirmModal aberto={confirm.aberto} titulo={`Excluir "${confirm.cat?.nome}"?`}
-        mensagem="As notícias desta categoria ficarão sem categoria. Ação irreversível."
+        mensagem="Só é possível excluir uma categoria sem notícias e sem feeds RSS vinculados."
         labelConfirmar="Excluir" carregando={confirm.carregando}
         onConfirmar={confirmarExclusao} onCancelar={()=>setConfirm({aberto:false,cat:null,carregando:false})}/>
 
@@ -322,7 +322,7 @@ function AbaFontes() {
   return (
     <>
       <ConfirmModal aberto={confirm.aberto} titulo={`Excluir "${confirm.fonte?.nome}"?`}
-        mensagem="Notícias desta fonte ficarão sem fonte. Ação irreversível."
+        mensagem="Só é possível excluir uma fonte sem notícias e sem feeds RSS vinculados."
         labelConfirmar="Excluir" carregando={confirm.carregando}
         onConfirmar={confirmarExclusao} onCancelar={()=>setConfirm({aberto:false,fonte:null,carregando:false})}/>
 

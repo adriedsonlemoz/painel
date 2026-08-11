@@ -7,11 +7,11 @@ export const rssService = {
   async editarFonte(id, dados) { return api(`/admin/rss/fontes/${id}`, { method: 'PUT', body: JSON.stringify(dados) }) },
   async excluirFonte(id)       { await api(`/admin/rss/fontes/${id}`, { method: 'DELETE' }); return true },
   async importarFonte(id, dados = {}) {
-    return api(`/admin/rss/fontes/${id}/importar`, { method: 'POST', body: JSON.stringify(dados) })
+    return api(`/admin/rss/fontes/${id}/importar`, { method: 'POST', body: JSON.stringify(dados), timeoutMs: 120000 })
   },
-  async importarTodas()        { return api('/admin/rss/importar-todas', { method: 'POST', body: '{}' }) },
-  async reprocessarImportadas() { return api('/admin/rss/reprocessar-importadas', { method: 'POST', body: '{}' }) },
-  async testarUrl(url)         { return api('/admin/rss/testar-url', { method: 'POST', body: JSON.stringify({ url }) }) },
+  async importarTodas()        { return api('/admin/rss/importar-todas', { method: 'POST', body: '{}', timeoutMs: 180000 }) },
+  async reprocessarImportadas() { return api('/admin/rss/reprocessar-importadas', { method: 'POST', body: '{}', timeoutMs: 120000 }) },
+  async testarUrl(url)         { return api('/admin/rss/testar-url', { method: 'POST', body: JSON.stringify({ url }), timeoutMs: 30000 }) },
   async status()               { return api('/admin/rss/status') },
   async iniciarScheduler(expressao) {
     return api('/admin/rss/scheduler/iniciar', {
