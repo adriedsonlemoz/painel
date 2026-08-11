@@ -1,4 +1,4 @@
-import { api, BASE_URL } from './http.js'
+import { api, BASE_URL, authFetch } from './http.js'
 export const updatesService = {
   status(){ return api('/admin/updates', { timeoutMs: 20000 }) },
   selfTest(){ return api('/admin/updates/self-test',{method:'POST',timeoutMs:30000}) },
@@ -6,7 +6,7 @@ export const updatesService = {
   postInstallSelfTest(frontendUrl=''){ return api('/admin/updates/post-install-self-test',{method:'POST',body:JSON.stringify({frontendUrl}),timeoutMs:45000}) },
   async preparar(file){
     const form=new FormData(); form.append('package',file)
-    const res=await fetch(`${BASE_URL}/admin/updates/prepare`,{method:'POST',body:form,credentials:'include'})
+    const res=await authFetch(`${BASE_URL}/admin/updates/prepare`,{method:'POST',body:form,credentials:'include'})
     const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||`Erro ${res.status}`); return data
   },
   excluirPreparado(id){ return api(`/admin/updates/staged/${id}`,{method:'DELETE',timeoutMs:20000}) },
@@ -24,7 +24,7 @@ export const updatesService = {
     const form=new FormData()
     form.append('package',file)
     for(const [k,v] of Object.entries(config)) form.append(k,String(v??''))
-    const res=await fetch(`${BASE_URL}/admin/updates/publish-github-direct`,{method:'POST',body:form,credentials:'include'})
+    const res=await authFetch(`${BASE_URL}/admin/updates/publish-github-direct`,{method:'POST',body:form,credentials:'include'})
     const data=await res.json().catch(()=>({}))
     if(!res.ok) throw new Error(data.erro||`Erro ${res.status}`)
     return data

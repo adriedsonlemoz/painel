@@ -8,6 +8,7 @@ import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
 import ImageUpload from '../../components/ImageUpload'
 import MarkdownEditor from '../../components/MarkdownEditor'
 import toast from 'react-hot-toast'
+import { authFetch } from '../../services/domains/http.js'
 
 function slugify(t) {
   return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
@@ -201,7 +202,7 @@ export default function AdminNoticiaForm() {
     setAiBusy(acao)
     try {
       const apiBase=import.meta.env.VITE_API_URL||'/api'
-      const r=await fetch(`${apiBase}/analysis/ai/editorial`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,titulo:form.titulo,resumo:form.resumo,conteudo:form.conteudo})})
+      const r=await authFetch(`${apiBase}/analysis/ai/editorial`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,titulo:form.titulo,resumo:form.resumo,conteudo:form.conteudo})})
       const d=await r.json().catch(()=>({}))
       if(!r.ok) throw new Error(d.erro||'Falha ao consultar a IA')
       setAiResult(d.resultado)

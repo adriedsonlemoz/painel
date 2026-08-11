@@ -40,6 +40,7 @@ const AdminSetup          = lazyWithRetry(() => import('./pages/admin/AdminSetup
 const AdminCloudinary      = lazyWithRetry(() => import('./pages/admin/AdminCloudinary'))
 const AdminSistema         = lazyWithRetry(() => import('./pages/admin/AdminSistema'))
 const AdminPlataformas     = lazyWithRetry(() => import('./pages/admin/AdminPlataformas'))
+const AdminAmbientes       = lazyWithRetry(() => import('./pages/admin/AdminAmbientes'))
 const AdminArquivos       = lazyWithRetry(() => import('./pages/admin/AdminArquivos'))
 const AdminTemas          = lazyWithRetry(() => import('./pages/admin/AdminTemas'))
 const AdminIntegracoes     = lazyWithRetry(() => import('./pages/admin/AdminIntegracoes'))
@@ -186,7 +187,7 @@ function FirstRunGuard({ children }) {
   }, [state.retry])
 
   const probeStages = [
-    { label: 'Frontend carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android/Termux' : 'navegador'}` },
+    { label: 'Frontend carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android' : 'navegador'}` },
     state.error
       ? { label: 'Backend / estado do setup', status: 'error', elapsed: probeElapsed, detail: state.error?.message || 'Falha ao consultar /api/setup/status' }
       : state.checked
@@ -272,6 +273,7 @@ export default function App() {
         <Route path="sistema"        element={<S><AdminSistema /></S>} />
         <Route path="infraestrutura"  element={<Navigate to="/admin/sistema" replace />} />
         <Route path="plataformas"      element={<S><AdminPlataformas /></S>} />
+        <Route path="ambientes"        element={<S><AdminAmbientes /></S>} />
         <Route path="arquivos"       element={<S><AdminArquivos /></S>} />
         <Route path="temas"          element={<S><AdminTemas /></S>} />
         <Route path="integracoes"    element={<S><AdminIntegracoes /></S>} />

@@ -57,6 +57,7 @@ export const infraestruturaService = {
   // ── Plataformas (Render + Vercel) ───────────────────────────
   async plataformasStatus()      { return api('/admin/infraestrutura/plataformas/status') },
   async plataformasCentral()      { return api('/admin/infraestrutura/plataformas/central') },
+  async plataformasCompatibilidade() { return api('/admin/infraestrutura/plataformas/compatibilidade', { timeoutMs: 20000 }) },
   async salvarProducaoPlataformas(renderServiceId, vercelProjectId, frontendOrigin = '') {
     return api('/admin/infraestrutura/plataformas/producao', {
       method:'PUT', body:JSON.stringify({ renderServiceId, vercelProjectId, frontendOrigin }),

@@ -202,6 +202,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
   const [erroAba, setErroAba] = useState(null)
   const [repoDetalhes, setRepoDetalhes] = useState(repo)
   const [repoAlterado, setRepoAlterado] = useState(false)
+  const [baixandoProjeto, setBaixandoProjeto] = useState(false)
 
   const [deleteStep, setDeleteStep] = useState(0)
   const [deleteInput, setDeleteInput] = useState('')
@@ -218,6 +219,15 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
 
   const fecharPainel = () => onFechar(repoAlterado)
   const atualizarRepoLocal = (novoRepo) => { setRepoDetalhes(novoRepo); setRepoAlterado(true) }
+
+  async function baixarProjeto() {
+    setBaixandoProjeto(true)
+    try {
+      await githubService.baixarZip(owner, repoNome, repoDetalhes?.branch || repoDetalhes?.default_branch || 'main')
+      toastShow('ZIP do projeto gerado e enviado para download.')
+    } catch (e) { toastShow(e.message || 'Não foi possível baixar o projeto.', 'erro') }
+    finally { setBaixandoProjeto(false) }
+  }
 
   useEffect(() => {
     githubService.getMeta(repo.id).then(m => {
@@ -327,27 +337,26 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
             {meta?.alias && <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>alias: {meta.alias}</div>}
           </div>
           <div className="gh-repo-header-actions" style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexShrink: 0 }}>
-            <a
-              href={githubService.downloadZipUrl(owner, repoNome, repoDetalhes?.branch || repoDetalhes?.default_branch)}
-              download
+            <button
+              type="button"
+              onClick={baixarProjeto}
+              disabled={baixandoProjeto}
               title={`Gerar e baixar o projeto ${owner}/${repoNome} como ZIP`}
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent:'center', gap: SPACE.xs,
                 fontSize: FONT.sm, fontWeight: 600, color: C.muted,
                 background: C.surface2, border: `1px solid ${C.border}`,
                 borderRadius: RADIUS.sm, padding: '6px 10px', minHeight:34,
-                textDecoration: 'none', transition: 'all .15s', flexShrink: 0,
+                transition: 'all .15s', flexShrink: 0, cursor:baixandoProjeto?'wait':'pointer',
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.text }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted }}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Baixar projeto
-            </a>
+              {baixandoProjeto ? 'Gerando…' : 'Baixar projeto'}
+            </button>
             <DSBtn variant="primary" size="sm" onClick={() => mudarAba('push')}>↑ Publicar</DSBtn>
             <DSBtn variant="ghost" size="icon" onClick={fecharPainel} aria-label="Fechar repositório">✕</DSBtn>
           </div>
@@ -388,9 +397,9 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
             <>
               {aba === 'visao'     && <AbaVisao repo={repoDetalhes} readme={readme} toastShow={toastShow} onRepoAtualizado={atualizarRepoLocal} />}
               {aba === 'meta'      && metaDraft && <AbaMeta metaDraft={metaDraft} setMetaDraft={setMetaDraft} projetosLocais={projetosLocais} salvandoMeta={salvandoMeta} onSalvar={salvarMeta} />}
-              {aba === 'commits'   && <AbaCommits commits={commits} owner={owner} repo={repoNome} />}
+              {aba === 'commits'   && <AbaCommits commits={commits} owner={owner} repo={repoNome} toastShow={toastShow} />}
               {aba === 'releases'  && <AbaReleases releases={releases} showRelease={showRelease} setShowRelease={setShowRelease} novaRelease={novaRelease} setNovaRelease={setNovaRelease} onCriar={criarRelease} criandoRelease={criandoRelease} />}
-              {aba === 'artifacts' && <AbaArtifacts artifacts={artifacts} owner={owner} repo={repoNome} />}
+              {aba === 'artifacts' && <AbaArtifacts artifacts={artifacts} owner={owner} repo={repoNome} toastShow={toastShow} />}
               {aba === 'arquivos'  && <AbaArquivos owner={owner} repo={repoNome} branch={repo.branch || repo.default_branch || 'main'} toastShow={toastShow} />}
               {aba === 'analysis'  && <AbaAnalysis analysis={analysis} />}
               {aba === 'secrets'   && <AbaSecrets secrets={secrets} owner={owner} repo={repoNome} onRefresh={() => { setSecrets(null); carregarAba('secrets') }} toastShow={toastShow} />}
@@ -520,12 +529,26 @@ function AbaArquivos({ owner, repo, branch, toastShow }) {
 function AbaVisao({ repo, readme, toastShow, onRepoAtualizado }) {
   const [showGitHubEdit, setShowGitHubEdit] = useState(false)
   const [salvandoGitHub, setSalvandoGitHub] = useState(false)
+  const [sugerindoIA, setSugerindoIA] = useState(false)
+  const [iaMeta, setIaMeta] = useState(null)
   const [draft, setDraft] = useState({ descricao: repo.descricao || '', homepage: repo.homepage || '' })
   const [owner, repoNome] = (repo.nomeCompleto || `?/${repo.nome}`).split('/')
 
   useEffect(() => {
     setDraft({ descricao: repo.descricao || '', homepage: repo.homepage || '' })
   }, [repo.descricao, repo.homepage])
+
+
+  async function sugerirComIA() {
+    setSugerindoIA(true)
+    try {
+      const sugestao = await githubService.sugerirDescricao(owner, repoNome)
+      setDraft(p => ({ ...p, descricao: sugestao.descricao || p.descricao }))
+      setIaMeta(sugestao._meta || null)
+      toastShow('Sugestão inserida. Revise o texto antes de salvar no GitHub.')
+    } catch (e) { toastShow(e.message || 'A IA não conseguiu sugerir a descrição.', 'erro') }
+    finally { setSugerindoIA(false) }
+  }
 
   async function salvarNoGitHub() {
     setSalvandoGitHub(true)
@@ -577,7 +600,7 @@ function AbaVisao({ repo, readme, toastShow, onRepoAtualizado }) {
         footer={<><DSBtn variant="primary" onClick={salvarNoGitHub} loading={salvandoGitHub} disabled={salvandoGitHub}>Salvar no GitHub</DSBtn><DSBtn onClick={() => setShowGitHubEdit(false)} disabled={salvandoGitHub}>Cancelar</DSBtn></>}>
         <div style={{ display:'grid', gap:SPACE.lg }}>
           <div style={{ fontSize:FONT.sm, color:C.muted, lineHeight:1.5 }}>Usa o mesmo token configurado em <b style={{ color:C.text }}>Integrações e APIs</b>. Para token fine-grained, a edição requer <b style={{ color:C.text }}>Administration: write</b> neste repositório.</div>
-          <label><div style={{ fontSize:FONT.sm, color:C.muted, fontWeight:700, marginBottom:SPACE.xs }}>Descrição</div><textarea value={draft.descricao} onChange={e => setDraft(p => ({ ...p, descricao:e.target.value }))} maxLength={350} rows={4} style={{ ...inp(), resize:'vertical', minHeight:90 }} placeholder="Descreva o projeto" /><div style={{ fontSize:FONT.xs, color:C.muted, textAlign:'right', marginTop:3 }}>{draft.descricao.length}/350</div></label>
+          <label><div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:SPACE.xs }}><span style={{ fontSize:FONT.sm, color:C.muted, fontWeight:700 }}>Descrição</span><DSBtn type="button" size="sm" variant="secondary" onClick={sugerirComIA} loading={sugerindoIA} disabled={sugerindoIA || salvandoGitHub}>✨ Sugerir com IA</DSBtn></div><textarea value={draft.descricao} onChange={e => { setDraft(p => ({ ...p, descricao:e.target.value })); setIaMeta(null) }} maxLength={350} rows={4} style={{ ...inp(), resize:'vertical', minHeight:90 }} placeholder="Descreva o projeto" /><div style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:FONT.xs, color:C.muted, marginTop:3 }}><span>{iaMeta ? `Sugestão: ${iaMeta.provedor}${iaMeta.modelo ? ` · ${iaMeta.modelo}` : ''}` : 'A IA usa Gemini/OpenRouter configurados em Integrações e APIs.'}</span><span>{draft.descricao.length}/350</span></div></label>
           <label><div style={{ fontSize:FONT.sm, color:C.muted, fontWeight:700, marginBottom:SPACE.xs }}>Homepage</div><input value={draft.homepage} onChange={e => setDraft(p => ({ ...p, homepage:e.target.value }))} style={inp()} placeholder="https://..." inputMode="url" /></label>
         </div>
       </DSModal>
@@ -648,7 +671,7 @@ function AbaMeta({ metaDraft, setMetaDraft, projetosLocais, salvandoMeta, onSalv
 }
 
 /* ── ABA: Commits ────────────────────────────────────────── */
-function AbaCommits({ commits, owner, repo }) {
+function AbaCommits({ commits, owner, repo, toastShow }) {
   if (!commits) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
   if (commits.length === 0) return <div style={{ fontSize: FONT.base, color: C.muted }}>Sem commits encontrados.</div>
   return (
@@ -690,19 +713,19 @@ function AbaCommits({ commits, owner, repo }) {
 
             {/* Download do código neste commit */}
             {owner && repo && c.shaFull && (
-              <a
-                href={githubService.downloadZipUrl(owner, repo, c.shaFull)}
-                download
+              <button
+                type="button"
                 title={`Baixar código-fonte no commit ${c.sha}`}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
-                  flexShrink: 0, alignSelf: 'center',
+                  flexShrink: 0, alignSelf: 'center', cursor: 'pointer',
                   fontSize: FONT.xs, fontWeight: 700, color: C.muted,
                   background: C.surface2, border: `1px solid ${C.border}`,
                   borderRadius: RADIUS.sm, padding: '4px 8px',
-                  textDecoration: 'none', transition: 'all .15s',
-                  whiteSpace: 'nowrap',
+                  transition: 'all .15s', whiteSpace: 'nowrap',
                 }}
+                onClick={() => githubService.baixarZip(owner, repo, c.shaFull)
+                  .catch(e => toastShow?.(e.message || 'Falha ao baixar este commit.', 'erro'))}
                 onMouseEnter={e => {
                   e.currentTarget.style.borderColor = C.accent
                   e.currentTarget.style.color = C.text
@@ -719,7 +742,7 @@ function AbaCommits({ commits, owner, repo }) {
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
                 Baixar
-              </a>
+              </button>
             )}
           </div>
         ))}
@@ -807,7 +830,7 @@ function AbaReleases({ releases, showRelease, setShowRelease, novaRelease, setNo
 }
 
 /* ── ABA: Artefatos ──────────────────────────────────────── */
-function AbaArtifacts({ artifacts, owner, repo }) {
+function AbaArtifacts({ artifacts, owner, repo, toastShow }) {
   if (!artifacts) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
   return (
     <>
@@ -835,14 +858,16 @@ function AbaArtifacts({ artifacts, owner, repo }) {
                 </div>
               </div>
               {!a.expirado && (
-                <a href={githubService.downloadArtifactUrl(a.id, owner, repo, a.nome)}
+                <button type="button"
+                  onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome)
+                    .catch(e => toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro'))}
                   style={{
-                    fontSize: FONT.sm, fontWeight: 600, color: '#fff',
-                    background: 'var(--adm-accent)', borderRadius: RADIUS.sm,
-                    padding: `${SPACE.xs + 1}px ${SPACE.lg}px`, textDecoration: 'none', whiteSpace: 'nowrap',
+                    fontSize: FONT.sm, fontWeight: 600, color: '#fff', cursor: 'pointer',
+                    background: 'var(--adm-accent)', border: 0, borderRadius: RADIUS.sm,
+                    padding: `${SPACE.xs + 1}px ${SPACE.lg}px`, whiteSpace: 'nowrap',
                   }}>
                   ⬇ Baixar {/apk/i.test(a.nome) ? 'APK' : 'ZIP'}
-                </a>
+                </button>
               )}
             </div>
           ))}
@@ -1350,9 +1375,11 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                         <DSBtn size="sm" onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
                           {isAberto ? 'Fechar' : 'Ver Jobs'}
                         </DSBtn>
-                        <a href={githubService.downloadLogsUrl(run.id, owner, repo)}
-                          style={{ fontSize: FONT.sm, fontWeight: 600, color: C.text, background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, textDecoration: 'none', whiteSpace: 'nowrap' }}
-                          title="Baixar todos os logs como ZIP">⬇ Logs</a>
+                        <button type="button"
+                          onClick={() => githubService.baixarLogs(run.id, owner, repo)
+                            .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}
+                          style={{ fontSize: FONT.sm, fontWeight: 600, color: C.text, cursor: 'pointer', background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, whiteSpace: 'nowrap' }}
+                          title="Baixar todos os logs como ZIP">⬇ Logs</button>
                       </div>
                     </div>
 
@@ -1415,19 +1442,21 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                                 {arts.map(a => {
                                   const isApk = /apk/i.test(a.nome)
                                   return (
-                                    <a key={a.id} href={githubService.downloadArtifactUrl(a.id, owner, repo, a.nome)}
+                                    <button key={a.id} type="button"
+                                      onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome)
+                                        .catch(e => toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro'))}
                                       style={{
                                         display: 'inline-flex', alignItems: 'center', gap: SPACE.sm,
-                                        fontSize: FONT.sm, fontWeight: 700,
+                                        fontSize: FONT.sm, fontWeight: 700, cursor: 'pointer',
                                         color: isApk ? '#fff' : C.text,
                                         background: isApk ? C.greenSolid : C.surf2,
                                         border: `1px solid ${isApk ? C.greenSolid : C.border}`,
                                         borderRadius: RADIUS.sm, padding: `${SPACE.xs + 1}px ${SPACE.lg}px`,
-                                        textDecoration: 'none', whiteSpace: 'nowrap',
+                                        whiteSpace: 'nowrap',
                                       }}
                                       title={`${fmtBytes(a.tamanho)} · criado ${relTime(a.criadoEm)}`}>
                                       {isApk ? '📱' : '📦'} ⬇ {isApk ? 'Baixar APK' : a.nome}
-                                    </a>
+                                    </button>
                                   )
                                 })}
                               </div>

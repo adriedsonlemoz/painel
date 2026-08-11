@@ -27,7 +27,8 @@ function swVersionPlugin() {
   }
 }
 
-const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || Date.now().toString()
+const gitSha = process.env.VERCEL_GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RENDER_GIT_COMMIT || ''
+const buildId = gitSha || Date.now().toString()
 
 if (process.env.VERCEL && !process.env.VITE_API_URL) {
   throw new Error('VITE_API_URL não configurada. Na Vercel, defina a URL pública do backend Render terminando em /api.')
@@ -38,7 +39,7 @@ export default defineConfig({
   // o cache da versão atual; a próxima inicialização usa um diretório novo.
   // Isso evita apagar o pre-bundle ativo no Termux durante uma atualização.
   cacheDir: viteCacheDir,
-  define: { __APP_BUILD_ID__: JSON.stringify(buildId) },
+  define: { __APP_BUILD_ID__: JSON.stringify(buildId), __APP_VERSION__: JSON.stringify(appPackage.version), __APP_GIT_SHA__: JSON.stringify(gitSha) },
   plugins: [react(), swVersionPlugin()],
   server: {
     port: 5173,

@@ -19,6 +19,7 @@
  *   DELETE /cloudinary/recursos → apaga um recurso pelo public_id
  */
 import { Router }   from 'express'
+import fsSync from 'node:fs'
 import mongoose      from 'mongoose'
 import PlataformaCredencial from '../models/PlataformaCredencial.js'
 import ErroLog from '../models/ErroLog.js'
@@ -28,7 +29,11 @@ import { ensurePersistentBootstrap } from '../utils/hostedBootstrap.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { autenticar }        from '../middleware/auth.js'
+import { runtimeLabel, IS_RENDER, IS_VERCEL, IS_TERMUX, IS_MANAGED_PLATFORM } from '../utils/runtimeEnvironment.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
+
+let BACKEND_VERSION='desconhecida'
+try { BACKEND_VERSION=JSON.parse(fsSync.readFileSync(new URL('../../package.json', import.meta.url),'utf8')).version||BACKEND_VERSION } catch {}
 
 const router = Router()
 router.use(autenticar)
@@ -1041,6 +1046,78 @@ async function smartRenderLogs(apiKey,ownerId,serviceId) {
     texto:row.message||row.text||row.body||'',
   })).filter(x=>x.texto)
 }
+
+
+
+// ── GET /plataformas/compatibilidade ─────────────────────────────
+// Diagnóstico unificado do mesmo pacote em Termux/VPS e Vercel/Render.
+// Não altera configuração: apenas informa o transporte e as integrações vistas.
+router.get('/plataformas/compatibilidade', async (req,res,next)=>{
+  try {
+    const origin=String(req.headers.origin||'').trim()
+    let originNormalized=''
+    try { if(origin) originNormalized=new URL(origin).origin } catch {}
+    let crossOrigin=false
+    try { crossOrigin=Boolean(originNormalized && new URL(originNormalized).host!==req.get('host')) } catch {}
+
+    const [github,render,vercel,cloudflare]=await Promise.all([
+      getCredential('github','GITHUB_TOKEN').catch(()=>({value:'',locked:false,source:null})),
+      getCredential('render','RENDER_API_KEY').catch(()=>({value:'',locked:false,source:null})),
+      getCredential('vercel','VERCEL_TOKEN').catch(()=>({value:'',locked:false,source:null})),
+      getCredential('cloudflare','CF_API_TOKEN').catch(()=>({value:'',locked:false,source:null,metadata:{}})),
+    ])
+    let r2Configured=false
+    try {
+      const parsed=JSON.parse(cloudflare.value||'{}')
+      r2Configured=Boolean(parsed.r2AccessKeyId&&parsed.r2SecretAccessKey)
+    } catch {
+      r2Configured=Boolean(process.env.CF_R2_ACCESS_KEY_ID&&process.env.CF_R2_SECRET_ACCESS_KEY)
+    }
+
+    const siteDoc=await ConfiguracaoHome.findOne({chave:'site_url'}).lean().catch(()=>null)
+    const frontendOrigin=originNormalized||String(siteDoc?.valor||process.env.FRONTEND_URL||'').split(',')[0].trim()
+    const corsAllowed=originNormalized ? isPlatformOriginAllowed(originNormalized) : null
+    const bearerUsed=Boolean(req.headers.authorization?.startsWith('Bearer '))
+    const checks=[
+      {id:'database',label:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?`Conectado em ${mongoose.connection.name||'banco atual'}`:'Banco ainda não conectado'},
+      {id:'cors',label:'Origem do frontend',ok:originNormalized?Boolean(corsAllowed):true,detail:originNormalized?(corsAllowed?'Autorizada pelo backend':`Não autorizada: ${originNormalized}`):'Sem Origin nesta requisição'},
+      {id:'auth',label:'Sessão administrativa',ok:true,detail:bearerUsed?'Bearer de compatibilidade cloud ativo':'Cookie HttpOnly ativo'},
+      {id:'github',label:'GitHub',ok:Boolean(github.value),detail:github.value?'Credencial disponível':'Não configurado'},
+      {id:'vercel',label:'Vercel',ok:Boolean(vercel.value),detail:vercel.value?'Credencial disponível':'Não configurado'},
+      {id:'render',label:'Render',ok:Boolean(render.value),detail:render.value?'Credencial disponível':'Não configurado'},
+      {id:'r2',label:'R2 Storage',ok:r2Configured,detail:r2Configured?'Credenciais S3 disponíveis':'Não configurado'},
+    ]
+
+    res.json({
+      ok:checks.filter(c=>['database','cors','auth'].includes(c.id)).every(c=>c.ok),
+      runtime:{
+        label:runtimeLabel(),managed:IS_MANAGED_PLATFORM,render:IS_RENDER,vercel:IS_VERCEL,termux:IS_TERMUX,
+        platform:process.platform,node:process.version,pid:process.pid,
+      },
+      frontend:{origin:frontendOrigin||'',requestOrigin:originNormalized||'',apiMode:crossOrigin?'cross-origin':'same-origin'},
+      backend:{host:req.get('host'),protocol:req.protocol,render:IS_RENDER,url:process.env.RENDER_EXTERNAL_URL||process.env.AL_PUBLIC_BACKEND_URL||'',version:BACKEND_VERSION,commit:process.env.RENDER_GIT_COMMIT||'',branch:process.env.RENDER_GIT_BRANCH||'',repo:process.env.RENDER_GIT_REPO_SLUG||''},
+      auth:{
+        requestTransport:bearerUsed?'bearer':'cookie',cookieSupported:true,bearerFallback:true,crossOrigin,
+        recommended:crossOrigin?'cookie + Bearer de fallback':'cookie HttpOnly',
+        note:crossOrigin?'O fallback Bearer evita depender de cookies de terceiro entre Vercel e Render.':'Ambiente same-origin/local continua usando o cookie HttpOnly tradicional.',
+      },
+      cors:{allowed:corsAllowed,origin:originNormalized||'',origins:platformOrigins()},
+      integrations:{
+        github:{configured:Boolean(github.value),source:github.source||null,locked:Boolean(github.locked)},
+        vercel:{configured:Boolean(vercel.value),source:vercel.source||null,locked:Boolean(vercel.locked)},
+        render:{configured:Boolean(render.value),source:render.source||null,locked:Boolean(render.locked)},
+        r2:{configured:r2Configured},
+      },
+      compatibility:{
+        termux:true,vps:true,vercelRender:true,
+        localMode:'Cookie HttpOnly + filesystem persistente quando disponível',
+        cloudMode:'Cookie quando aceito + Bearer de sessão como fallback; persistência em MongoDB/R2/GitHub',
+      },
+      checks,
+      checkedAt:new Date().toISOString(),
+    })
+  } catch(err){next(err)}
+})
 
 router.get('/plataformas/central', async (_req,res,next)=>{
   try {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.90
+- Autenticação Vercel + Render deixa de depender exclusivamente de cookie cross-site: o cookie HttpOnly continua sendo tentado e, somente quando frontend e backend estão em origens diferentes, o login recebe um Bearer de sessão temporário como fallback.
+- No login cloud, o frontend testa primeiro se o cookie cross-site foi aceito. Se funcionar, descarta o Bearer e continua no cookie HttpOnly; se o navegador bloquear o cookie, mantém o Bearer apenas no sessionStorage da aba, com validade reduzida (12h por padrão). Termux/VPS nunca recebem esse fallback.
+- Middleware de autenticação passa a priorizar Authorization Bearer quando ele estiver explicitamente presente, evitando que um cookie cross-site antigo invalide uma sessão cloud nova.
+- Cliente HTTP central e uploads/downloads administrativos passam a anexar automaticamente o fallback Bearer quando necessário, mantendo credentials=include para compatibilidade com cookie.
+- Service Worker deixa de armazenar respostas de autenticação e APIs administrativas sensíveis, reduzindo risco de sessão/401 antigo reaparecer depois de um novo deploy.
+- Tela de login recupera o Diagnóstico de conexão com botão Executar diagnóstico e mantém um probe leve automático para indicar rapidamente se a API está acessível.
+- Diagnóstico do login agora identifica modo same-origin ou Vercel → Render, informa a estratégia de sessão e usa mensagens CORS compatíveis com a Central de Plataformas atual.
+- Novo menu Admin → Infraestrutura → Ambientes verifica runtime, origem do frontend, URL da API do build, CORS, MongoDB, transporte da sessão e disponibilidade das integrações GitHub, Vercel, Render e R2 sem expor segredos.
+- Ambientes compara a versão compilada do frontend com a versão real do backend em execução e alerta quando Vercel e Render estão em releases diferentes; também exibe os SHAs de build/deploy quando disponíveis.
+- Build Vite passa a incorporar a versão do frontend diretamente do package.json e o SHA Git da Vercel, evitando depender apenas de VITE_APP_VERSION para diagnosticar a release publicada.
+- GitHub → Editar detalhes ganha Sugerir com IA. A sugestão usa exclusivamente Gemini/OpenRouter configurados em Integrações e APIs, analisa dados reais do repositório/README e nunca salva automaticamente: o usuário revisa antes de gravar no GitHub.
+- A instrução de IA trata README como conteúdo não confiável e ignora comandos encontrados dentro dele, usando-o apenas como contexto factual do projeto.
+- Downloads autenticados do GitHub (projeto, commits, logs e artefatos), uploads administrativos e backup foram adaptados ao transporte híbrido para continuarem funcionando quando o navegador restringe cookies entre vercel.app e onrender.com.
+- Termux e VPS permanecem suportados: cookie HttpOnly, rotas, instalação física e atualizador local continuam ativos sem exigir Bearer cloud ou mudanças de configuração.
+- Pacote completo 1.0.90 inclui integralmente o GitHub-first 1.0.89, atualizador cloud R2 → GitHub → Vercel/Render e todas as melhorias anteriores.
+
 ## 1.0.89
 - GitHub: removido o seletor vertical de seções dentro do repositório. A navegação volta a usar cards compactos e permanentes; no mobile são 3 cards por linha e cada toque troca somente a seção exibida.
 - Visão geral foi condensada: Dados no GitHub e Informações do repositório ficam lado a lado, com Branch, Linguagem, Tamanho, Último push, Stars, Forks, Issues e data apresentados de forma compacta.

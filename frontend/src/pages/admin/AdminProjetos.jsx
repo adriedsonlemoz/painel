@@ -16,7 +16,7 @@ import { useProjetos }                    from '../../modules/projetos/useProjet
 import { useProjetosGridFS }              from '../../hooks/useProjetosGridFS.js'
 import { useProjetosR2 }                  from '../../hooks/useProjetosR2.js'
 import { projetosService }                from '../../services/domains/projetos.js'
-import { BASE_URL }                       from '../../services/domains/http.js'
+import { BASE_URL, authFetch }            from '../../services/domains/http.js'
 import { T as C, SPACE, RADIUS, FONT }   from '../../themes/tokens'
 import {
   DSPageHeader,
@@ -510,7 +510,7 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
             return
           }
           try {
-            const r   = await fetch(`${BASE_URL}/projetos/upload-gridfs/status/${jobId}`, { credentials: 'include' })
+            const r   = await authFetch(`${BASE_URL}/projetos/upload-gridfs/status/${jobId}`, { credentials: 'include' })
             const job = await r.json()
 
             if (job.erro && !job.status) {
@@ -1365,7 +1365,7 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
             return
           }
           try {
-            const r   = await fetch(`${BASE_URL}/projetos/upload-r2/status/${jobId}`, { credentials: 'include' })
+            const r   = await authFetch(`${BASE_URL}/projetos/upload-r2/status/${jobId}`, { credentials: 'include' })
             const job = await r.json()
 
             if (job.erro && !job.status) {
@@ -2134,7 +2134,7 @@ function AbaGridFS() {
     if (baixando) return
     setBaixando(true)
     try {
-      const res = await fetch(`${BASE_URL}/projetos/gridfs/${encodeURIComponent(projeto.nome)}/download`, {
+      const res = await authFetch(`${BASE_URL}/projetos/gridfs/${encodeURIComponent(projeto.nome)}/download`, {
         credentials: 'include',
       })
       if (!res.ok) {
@@ -2168,7 +2168,7 @@ function AbaGridFS() {
     setProgressoDel(0)
 
     try {
-      const res = await fetch(`${BASE_URL}/projetos/gridfs/${encodeURIComponent(projeto.nome)}`, {
+      const res = await authFetch(`${BASE_URL}/projetos/gridfs/${encodeURIComponent(projeto.nome)}`, {
         method: 'DELETE',
         credentials: 'include',
       })

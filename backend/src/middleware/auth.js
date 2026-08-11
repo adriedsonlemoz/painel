@@ -6,11 +6,13 @@ import Usuario from '../models/Usuario.js'
 // para Authorization: Bearer (compatibilidade com clientes externos/API).
 export async function autenticar(req, res, next) {
   try {
+    // Quando o frontend cloud envia Bearer explicitamente, ele tem prioridade.
+    // Isso evita que um cookie cross-site antigo bloqueie uma sessão nova válida.
     const token =
-      req.cookies?.alsistemas_token ||
       (req.headers.authorization?.startsWith('Bearer ')
         ? req.headers.authorization.split(' ')[1]
-        : null)
+        : null) ||
+      req.cookies?.alsistemas_token
 
     if (!token) {
       return res.status(401).json({ erro: 'Token não fornecido' })
@@ -44,11 +46,13 @@ export async function autenticar(req, res, next) {
  */
 export async function autenticarOpcional(req, res, next) {
   try {
+    // Quando o frontend cloud envia Bearer explicitamente, ele tem prioridade.
+    // Isso evita que um cookie cross-site antigo bloqueie uma sessão nova válida.
     const token =
-      req.cookies?.alsistemas_token ||
       (req.headers.authorization?.startsWith('Bearer ')
         ? req.headers.authorization.split(' ')[1]
-        : null)
+        : null) ||
+      req.cookies?.alsistemas_token
 
     if (token) {
       const decoded  = jwt.verify(token, bootstrapValue('JWT_SECRET'))

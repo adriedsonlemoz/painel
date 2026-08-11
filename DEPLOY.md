@@ -100,6 +100,17 @@ Em **Settings → Environment Variables**:
 
 ```env
 VITE_API_URL=https://alsistemas-backend.onrender.com/api
+
+### Sessão administrativa Vercel → Render (1.0.90)
+
+O backend continua emitindo cookie HttpOnly. Como `*.vercel.app` e `*.onrender.com` são sites diferentes e alguns navegadores podem bloquear cookies de terceiros, o AL também entrega um token Bearer temporário **somente no login cross-origin**. O frontend testa imediatamente se o cookie foi aceito: quando funciona, descarta o Bearer e continua só no HttpOnly; quando é bloqueado, mantém o fallback em `sessionStorage`. Termux/VPS same-origin não recebe esse token.
+
+Depois do deploy, abra **Admin → Infraestrutura → Ambientes**. A tela deve mostrar:
+- origem Vercel autorizada no CORS;
+- API do build apontando para o Render + `/api`;
+- versão do frontend igual à versão do backend;
+- transporte de sessão `bearer` no caso em que o fallback cloud estiver em uso, ou `cookie` quando o navegador aceitou o cookie.
+
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
 VITE_APP_VERSION=1.0.83

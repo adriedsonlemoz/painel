@@ -121,6 +121,17 @@ export default function Login() {
     add('→', 'Iniciando diagnóstico de conexão…')
     add('→', `API base: ${API_BASE}`)
     add('→', `Origem:   ${window.location.origin}`)
+    let cloudCrossOrigin = false
+    try {
+      const apiOrigin = new URL(API_BASE, window.location.origin).origin
+      cloudCrossOrigin = apiOrigin !== window.location.origin
+      if (cloudCrossOrigin) {
+        add('→', 'Modo cloud detectado: frontend e API estão em origens diferentes.')
+        add('→', 'Após o login, o AL mantém cookie e usa Bearer de sessão como fallback quando o navegador restringe cookie cross-site.', true)
+      } else {
+        add('✓', 'Modo same-origin/local: sessão por cookie HttpOnly.')
+      }
+    } catch { /* URL inválida será identificada pelos testes abaixo */ }
 
     sep('Ambiente do browser')
 
@@ -134,9 +145,11 @@ export default function Login() {
     }
 
     if (navigator.cookieEnabled) {
-      add('✓', 'Cookies: habilitados (necessário para autenticação)')
+      add('✓', cloudCrossOrigin ? 'Cookies: habilitados; fallback cloud também disponível após login' : 'Cookies: habilitados (sessão HttpOnly local/VPS)')
+    } else if (cloudCrossOrigin) {
+      add('⚠', 'Cookies desabilitados. No modo Vercel → Render o AL ainda tentará o Bearer de sessão como fallback.')
     } else {
-      add('✕', 'Cookies: DESABILITADOS — autenticação não funcionará')
+      add('✕', 'Cookies: DESABILITADOS — o modo local/VPS por cookie não conseguirá manter a sessão')
     }
 
     // Variáveis de ambiente
@@ -173,7 +186,7 @@ export default function Login() {
       } else if (corsBlocked) {
         setApiOnline(false)
         add('✕', `CORS bloqueou GET ${SERVER_ROOT}/`)
-        add('⚠', `FRONTEND_URL no Render não inclui ${window.location.origin}`, true)
+        add('⚠', `A origem ${window.location.origin} não foi aceita pelo backend. Confira Ambientes/Plataformas e a configuração Vercel ↔ Render.`, true)
       } else if (res) {
         serverUp = true
         setApiOnline(true)
@@ -363,11 +376,18 @@ export default function Login() {
     setDiagDone(true)
   }, [])
 
-  // Diagnóstico completo é sob demanda. Ele faz várias chamadas de rede
-  // (backend, health, Render e Vercel) e não deve competir com o primeiro carregamento.
-  // O usuário pode iniciá-lo manualmente pelo botão de diagnóstico.
+  // Diagnóstico completo é sob demanda. Um probe leve roda no login para
+  // indicar rapidamente se a API está acessível sem competir com o carregamento.
   useEffect(() => {
     ranRef.current = false
+    let alive = true
+    const timer = window.setTimeout(async () => {
+      const probe = await fetchTimed(`${API_BASE}/health/live`, {}, 3000)
+      if (!alive) return
+      if (probe.res) setApiOnline(probe.res.ok)
+      else if (probe.timedOut || probe.corsBlocked || probe.networkError) setApiOnline(false)
+    }, 350)
+    return () => { alive = false; window.clearTimeout(timer) }
   }, [])
 
   function handleRerun() {
@@ -486,6 +506,15 @@ export default function Login() {
                             leading-relaxed space-y-px">
               {logEntries.length === 0 && diagRunning && (
                 <div className="text-gray-500 animate-pulse">Iniciando…</div>
+              )}
+              {logEntries.length === 0 && !diagRunning && (
+                <div className="py-2 space-y-2 text-gray-400">
+                  <div>O diagnóstico continua disponível. Ele confere API, CORS, MongoDB e o estado das plataformas sem alterar nenhuma configuração.</div>
+                  <button type="button" onClick={handleRerun}
+                    className="w-full rounded-lg border border-blue-800/70 bg-blue-950/40 px-3 py-2 text-blue-300 hover:bg-blue-900/50 transition-colors font-semibold">
+                    ▶ Executar diagnóstico
+                  </button>
+                </div>
               )}
               {logEntries.map((entry, i) => {
                 const isSep = entry.icon === '─'

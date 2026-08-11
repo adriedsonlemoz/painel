@@ -1,4 +1,4 @@
-import { api, BASE_URL } from './http.js'
+import { api, BASE_URL, authFetch } from './http.js'
 
 const BASE_URL_ERROS = BASE_URL + '/erros'
 
@@ -36,7 +36,7 @@ export const errosService = {
         usuario_email: null,
         dados: dados || null,
       }
-      await fetch(BASE_URL_ERROS, {
+      await authFetch(BASE_URL_ERROS, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

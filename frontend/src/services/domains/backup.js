@@ -1,4 +1,4 @@
-import { api, BASE_URL } from './http.js'
+import { api, BASE_URL, authFetch } from './http.js'
 
 export const backupService = {
   async listar()              { return api('/admin/backup') },
@@ -8,7 +8,7 @@ export const backupService = {
     const form = new FormData()
     form.append('arquivo', arquivo)
     if (descricao.trim()) form.append('descricao', descricao.trim())
-    const res = await fetch(`${BASE_URL}/admin/backup/import`, {
+    const res = await authFetch(`${BASE_URL}/admin/backup/import`, {
       method: 'POST',
       body: form,
       credentials: 'include',
@@ -20,4 +20,15 @@ export const backupService = {
   async restaurar(id) { return api(`/admin/backup/${id}/restore`, { method: 'POST', body: '{}' }) },
   async excluir(id)   { return api(`/admin/backup/${id}`, { method: 'DELETE' }) },
   downloadUrl(id)     { return `${BASE_URL}/admin/backup/${id}/download` },
+  async baixar(id) {
+    const res = await authFetch(`${BASE_URL}/admin/backup/${id}/download`, { credentials: 'include' })
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.erro || `Erro ${res.status}`) }
+    const blob = await res.blob()
+    const cd = res.headers.get('content-disposition') || ''
+    const m = cd.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i)
+    const filename = decodeURIComponent((m?.[1] || `backup-${id}.json`).replace(/^\"|\"$/g, ''))
+    const url = URL.createObjectURL(blob); const a = document.createElement('a')
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+    return { ok:true, filename }
+  },
 }

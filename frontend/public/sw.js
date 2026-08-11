@@ -34,7 +34,12 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET' || url.protocol === 'chrome-extension:') return
 
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirstAPI(request))
+    // Sessão/admin nunca entram em cache. Isso evita reaproveitar 401/200 de
+    // uma sessão antiga após deploy e também funciona quando a API está no
+    // Render e o frontend na Vercel.
+    const sensitive = ['/api/auth/', '/api/admin/', '/api/github/', '/api/projetos/', '/api/analysis/', '/api/setup/', '/api/upload', '/api/erros']
+      .some(prefix => url.pathname.startsWith(prefix))
+    event.respondWith(sensitive ? fetch(request, { cache: 'no-store' }) : networkFirstAPI(request))
     return
   }
 

@@ -71,6 +71,7 @@ const NAV = [
       { to: '/admin/cloudinary',   label: 'Cloudinary',         icon: IconCloud,    perm: 'cloudinary.gerenciar' },
       { to: '/admin/cloudflare',   label: 'Cloudflare',         icon: IconCF,       perm: 'cloudflare.gerenciar' },
       { to: '/admin/plataformas',  label: 'Plataformas',        icon: IconPlatform, perm: 'plataformas.gerenciar' },
+      { to: '/admin/ambientes',    label: 'Ambientes',          icon: IconPlatform, perm: 'configuracoes.gerenciar' },
       { to: '/admin/backup',       label: 'Backup',             icon: IconBackup,   perm: 'backup.gerenciar' },
     ],
   },

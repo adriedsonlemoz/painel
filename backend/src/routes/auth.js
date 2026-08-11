@@ -23,10 +23,13 @@ const loginLimiter = rateLimit({
 // Cookie calculado por requisição. Em Render + Vercel o frontend e backend
 // ficam em hosts diferentes, então não dependemos mais de FRONTEND_URL para
 // decidir SameSite/Secure.
-function cookieOpts(req) {
+function requestIsCrossOrigin(req) {
   const origin=String(req.headers.origin||'')
-  let crossOrigin=false
-  try { crossOrigin=Boolean(origin && new URL(origin).host!==req.get('host')) } catch {}
+  try { return Boolean(origin && new URL(origin).host!==req.get('host')) } catch { return false }
+}
+
+function cookieOpts(req) {
+  const crossOrigin=requestIsCrossOrigin(req)
   const secure=crossOrigin || req.secure || String(req.headers['x-forwarded-proto']||'').includes('https')
   return {
     httpOnly:true,
@@ -40,11 +43,11 @@ function cookieOpts(req) {
 const MAX_TENTATIVAS   = 5
 const BLOQUEIO_MINUTOS = 30
 
-function gerarToken(usuario) {
+function gerarToken(usuario, expiresIn = process.env.JWT_EXPIRES_IN || '7d', extra = {}) {
   return jwt.sign(
-    { id: usuario._id, sv: usuario.sessao_versao || 0 },
+    { id: usuario._id, sv: usuario.sessao_versao || 0, ...extra },
     bootstrapValue('JWT_SECRET'),
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
+    { expiresIn },
   )
 }
 
@@ -101,15 +104,31 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
 
     const token = gerarToken(usuario)
 
-    // #1 — Envia token via cookie HttpOnly
+    // #1 — Cookie HttpOnly continua sendo o transporte principal.
+    const crossOrigin=requestIsCrossOrigin(req)
+    const cloudToken=crossOrigin ? gerarToken(usuario, process.env.JWT_CLOUD_EXPIRES_IN || '12h', { transport:'cloud' }) : ''
     res.cookie('alsistemas_token', token, cookieOpts(req))
-    res.json({ usuario })
+    res.json({
+      usuario,
+      // Em frontend/backend cross-origin (ex.: Vercel → Render), alguns
+      // navegadores bloqueiam cookies de terceiro mesmo com SameSite=None.
+      // O Bearer é entregue somente nesse cenário, tem validade menor e fica
+      // apenas no sessionStorage; Termux/VPS continuam usando só cookie HttpOnly.
+      ...(crossOrigin ? { access_token: cloudToken } : {}),
+      auth:{
+        transport:crossOrigin?'cookie+bearer-fallback':'cookie',
+        crossOrigin,
+        cookie:{httpOnly:true,secure:cookieOpts(req).secure,sameSite:cookieOpts(req).sameSite},
+        bearerFallback:crossOrigin,
+        bearerExpiresIn:crossOrigin?(process.env.JWT_CLOUD_EXPIRES_IN || '12h'):null,
+      },
+    })
   } catch (err) { next(err) }
 })
 
 // ── GET /api/auth/me — retorna usuário logado ────────────────────────────────
 router.get('/me', autenticar, (req, res) => {
-  res.json({ usuario: req.usuario })
+  res.json({ usuario: req.usuario, auth:{ transport:req.headers.authorization?.startsWith('Bearer ')?'bearer':'cookie' } })
 })
 
 // ── PUT /api/auth/me — editar próprio perfil (qualquer usuário autenticado) ──

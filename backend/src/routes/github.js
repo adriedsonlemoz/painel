@@ -37,6 +37,7 @@ import crypto           from 'node:crypto'
 import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient.js'
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
 import { storeProjectSnapshot } from '../services/cloudUpdateStorage.js'
+import { sugerirDescricaoRepositorio } from '../utils/aiClient.js'
 
 const router = Router()
 
@@ -417,6 +418,34 @@ router.patch('/repos/:owner/:repo', autenticar, async (req, res) => {
       ? 'O token salvo em Integrações e APIs não tem permissão para editar este repositório. Em token fine-grained, habilite Administration: write para o repositório.'
       : err.message
     res.status(err.status || 500).json({ erro: msg })
+  }
+})
+
+
+
+/* POST /api/github/repos/:owner/:repo/descricao-ia
+   Sugere texto sem salvar automaticamente no GitHub. Usa Gemini/OpenRouter
+   configurados em Integrações e APIs e somente dados reais do repositório. */
+router.post('/repos/:owner/:repo/descricao-ia', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  try {
+    const [repoInfo, readmeData] = await Promise.all([
+      githubFetch(`/repos/${owner}/${repo}`),
+      githubFetch(`/repos/${owner}/${repo}/readme`).catch(() => null),
+    ])
+    const readme = readmeData?.content ? Buffer.from(readmeData.content, 'base64').toString('utf8') : ''
+    const suggestion = await sugerirDescricaoRepositorio({
+      nome: repoInfo.full_name || `${owner}/${repo}`,
+      descricaoAtual: repoInfo.description || '',
+      linguagem: repoInfo.language || '',
+      topicos: repoInfo.topics || [],
+      readme,
+      provedor: req.body?.provedor || undefined,
+    })
+    res.json({ ok:true, ...suggestion, aviso:'Sugestão gerada pela IA. Revise antes de salvar no GitHub.' })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message || 'Não foi possível gerar a sugestão.' })
   }
 })
 

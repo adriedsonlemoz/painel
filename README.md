@@ -227,6 +227,14 @@ Em **Admin → Desenvolvimento → Atualizações**, um pacote completo pode seg
 Em Render/Vercel não existe instalação física sobre a instância em execução. O GitHub é a origem do código; R2 preserva o pacote e MongoDB preserva o estado da publicação.
 
 
+### Compatibilidade de ambientes e sessão cloud (1.0.90)
+
+O mesmo pacote continua funcionando em **Termux/VPS** e em **Vercel + Render**. No modo local/same-origin, a sessão administrativa permanece exclusivamente no cookie HttpOnly. Quando o frontend Vercel chama um backend Render em outro domínio, o AL mantém o cookie e recebe também um Bearer temporário de contingência. O frontend testa o cookie: se ele funcionar, descarta o Bearer; se for bloqueado, mantém o fallback somente no `sessionStorage` da aba.
+
+Use **Admin → Infraestrutura → Ambientes** para comparar a versão do frontend com a versão real do backend, verificar SHAs de deploy, CORS, MongoDB, transporte da sessão e disponibilidade das integrações. Na Vercel, `VITE_API_URL` deve apontar para a URL pública do Render terminando em `/api`; alterações nessa variável exigem um novo deployment do frontend.
+
+Em **GitHub → Editar detalhes**, o botão **Sugerir com IA** usa Gemini/OpenRouter já configurados em Integrações e APIs. A IA usa nome, linguagem, tópicos e README como contexto, preenche apenas a sugestão e nunca salva automaticamente no GitHub.
+
 ### GitHub-first para vários projetos (1.0.89)
 
 O módulo **Admin → GitHub** não depende do cadastro em Projetos. Qualquer repositório acessível pelo token central pode ser administrado. Na seção **Publicar**, escolha um ZIP, confira explicitamente **repositório → branch → pasta** e só então crie o commit. A opção de substituição remove arquivos apenas dentro da pasta escolhida; o restante do repositório não é tocado.

@@ -1,4 +1,4 @@
-import { api, BASE_URL } from './http.js'
+import { api, BASE_URL, authFetch } from './http.js'
 
 export const storageService = {
   async upload(file, onProgress) {
@@ -10,7 +10,7 @@ export const storageService = {
     formData.append('imagem', file)
     onProgress?.(30)
 
-    const res = await fetch(`${BASE_URL}/upload`, {
+    const res = await authFetch(`${BASE_URL}/upload`, {
       method: 'POST',
       credentials: 'include',
       body: formData,

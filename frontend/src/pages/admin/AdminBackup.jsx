@@ -62,12 +62,12 @@ function BackupCard({ bk, onRestaurar, onExcluir }) {
       </div>
 
       <div style={{ display: 'flex', gap: SPACE.md, flexWrap: 'wrap' }}>
-        <a href={backupService.downloadUrl(bk.id)} download className="adm-btn adm-btn-ghost adm-btn-sm" style={{ flex: '1 1 auto', justifyContent: 'center' }}>
+        <button onClick={() => backupService.baixar(bk.id).catch(e => toast.error(e.message || 'Falha ao baixar backup.'))} className="adm-btn adm-btn-ghost adm-btn-sm" style={{ flex: '1 1 auto', justifyContent: 'center' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
           </svg>
           Download
-        </a>
+        </button>
         <button onClick={() => onRestaurar(bk.id)} className="adm-btn adm-btn-secondary adm-btn-sm" style={{ flex: '1 1 auto', justifyContent: 'center' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
             <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" />

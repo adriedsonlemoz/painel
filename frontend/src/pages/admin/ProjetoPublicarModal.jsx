@@ -18,6 +18,7 @@ import { githubService }   from '../../services/domains/github.js'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import { DSModal, DSBtn, DSAlert }      from '../../components/admin/ui/DS'
 import toast from 'react-hot-toast'
+import { authFetch } from '../../services/domains/http.js'
 
 // ── Helpers ───────────────────────────────────────────────────
 function fmtBytes(b) {
@@ -152,7 +153,7 @@ function Passo1({ onConcluido }) {
         let finalizado = null
         while (Date.now() - inicio < 15 * 60_000) {
           await new Promise(r => setTimeout(r, 900))
-          const resp = await fetch(`${base}/projetos/upload-gridfs/status/${encodeURIComponent(result.jobId)}`, {
+          const resp = await authFetch(`${base}/projetos/upload-gridfs/status/${encodeURIComponent(result.jobId)}`, {
             credentials: 'include',
           })
           const job = await resp.json()

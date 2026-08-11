@@ -9,6 +9,7 @@ export function AuthProvider({ children }) {
   // para login/admin e passa a ser carregada sob demanda por ensureSession().
   const [loading, setLoading] = useState(false)
   const [sessionChecked, setSessionChecked] = useState(false)
+  const [authTransport, setAuthTransport] = useState('unknown')
   const checked = useRef(false)
   const checkingPromise = useRef(null)
 
@@ -22,6 +23,7 @@ export function AuthProvider({ children }) {
         const { data } = await authService.getSession()
         const sessionUser = data?.session?.user ?? null
         setUser(sessionUser)
+        setAuthTransport(data?.auth?.transport || (sessionUser ? 'cookie' : 'none'))
         return sessionUser
       } catch {
         setUser(null)
@@ -42,6 +44,7 @@ export function AuthProvider({ children }) {
     checked.current = true
     setSessionChecked(true)
     setUser(data.user)
+    setAuthTransport(data?.auth?.transport || 'cookie')
     return data
   }
 
@@ -50,6 +53,7 @@ export function AuthProvider({ children }) {
     checked.current = true
     setSessionChecked(true)
     setUser(null)
+    setAuthTransport('none')
   }
 
   function temPermissao(permissao) {
@@ -67,7 +71,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, sessionChecked, ensureSession, login, logout, temPermissao, podeAcessarAdmin }}>
+    <AuthContext.Provider value={{ user, loading, sessionChecked, authTransport, ensureSession, login, logout, temPermissao, podeAcessarAdmin }}>
       {children}
     </AuthContext.Provider>
   )

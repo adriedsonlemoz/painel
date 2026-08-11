@@ -164,6 +164,9 @@ app.use(cors({
       .catch(() => callback(new Error(`CORS: origem não permitida — ${origin}`)))
   },
   credentials: true,
+  // Authorization do fallback cloud provoca preflight. Cache curto reduz
+  // latência sem transformar CORS dinâmico em uma permissão permanente.
+  maxAge: 600,
 }))
 
 // ─── Parsers ─────────────────────────────────────────────────
