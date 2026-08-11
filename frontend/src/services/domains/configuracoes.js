@@ -22,6 +22,15 @@ async function listar(force = false) {
   return pending
 }
 
+function sincronizarPublicConfig(data = {}) {
+  cache = data || {}
+  if (typeof window !== 'undefined') {
+    window.__AL_PUBLIC_CONFIG__ = cache
+    window.__AL_PUBLIC_CONFIG_PROMISE__ = Promise.resolve(cache)
+  }
+  return cache
+}
+
 function invalidar() { cache = null }
 
 export const configuracoesService = {
@@ -36,5 +45,13 @@ export const configuracoesService = {
     invalidar()
     return out
   },
+  async listarSEO() { return api('/seo-configuracoes') },
+  async atualizarSEO(pares) {
+    const out = await api('/seo-configuracoes', { method: 'PUT', body: JSON.stringify({ pares }) })
+    if (out?.configuracoes) sincronizarPublicConfig({ ...(cache || {}), ...out.configuracoes })
+    return out
+  },
+  async analisarSEO(configuracoes, acao = 'auditar') { return api('/seo/ia', { method: 'POST', body: JSON.stringify({ configuracoes, acao }), timeoutMs: 60000 }) },
+  sincronizarPublicConfig,
   invalidar,
 }

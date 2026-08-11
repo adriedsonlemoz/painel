@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import ErroLog from '../models/ErroLog.js'
+import DiagnosticTriage from '../models/DiagnosticTriage.js'
 import { registrarErro } from '../services/errorLogService.js'
 import { importarErrosAtualizadorSpool } from '../services/updateErrorSpool.js'
 import { diagnosticarTermux } from '../services/termuxDiagnosticsService.js'
@@ -83,8 +84,13 @@ router.get('/central', autenticar, verificarPermissao('erros.ver'), async (_req,
       diagnosticsSnapshot(),
       ErroLog.find({status:{$in:['novo','investigando']}}).sort({criado_em:-1}).limit(30).lean(),
     ])
-    const localEvents=local.map(e=>({id:`al:${e._id}`,source:'al',severity:e.status==='novo'?'critical':'warning',title:e.mensagem,message:e.rota||e.url||'Erro registrado pelo AL Sistemas',createdAt:e.ultima_ocorrencia||e.criado_em,meta:{erroId:String(e._id),tipo:e.tipo,status:e.status,stack:e.stack,dados:e.dados}}))
-    res.json({...live,events:[...localEvents,...(live.events||[])].sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)),localCount:local.length})
+    const localEvents=local.map(e=>({id:`al:${e._id}`,source:'al',severity:e.status==='novo'?'critical':'warning',title:e.mensagem,message:e.rota||e.url||'Erro registrado pelo AL Sistemas',createdAt:e.ultima_ocorrencia||e.criado_em,meta:{erroId:String(e._id),tipo:e.tipo,status:e.status,stack:e.stack,dados:e.dados},triage:{status:e.status==='investigando'?'acompanhando':e.status==='resolvido'?'revisado':e.status==='ignorado'?'silenciado':'novo',nota:''}}))
+    const merged=[...localEvents,...(live.events||[])]
+    const externalIds=merged.filter(e=>e.source!=='al').map(e=>String(e.id||'')).filter(Boolean)
+    const triages=externalIds.length?await DiagnosticTriage.find({event_id:{$in:externalIds}}).lean():[]
+    const triageMap=new Map(triages.map(t=>[t.event_id,t]))
+    const events=merged.map(e=>e.source==='al'?e:{...e,triage:triageMap.get(String(e.id))||{status:'novo',nota:''}})
+    res.json({...live,events:events.sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)),localCount:local.length})
   }catch(err){next(err)}
 })
 
@@ -112,6 +118,36 @@ router.post('/central/analisar', autenticar, verificarPermissao('erros.ver'), as
       pergunta:`ORIGEM: ${event.source}\nTÍTULO: ${event.title||''}\nMENSAGEM: ${event.message||''}\nMETADADOS: ${JSON.stringify(event.meta||{})}\nDADOS/LOGS:\n${safe}`,
     })
     res.json({ok:true,analysis:result.resposta,provider:result.provedor,model:result.modelo})
+  }catch(err){next(err)}
+})
+
+
+
+// Triagem local para qualquer origem. Em eventos externos o AL não altera o erro na
+// plataforma: apenas registra acompanhamento/revisão/silenciamento e uma nota local.
+router.post('/central/triage', autenticar, verificarPermissao('erros.gerenciar'), async (req,res,next)=>{
+  try{
+    const {events=[],status,nota=''}=req.body||{}
+    const valid=['novo','acompanhando','revisado','silenciado']
+    if(!Array.isArray(events)||!events.length)return res.status(400).json({erro:'Selecione ao menos uma ocorrência.'})
+    if(!valid.includes(status))return res.status(400).json({erro:'Status de triagem inválido.'})
+    let atualizados=0
+    for(const event of events.slice(0,100)){
+      if(event?.source==='al'&&event?.meta?.erroId){
+        const map={novo:'novo',acompanhando:'investigando',revisado:'resolvido',silenciado:'ignorado'}
+        const st=map[status]
+        const r=await ErroLog.findByIdAndUpdate(event.meta.erroId,{status:st,lido:st!=='novo'},{new:true})
+        if(r)atualizados++
+      }else if(event?.id&&event?.source){
+        await DiagnosticTriage.findOneAndUpdate(
+          {event_id:String(event.id)},
+          {$set:{source:String(event.source),status,nota:String(nota||'').slice(0,3000),titulo:String(event.title||'').slice(0,500),atualizado_por:String(req.usuario?.email||req.usuario?._id||'')}},
+          {upsert:true,new:true}
+        )
+        atualizados++
+      }
+    }
+    res.json({ok:true,atualizados,status,nota:String(nota||'').slice(0,3000)})
   }catch(err){next(err)}
 })
 

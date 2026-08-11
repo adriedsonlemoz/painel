@@ -57,6 +57,7 @@ export const errosService = {
   async central() { return api('/erros/central', { timeoutMs: 30000 }) },
   async detalhesCentral(event) { return api('/erros/central/detalhes', { method: 'POST', body: JSON.stringify({ event }), timeoutMs: 30000 }) },
   async analisarCentral(event) { return api('/erros/central/analisar', { method: 'POST', body: JSON.stringify({ event }), timeoutMs: 60000 }) },
+  async triagemCentral(events, status, nota = '') { return api('/erros/central/triage', { method: 'POST', body: JSON.stringify({ events, status, nota }) }) },
   async contagem()              { return api('/erros/contagem') },
   async marcarLido(id, lido = true) {
     return api(`/erros/${id}/lido`, { method: 'PATCH', body: JSON.stringify({ lido }) })

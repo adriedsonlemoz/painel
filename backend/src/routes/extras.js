@@ -13,6 +13,7 @@ import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { auditLog } from '../middleware/auditLog.js'
 import { cacheGet, cacheSet, cacheDel } from '../utils/cache.js'
+import { enviarMensagem } from '../utils/aiClient.js'
 import {
   regraConfiguracao, regraConfiguracaoLote,
   regraNoticiaExterna, regraTopico, regraOnibus, validar,
@@ -23,6 +24,21 @@ const CACHE_KEY_CONFIG    = 'configuracoes_home'
 const CACHE_KEY_CATEGORIAS = 'categorias_lista'
 const CACHE_KEY_MODULOS    = 'modulos_ativos'
 const CACHE_TTL = 60
+
+const SEO_KEYS = new Set([
+  'nome_site','site_titulo','site_descricao','site_author','site_keywords','site_url','site_favicon',
+  'site_imagem','site_twitter_card','site_twitter_site','site_ga_id','site_gsc_verification','site_robots',
+  'sitemap_changefreq','sitemap_priority','sitemap_limite','sitemap_cache_min',
+])
+function seoPermissao(req,res,next){
+  const u=req.usuario
+  if(!u)return res.status(401).json({erro:'Não autenticado.'})
+  if(u.role==='superadmin')return next()
+  const perms=u.perfil_id?.permissoes||[]
+  if(perms.includes('*')||perms.includes('seo.gerenciar')||perms.includes('configuracoes.gerenciar'))return next()
+  return res.status(403).json({erro:'Permissão insuficiente para SEO.'})
+}
+
 
 // ─── Helper: paginação por cursor genérica ────────────────────
 /**
@@ -81,6 +97,46 @@ router.put('/configuracoes-lote', autenticar, verificarPermissao('configuracoes.
     await cacheDel(CACHE_KEY_CONFIG)
     res.json({ mensagem: 'Configurações atualizadas' })
   } catch (err) { next(err) }
+})
+
+
+
+// ─── SEO ADMIN ───────────────────────────────────────────────
+// Rotas dedicadas evitam a inconsistência entre a permissão da tela SEO e a
+// permissão geral de Configurações, sem afrouxar as demais configurações do sistema.
+router.get('/seo-configuracoes', autenticar, seoPermissao, async (_req,res,next)=>{
+  try{
+    const configs=await ConfiguracaoHome.find({chave:{$in:[...SEO_KEYS]}}).lean()
+    res.json(configs.reduce((acc,c)=>({...acc,[c.chave]:c.valor}),{}))
+  }catch(err){next(err)}
+})
+router.put('/seo-configuracoes', autenticar, seoPermissao, auditLog('seo'), regraConfiguracaoLote, validar, async (req,res,next)=>{
+  try{
+    const pares=(req.body?.pares||[]).filter(p=>SEO_KEYS.has(p?.chave))
+    if(!pares.length)return res.status(400).json({erro:'Nenhuma configuração SEO válida recebida.'})
+    await Promise.all(pares.map(({chave,valor})=>ConfiguracaoHome.findOneAndUpdate({chave},{valor:String(valor??'')},{upsert:true,new:true})))
+    await cacheDel(CACHE_KEY_CONFIG)
+    const configs=await ConfiguracaoHome.find({chave:{$in:[...SEO_KEYS]}}).lean()
+    const mapa=configs.reduce((acc,c)=>({...acc,[c.chave]:c.valor}),{})
+    res.json({ok:true,configuracoes:mapa})
+  }catch(err){next(err)}
+})
+router.post('/seo/ia', autenticar, seoPermissao, async (req,res,next)=>{
+  try{
+    const {acao='auditar',configuracoes={}}=req.body||{}
+    const allowed={}
+    for(const k of SEO_KEYS)if(configuracoes[k]!==undefined)allowed[k]=String(configuracoes[k]??'').slice(0,3000)
+    const systemPrompt='Você é um assistente de SEO editorial para um portal de notícias brasileiro. Não invente fatos, localidades, marcas ou serviços. Trabalhe apenas com os dados fornecidos. Responda exclusivamente em JSON válido, sem markdown. Sugestões não devem ser aplicadas automaticamente.'
+    const pergunta=`AÇÃO: ${acao}
+CONFIGURAÇÕES ATUAIS: ${JSON.stringify(allowed)}
+
+Retorne JSON com: {"pontuacao":0,"resumo":"","alertas":[""],"sugestoes":{"site_titulo":"","site_descricao":"","site_keywords":""}}. Regras: título SEO preferencialmente até 60 caracteres; descrição entre 120 e 160 caracteres; palavras-chave devem ser específicas e fiéis ao portal. Se um campo já estiver adequado, pode repetir o valor atual.`
+    const out=await enviarMensagem({systemPrompt,pergunta})
+    let data
+    const txt=String(out.resposta||'').replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()
+    try{data=JSON.parse(txt)}catch{const a=txt.indexOf('{'),b=txt.lastIndexOf('}');if(a>=0&&b>a)data=JSON.parse(txt.slice(a,b+1));else throw new Error('A IA não retornou JSON válido.')}
+    res.json({ok:true,...data,_meta:{provedor:out.provedor,modelo:out.modelo}})
+  }catch(err){next(err)}
 })
 
 // ─── MÓDULOS ────────────────────────────────────────────────

@@ -309,3 +309,8 @@ A tela Cloudflare prioriza R2/buckets e move os demais recursos para a engrenage
 ## AL Sistemas 1.0.95 — Central online de diagnóstico
 
 A tela **Erros e logs** passa a priorizar produção online. AL Sistemas, GitHub Actions, Vercel, Render e MongoDB aparecem na mesma Central. Falhas externas são descobertas pelas APIs configuradas em **Integrações e APIs** e os logs/detalhes são carregados sob demanda. Ações de limpeza afetam somente os registros persistidos pelo AL. Termux permanece como modo legado e a estrutura para VPS fica preparada para ativação futura.
+
+
+## AL Sistemas 1.0.96 — SEO persistente e triagem externa
+
+A tela SEO usa rotas administrativas dedicadas, confirmação de persistência no MongoDB e assistência por Gemini/OpenRouter. A Central de Erros permite triagem e notas locais para GitHub, Vercel, Render e MongoDB sem modificar o erro na plataforma de origem.

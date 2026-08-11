@@ -7,6 +7,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 // ─── Paleta (padrão do admin) ─────────────────────────────────
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import AdminIcon from '../../components/admin/ui/AdminIcon'
+import { DSModal } from '../../components/admin/ui/DS'
 
 // Alias para compatibilidade com JSX já escrito abaixo
 const Ico = {
@@ -318,155 +319,131 @@ function calcularAuditoriaSEO(cfg={}) {
 
 // ─── Componente principal ─────────────────────────────────────
 export default function AdminSEO() {
-  const [cfg,       setCfg]       = useState({})
-  const [cfgEdit,   setCfgEdit]   = useState({})
-  const [loading,   setLoading]   = useState(true)
-  const [salvando,  setSalvando]  = useState(false)
-  const [abaAtiva,  setAbaAtiva]  = useState('identidade')
+  const [cfg, setCfg] = useState({})
+  const [cfgEdit, setCfgEdit] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [salvando, setSalvando] = useState(false)
+  const [secao, setSecao] = useState(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState(null)
+  const [salvoEm, setSalvoEm] = useState(null)
 
   const semAlteracoes = ALL_KEYS.every(k => (cfgEdit[k] ?? '') === (cfg[k] ?? ''))
   const { showPrompt, confirm: confirmarNavegacao, cancel: cancelarNavegacao } = useUnsavedChanges(!semAlteracoes)
 
-  useEffect(() => {
-    configuracoesService.listar()
-      .then(c => { setCfg(c); setCfgEdit(c) })
-      .catch(() => toast.error('Erro ao carregar configurações'))
-      .finally(() => setLoading(false))
-  }, [])
-
-  function onChange(chave, valor) {
-    setCfgEdit(e => ({ ...e, [chave]: valor }))
+  async function carregar() {
+    setLoading(true)
+    try {
+      const c = await configuracoesService.listarSEO()
+      setCfg(c || {})
+      setCfgEdit(c || {})
+      configuracoesService.sincronizarPublicConfig({ ...(await configuracoesService.listar(true).catch(()=>({}))), ...(c || {}) })
+    } catch (e) { toast.error(e.message || 'Erro ao carregar configurações SEO') }
+    finally { setLoading(false) }
   }
+  useEffect(() => { carregar() }, [])
+
+  function onChange(chave, valor) { setCfgEdit(e => ({ ...e, [chave]: valor })) }
 
   async function salvar() {
     setSalvando(true)
     try {
       const pares = ALL_KEYS.map(k => ({ chave: k, valor: cfgEdit[k] ?? '' }))
-      await configuracoesService.atualizarLote(pares)
-      setCfg({ ...cfgEdit })
-      toast.success('Configurações salvas!')
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setSalvando(false)
-    }
+      const out = await configuracoesService.atualizarSEO(pares)
+      const persisted = out?.configuracoes || await configuracoesService.listarSEO()
+      const mismatch = ALL_KEYS.filter(k => String(persisted?.[k] ?? '') !== String(cfgEdit[k] ?? ''))
+      if (mismatch.length) throw new Error(`O servidor não confirmou ${mismatch.length} campo(s): ${mismatch.join(', ')}`)
+      setCfg(persisted)
+      setCfgEdit(persisted)
+      setSalvoEm(new Date())
+      toast.success('SEO salvo e confirmado no MongoDB!')
+    } catch (e) { toast.error(e.message) }
+    finally { setSalvando(false) }
   }
 
-  // Campos por aba
+  async function analisarIA() {
+    setAiOpen(true); setAiLoading(true); setAiResult(null)
+    try { setAiResult(await configuracoesService.analisarSEO(cfgEdit, 'auditar')) }
+    catch (e) { toast.error(e.message) }
+    finally { setAiLoading(false) }
+  }
+  function aplicarSugestao(chave) {
+    const v=aiResult?.sugestoes?.[chave]
+    if(v) onChange(chave,v)
+  }
+
   const camposIdentidade = [
-    { key: 'nome_site',      label: 'Nome público do portal', type: 'text', placeholder: 'Ex.: Notícias de Iguatama', hint: 'Nome principal exibido aos visitantes, inclusive durante o carregamento do portal' },
-    { key: 'site_url',       label: 'URL pública do portal', type: 'text', placeholder: 'https://seuportal.vercel.app', hint: 'Usada no sitemap e URLs canônicas quando frontend e backend estão em serviços diferentes' },
-    { key: 'site_titulo',    label: 'Título do site',    type: 'text',     placeholder: 'AL Sistemas', hint: 'Aparece na aba do navegador e nos resultados de busca' },
-    { key: 'site_descricao', label: 'Descrição padrão',  type: 'textarea', placeholder: 'Portal de notícias de Iguatama...', hint: 'Meta description — exibida nos resultados de busca (ideal: 120–160 caracteres)' },
-    { key: 'site_author',    label: 'Autor padrão',       type: 'text',     placeholder: 'AL Sistemas', hint: 'Valor da meta tag "author"' },
-    { key: 'site_keywords',  label: 'Palavras-chave',     type: 'text',     placeholder: 'notícias, iguatama, minas gerais', hint: 'Separadas por vírgula' },
+    { key: 'nome_site', label: 'Nome público do portal', type: 'text', placeholder: 'Ex.: Notícias de Iguatama', hint: 'Nome principal exibido aos visitantes.' },
+    { key: 'site_url', label: 'URL pública do portal', type: 'text', placeholder: 'https://seuportal.vercel.app', hint: 'Usada em canonical e sitemap.' },
+    { key: 'site_titulo', label: 'Título do site', type: 'text', placeholder: 'Portal de Notícias', hint: 'Título padrão para busca e compartilhamento.' },
+    { key: 'site_descricao', label: 'Descrição padrão', type: 'textarea', placeholder: 'Portal de notícias...', hint: 'Meta description — ideal entre 120 e 160 caracteres.' },
+    { key: 'site_author', label: 'Autor padrão', type: 'text', placeholder: 'Redação' },
+    { key: 'site_keywords', label: 'Palavras-chave', type: 'text', placeholder: 'notícias, cidade, região', hint: 'Separadas por vírgula.' },
   ]
   const camposSocial = [
-    { key: 'site_imagem',       label: 'Imagem Open Graph', type: 'text',   placeholder: 'https://...', hint: '1200×630 px recomendado' },
-    { key: 'site_twitter_card', label: 'Twitter Card',       type: 'select', options: [
-      { value: '',                    label: 'Padrão'              },
-      { value: 'summary',             label: 'Summary'             },
-      { value: 'summary_large_image', label: 'Summary Large Image' },
+    { key: 'site_imagem', label: 'Imagem Open Graph', type: 'text', placeholder: 'https://...', hint: '1200×630 px recomendado' },
+    { key: 'site_twitter_card', label: 'Twitter Card', type: 'select', options: [
+      { value: '', label: 'Padrão' }, { value: 'summary', label: 'Summary' }, { value: 'summary_large_image', label: 'Summary Large Image' },
     ]},
-    { key: 'site_twitter_site', label: '@ do Twitter', type: 'text', placeholder: '@iguatamanoticias' },
+    { key: 'site_twitter_site', label: '@ do Twitter/X', type: 'text', placeholder: '@portal' },
   ]
   const camposAnalytics = [
-    { key: 'site_ga_id',            label: 'Google Analytics (GA4)', type: 'text', placeholder: 'G-XXXXXXXXXX' },
-    { key: 'site_gsc_verification', label: 'Google Search Console',  type: 'text', placeholder: 'Código de verificação' },
+    { key: 'site_ga_id', label: 'Google Analytics (GA4)', type: 'text', placeholder: 'G-XXXXXXXXXX' },
+    { key: 'site_gsc_verification', label: 'Google Search Console', type: 'text', placeholder: 'Código de verificação' },
   ]
-  const camposIndexacao = [
-    { key: 'site_robots', label: 'Robots.txt', type: 'select', options: [
-      { value: '',                 label: 'index, follow (Padrão)'  },
-      { value: 'noindex, follow',  label: 'noindex, follow'         },
-      { value: 'noindex, nofollow',label: 'noindex, nofollow'       },
-    ]},
+  const camposIndexacao = [{ key: 'site_robots', label: 'Robots', type: 'select', options: [
+    { value: '', label: 'index, follow (Padrão)' }, { value: 'noindex, follow', label: 'noindex, follow' }, { value: 'noindex, nofollow', label: 'noindex, nofollow' },
+  ]}]
+
+  const sections=[
+    {id:'identidade',label:'Identidade',sub:'Título, descrição e palavras-chave',icon:'◈'},
+    {id:'favicon',label:'Favicon',sub:'Ícone do portal',icon:'▣'},
+    {id:'social',label:'Redes sociais',sub:'Open Graph e X',icon:'↗'},
+    {id:'analytics',label:'Google',sub:'Analytics e Search Console',icon:'⌁'},
+    {id:'indexacao',label:'Indexação',sub:'Robots e rastreamento',icon:'◎'},
+    {id:'sitemap',label:'Sitemap',sub:'Frequência, prioridade e cache',icon:'⌘'},
   ]
 
-  if (loading) {
-    return (
-      <div className="adm-empty" style={{ marginTop: 80 }}>
-        <div style={{ width: 24, height: 24, border: `2px solid ${C.border}`, borderTopColor: C.blue, borderRadius: '50%', animation: 'seo-spin 0.7s linear infinite', margin: '0 auto' }} />
-      </div>
-    )
+  function sectionContent(id){
+    if(id==='identidade') return camposIdentidade.map(f=><Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange}/>)
+    if(id==='favicon') return <AbaFavicon value={cfgEdit.site_favicon} onChange={onChange}/>
+    if(id==='social') return camposSocial.map(f=><Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange}/>)
+    if(id==='analytics') return camposAnalytics.map(f=><Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange}/>)
+    if(id==='sitemap') return <AbaSitemap cfg={cfgEdit} onChange={onChange}/>
+    if(id==='indexacao') return <>{camposIndexacao.map(f=><Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange}/>)}<div style={{padding:12,background:'rgba(239,68,68,.08)',borderRadius:RADIUS.md,color:C.red}}>⚠ “noindex” remove o portal dos resultados de busca.</div></>
+    return null
   }
 
-  const mostrarPreview = ['identidade', 'favicon', 'social', 'analytics', 'indexacao'].includes(abaAtiva)
+  if(loading) return <div className="adm-empty" style={{marginTop:80}}>Carregando SEO…</div>
+  const audit=calcularAuditoriaSEO(cfgEdit)
 
-  return (
-    <>
-      <style>{`
-        @keyframes seo-spin { to { transform: rotate(360deg) } }
-        @media (max-width: 640px) { .seo-preview-col { display: none !important; } }
-      `}</style>
+  return <>
+    <style>{`
+      .seo-section-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+      .seo-section-card{min-width:0;text-align:left;padding:14px;border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:14px;cursor:pointer;color:var(--adm-text)}
+      .seo-section-card:hover{border-color:var(--adm-accent)}
+      @media(max-width:620px){.seo-section-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.seo-section-card{padding:10px 8px}.seo-section-sub{display:none}}
+    `}</style>
+    <ConfirmModal aberto={showPrompt} titulo="Sair sem salvar?" mensagem="Você tem alterações não salvas." labelConfirmar="Descartar" variante="warning" onConfirmar={confirmarNavegacao} onCancelar={cancelarNavegacao}/>
 
-      <ConfirmModal
-        aberto={showPrompt}
-        titulo="Sair sem salvar?"
-        mensagem="Você tem alterações não salvas. Deseja descartá-las?"
-        labelConfirmar="Descartar"
-        variante="warning"
-        onConfirmar={confirmarNavegacao}
-        onCancelar={cancelarNavegacao}
-      />
+    <div className="adm-page-header" style={{marginBottom:18}}>
+      <div><div className="adm-page-title">SEO &amp; Metadados</div><div className="adm-page-sub">Busca, compartilhamento e indexação do portal</div></div>
+      <div className="adm-page-actions"><button className="adm-btn adm-btn-secondary" onClick={()=>setPreviewOpen(true)}>Visualizar</button><button className="adm-btn adm-btn-secondary" onClick={analisarIA}>✨ IA</button><button className="adm-btn adm-btn-primary" disabled={salvando||semAlteracoes} onClick={salvar}>{salvando?'Salvando…':'Salvar'}</button></div>
+    </div>
 
-      {/* Header */}
-      <div className="adm-page-header" style={{ marginBottom: 24 }}>
-        <div>
-          <div className="adm-page-title">SEO &amp; Metadados</div>
-          <div className="adm-page-sub">Configure como o site aparece em buscadores e redes sociais</div>
-        </div>
-        <div className="adm-page-actions">
-          <button onClick={salvar} disabled={salvando || semAlteracoes} className="adm-btn adm-btn-primary">
-            {salvando ? 'Salvando...' : 'Salvar alterações'}
-          </button>
-        </div>
-      </div>
+    <div className="adm-card" style={{padding:14,marginBottom:14,display:'grid',gridTemplateColumns:'auto 1fr',gap:14,alignItems:'center'}}>
+      <div style={{width:58,height:58,borderRadius:'50%',display:'grid',placeItems:'center',border:`6px solid ${audit.nota>=80?C.green:audit.nota>=55?C.yellow:C.red}`,fontWeight:800}}>{audit.nota}</div>
+      <div style={{minWidth:0}}><strong>Saúde do SEO</strong><div style={{fontSize:FONT.sm,color:C.muted,marginTop:4}}>{audit.pendencias.length?`${audit.pendencias.length} melhoria(s): ${audit.pendencias.map(x=>x[0]).join(' · ')}`:'Configuração essencial completa.'}</div><div style={{fontSize:FONT.sm,color:semAlteracoes?C.green:C.yellow,marginTop:5}}>{salvando?'Salvando no MongoDB…':!semAlteracoes?'● Alterações não salvas':salvoEm?`✓ Salvo e confirmado às ${salvoEm.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`:'✓ Sincronizado com o MongoDB'}</div></div>
+    </div>
 
-      {(()=>{const a=calcularAuditoriaSEO(cfgEdit);return <div className="adm-card" style={{marginBottom:18,padding:16,display:'flex',gap:16,alignItems:'center',flexWrap:'wrap'}}><div style={{width:72,height:72,borderRadius:'50%',display:'grid',placeItems:'center',border:`7px solid ${a.nota>=80?C.green:a.nota>=55?C.yellow:C.red}`,fontWeight:800,fontSize:20,color:C.text}}>{a.nota}</div><div style={{flex:1,minWidth:240}}><div style={{fontWeight:800,color:C.text}}>Auditoria SEO do portal</div><div style={{fontSize:12,color:C.muted,marginTop:4}}>Pontuação baseada nas configurações essenciais para busca, compartilhamento e indexação.</div>{a.pendencias.length?<div style={{fontSize:12,color:C.yellow,marginTop:7}}>Pendências: {a.pendencias.map(x=>x[0]).join(' · ')}</div>:<div style={{fontSize:12,color:C.green,marginTop:7}}>✓ Configuração essencial completa.</div>}</div></div>})()}
+    <div className="seo-section-grid">{sections.map(x=><button key={x.id} className="seo-section-card" onClick={()=>setSecao(x.id)}><div style={{fontSize:18,marginBottom:7}}>{x.icon}</div><div style={{fontWeight:750,fontSize:FONT.base}}>{x.label}</div><div className="seo-section-sub" style={{fontSize:FONT.sm,color:C.muted,marginTop:4,lineHeight:1.3}}>{x.sub}</div></button>)}</div>
 
-      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        {/* Coluna principal */}
-        <div style={{ flex: 1, minWidth: 300 }}>
-
-          {/* ── Barra de abas ── */}
-          <div className="adm-tabs">
-            {ABAS.map(aba => (
-              <button
-                key={aba.id}
-                onClick={() => setAbaAtiva(aba.id)}
-                className={`adm-tab-btn${abaAtiva === aba.id ? ' active' : ''}`}
-              >
-                {aba.icon} {aba.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Conteúdo da aba */}
-          <div className="adm-card" style={{ padding: 18 }}>
-            {abaAtiva === 'identidade' && camposIdentidade.map(f => <Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange} />)}
-            {abaAtiva === 'favicon'    && <AbaFavicon value={cfgEdit.site_favicon} onChange={onChange} />}
-            {abaAtiva === 'social'     && camposSocial.map(f    => <Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange} />)}
-            {abaAtiva === 'analytics'  && camposAnalytics.map(f => <Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange} />)}
-            {abaAtiva === 'sitemap'    && <AbaSitemap cfg={cfgEdit} onChange={onChange} />}
-
-            {abaAtiva === 'indexacao' && (
-              <>
-                {camposIndexacao.map(f => <Campo key={f.key} campo={f} value={cfgEdit[f.key]} onChange={onChange} />)}
-                <div style={{ marginTop: 8, padding: 12, background: 'rgba(239,68,68,0.1)', borderRadius: RADIUS.md, fontSize: FONT.base, color: C.red, border: `1px solid rgba(239,68,68,0.2)` }}>
-                  ⚠️ "noindex" remove o site dos resultados de busca. Use apenas em ambiente de testes.
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Painel de preview — só nas abas relevantes */}
-        {mostrarPreview && (
-          <div className="seo-preview-col" style={{ width: 340, flexShrink: 0 }}>
-            <PreviewPanel cfg={cfgEdit} />
-          </div>
-        )}
-      </div>
-    </>
-  )
+    <DSModal open={!!secao} onClose={()=>setSecao(null)} title={sections.find(x=>x.id===secao)?.label||'SEO'} size="lg"><div>{sectionContent(secao)}</div></DSModal>
+    <DSModal open={previewOpen} onClose={()=>setPreviewOpen(false)} title="Prévia do portal" size="md"><PreviewPanel cfg={cfgEdit}/></DSModal>
+    <DSModal open={aiOpen} onClose={()=>!aiLoading&&setAiOpen(false)} title="Assistente SEO" size="md">
+      {aiLoading?<div className="adm-empty">Analisando configurações com IA…</div>:aiResult?<div style={{display:'grid',gap:14}}><div className="adm-card" style={{padding:14}}><strong>{aiResult.pontuacao??audit.nota}/100</strong><div style={{color:C.muted,marginTop:6}}>{aiResult.resumo}</div></div>{(aiResult.alertas||[]).length>0&&<div><strong>Alertas</strong><ul>{aiResult.alertas.map((a,i)=><li key={i}>{a}</li>)}</ul></div>}<div style={{display:'grid',gap:10}}>{[['site_titulo','Título'],['site_descricao','Descrição'],['site_keywords','Palavras-chave']].map(([k,l])=>aiResult.sugestoes?.[k]?<div key={k} className="adm-card" style={{padding:12}}><strong>{l}</strong><div style={{margin:'7px 0',lineHeight:1.5}}>{aiResult.sugestoes[k]}</div><button className="adm-btn adm-btn-secondary adm-btn-sm" onClick={()=>aplicarSugestao(k)}>Usar sugestão</button></div>:null)}</div><div style={{fontSize:FONT.sm,color:C.muted}}>A IA apenas sugere. Nada é salvo sem você confirmar em Salvar.</div></div>:<div className="adm-empty">Não foi possível gerar análise.</div>}
+    </DSModal>
+  </>
 }

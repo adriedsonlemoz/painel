@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.96
+
+- **SEO corrigido de verdade:** a tela agora usa endpoints dedicados de SEO, aceitando `seo.gerenciar` ou `configuracoes.gerenciar`, sem afrouxar as demais configurações do sistema.
+- **Persistência confirmada:** depois de salvar, o backend relê o MongoDB e devolve os valores; o frontend compara campo a campo antes de mostrar sucesso e sincroniza cache/bootstrap público.
+- **Nova interface SEO:** seções em cards compactos que abrem em popup/bottom-sheet, prévia disponível no celular e estado claro de alterações não salvas, salvando e salvo.
+- **IA no SEO:** Gemini/OpenRouter de Integrações e APIs pode auditar a configuração e sugerir título, descrição e palavras-chave; nada é salvo automaticamente.
+- **Triagem externa:** GitHub, Vercel, Render e MongoDB agora aceitam estados locais `Novo`, `Acompanhando`, `Revisado` e `Silenciado`, mesmo que o erro continue existindo na origem.
+- **Notas e acompanhamento:** ocorrências externas podem receber nota local persistida no MongoDB; detalhes também ganham reconsulta da origem, link para a plataforma e análise IA.
+- **Ações em massa:** seleção de ocorrências externas passa a aceitar triagem em lote; a antiga limitação de status apenas para registros internos do AL foi removida.
 
 ## 1.0.95
 

@@ -1,18 +1,16 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.95",
+  "version": "1.0.96",
   "packageFormat": 2,
   "changelog": [
-    "Erros e logs foi reformulado como Central online de diagnóstico, com interface compacta e foco em produção cloud.",
-    "Ações Limpar resolvidos, Limpar ignorados e Limpar tudo saíram do topo e foram movidas para a engrenagem de gerenciamento.",
-    "A tela agora reúne AL Sistemas, GitHub Actions, Vercel, Render e MongoDB como fontes de diagnóstico, usando as credenciais existentes de Integrações e APIs.",
-    "GitHub, Vercel e Render exibem falhas recentes de workflows/deploys; detalhes e logs são buscados sob demanda diretamente nas plataformas, evitando duplicar logs completos no MongoDB.",
-    "MongoDB ganhou diagnóstico de conexão/ping e métricas do banco; indisponibilidade do banco aparece como ocorrência crítica na mesma Central.",
-    "Analisar com IA foi generalizado para ocorrências do AL, GitHub, Vercel, Render e MongoDB, usando Gemini/OpenRouter já configurados e sem executar correções automaticamente.",
-    "Filtros avançados foram movidos para popup; a tela principal mantém somente busca, origem e cards de ocorrências.",
-    "Seleção em massa agora usa uma barra flutuante compacta no rodapé; alterações de status continuam limitadas aos registros persistidos pelo AL.",
-    "O diagnóstico principal agora prioriza Produção cloud; Termux permanece como modo legado e VPS fica preparado para ativação futura via infraestrutura sem poluir a interface atual.",
-    "Pacote completo 1.0.95 inclui todas as melhorias das versões anteriores."
+    "SEO & Metadados passa a salvar por rotas dedicadas com permissão seo.gerenciar ou configuracoes.gerenciar, corrigindo o caso em que a tela abria mas o usuário não conseguia persistir alterações.",
+    "Após salvar SEO, o backend relê os valores persistidos no MongoDB e o frontend confirma campo a campo; cache e bootstrap público são sincronizados imediatamente para não reaparecer valor antigo.",
+    "SEO ganha interface compacta por cards e popups responsivos, prévia acessível também no mobile e indicação explícita de alterações não salvas / salvando / salvo e confirmado.",
+    "SEO ganha Assistente IA usando Gemini/OpenRouter de Integrações e APIs, com auditoria, sugestões de título, descrição e palavras-chave aplicadas somente após revisão do usuário.",
+    "Central de Erros ganha triagem local para ocorrências externas: Novo, Acompanhando, Revisado e Silenciado, além de notas locais, sem apagar ou alterar o erro na plataforma de origem.",
+    "GitHub, Vercel, Render e MongoDB podem ser selecionados em massa para triagem no AL; a mensagem antiga que limitava ações de status somente aos erros internos foi removida.",
+    "Detalhes de ocorrências externas ganham Reconsultar origem, Abrir plataforma, Analisar com IA e nota de acompanhamento persistente no MongoDB.",
+    "Termux/VPS e todos os fluxos anteriores permanecem compatíveis; pacote completo 1.0.96 inclui todas as melhorias das versões anteriores."
   ],
   "updatePackages": {
     "full": true,
