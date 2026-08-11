@@ -126,6 +126,22 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
   } catch (err) { next(err) }
 })
 
+// ── GET /api/auth/cookie-probe — verifica o cookie sem gerar 401 ─────────────
+// Usado após login Vercel → Render apenas para descobrir se o navegador aceitou
+// o cookie de terceiro. Sempre responde 200 para não poluir logs/diagnósticos.
+router.get('/cookie-probe', async (req, res) => {
+  const token = req.cookies?.alsistemas_token
+  if (!token) return res.json({ ok: false, transport: 'none' })
+  try {
+    const payload = jwt.verify(token, bootstrapValue('JWT_SECRET'))
+    const usuario = await Usuario.findById(payload.id).select('_id sessao_versao ativo').lean()
+    const ok = Boolean(usuario?.ativo && Number(usuario.sessao_versao || 0) === Number(payload.sv || 0))
+    return res.json({ ok, transport: ok ? 'cookie' : 'none' })
+  } catch {
+    return res.json({ ok: false, transport: 'none' })
+  }
+})
+
 // ── GET /api/auth/me — retorna usuário logado ────────────────────────────────
 router.get('/me', autenticar, (req, res) => {
   res.json({ usuario: req.usuario, auth:{ transport:req.headers.authorization?.startsWith('Bearer ')?'bearer':'cookie' } })

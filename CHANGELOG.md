@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.103 — Novo projeto GitHub, R2 corrigido e assistentes compactos
+
+- A página principal do GitHub ganha **Novo projeto GitHub**, independente de uma pasta local do módulo Projetos.
+- O novo fluxo é um assistente centralizado em **6 telas curtas**: Projeto → Detalhes → Arquivos → Revisão → Commit → Pronto, pensado para caber também em celulares pequenos.
+- O assistente permite escolher conta pessoal/organização, nome, público/privado, descrição, homepage, Issues, Projects, Wiki e Discussions antes de criar o repositório.
+- Depois de criar o repositório vazio, o usuário escolhe **R2** ou **GridFS**, envia o ZIP com progresso real e o backend descompacta/prepara os arquivos antes de qualquer commit.
+- A revisão mostra quantidade/prévia de arquivos, branch, pasta exata no GitHub e mensagem do commit; o botão de primeiro commit só aparece depois dessa conferência.
+- Repositórios completamente vazios podem receber o primeiro commit e a branch escolhida é criada automaticamente quando necessário.
+- O navegador R2 da Cloudflare e a listagem R2 em Projetos foram corrigidos para mostrar objetos realmente enviados, usando S3 compatível com paginação e fallback REST compatível.
+- Projetos armazenados no R2 podem ser usados diretamente como fonte do commit, sem exigir cópia local persistente no Render.
+- Commit e sincronização do módulo Projetos passam de `EventSource` puro para **streaming autenticado por fetch/POST**, permitindo o Bearer de fallback Vercel → Render e corrigindo a falsa mensagem de perda de conexão.
+- O endpoint GET/SSE antigo continua disponível como compatibilidade para Termux/VPS.
+- O atualizador cloud passa a exibir **uma única etapa central por tela**: Atualização/R2 → GitHub → Vercel → Render. A próxima etapa assume a tela automaticamente.
+- O monitor do atualizador foi compactado para telas pequenas e deixou de gerar notificações grandes para sucessos rotineiros; erros e avisos importantes permanecem destacados.
+- Manifesto, frontend, backend, Setup e backup/exportação foram sincronizados em **1.0.103**.
+
+## 1.0.102 — GitHub mobile, README e correções de produção
+
+- GitHub corrige definitivamente a Central do Repositório para **3 cards por linha no celular**, removendo a regra global que ainda forçava 2 colunas.
+- **Visão geral** volta a carregar o README renderizado ao abrir o card.
+- **Baixar projeto** e **Publicar** deixam de parecer a mesma ação: download permanece no cabeçalho e Publicar fica como ferramenta própria da Central.
+- Workflows recebem ações mobile compactas e estados traduzidos para português.
+- Build Android fixa Capacitor 6.2.1 + tar 6.2.1, usa Node 22 e envia ao Vite a versão real do package.json.
+- Render configura `trust proxy` em produção gerenciada; deploy antigo desativado deixa de contaminar o diagnóstico quando o serviço atual está saudável.
+- O teste de sessão Vercel → Render deixa de produzir o 401 deliberado depois do login e preserva o fallback Bearer.
+
 ## 1.0.101 — GitHub alinhado ao Design System da Central
 
 - O painel interno de cada repositório passa a usar cards inspirados na Central de Atualizações, com ícone, título e descrição curta.

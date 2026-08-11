@@ -26,6 +26,7 @@ import { infraestruturaService } from '../../services/domains/infraestrutura.js'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import AdminIcon            from '../../components/admin/ui/AdminIcon'
 import { DSBtn, DSBadge, DSSectionTitle, DSModal } from '../../components/admin/ui/DS'
+import NovoProjetoGitHubWizard from '../../components/admin/github/NovoProjetoGitHubWizard.jsx'
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function relTime(iso) {
@@ -121,6 +122,12 @@ const STATUS_RUN_COR = {
   queued:      C.amber,
   waiting:     C.amber,
 }
+const STATUS_RUN_LABEL = {
+  success:'Concluído', failure:'Falhou', cancelled:'Cancelado', skipped:'Ignorado',
+  in_progress:'Em andamento', queued:'Na fila', waiting:'Aguardando', requested:'Solicitado',
+  active:'Ativo', disabled_manually:'Desativado', disabled_inactivity:'Desativado por inatividade',
+}
+function runStatusLabel(value){ return STATUS_RUN_LABEL[value] || String(value || '—').replaceAll('_',' ') }
 
 /* ── Toast simples (posição fixa, mantido local) ────────── */
 function useToast() {
@@ -176,7 +183,7 @@ const inp = (extra = {}) => ({
 /* ── Badge de status de run ──────────────────────────────── */
 function RunBadge({ status, conclusao }) {
   const cor   = STATUS_RUN_COR[conclusao || status] || C.muted
-  const label = conclusao || status || '?'
+  const label = runStatusLabel(conclusao || status || '?')
   return (
     <DSBadge style={{ background: `${cor}18`, color: cor, borderColor: `${cor}30` }}>
       {label}
@@ -254,13 +261,12 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
     finally     { setLoadingAba(false) }
   }, [owner, repoNome, readme, commits, releases, artifacts, analysis])
 
-  useEffect(() => { carregarAba(aba) }, [aba])
-
   const mudarAba = (a) => {
     setErroAba(null)
     if (a === 'push') { setPublicarAberto(true); return }
     setAba(a)
     setSecaoModal(a)
+    carregarAba(a)
   }
 
   async function salvarMeta() {
@@ -308,7 +314,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
     { id:'artifacts', icon:'□', label:'Artefatos', desc:'Arquivos do Actions', grupo:'Código' },
     { id:'workflows', icon:'↯', label:'Workflows', desc:'Actions e execuções', grupo:'Automação' },
     { id:'secrets', icon:'◆', label:'Secrets', desc:'Variáveis do GitHub', grupo:'Automação' },
-    { id:'push', icon:'↑', label:'Publicar', desc:'GitHub · Vercel · Render', grupo:'Produção', destaque:true },
+    { id:'push', icon:'↑', label:'Publicar', desc:'Enviar e implantar', grupo:'Produção', destaque:true },
   ]
   const MANUTENCAO = { id:'delete', icon:'×', label:'Excluir repositório', desc:'Ação permanente', grupo:'Manutenção', perigo:true }
   const abaAtual = [...ABAS, MANUTENCAO].find(a => a.id === aba) || ABAS[0]
@@ -370,7 +376,6 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               </svg>
               {baixandoProjeto ? 'Gerando…' : 'Baixar projeto'}
             </button>
-            <DSBtn variant="primary" size="sm" onClick={() => setPublicarAberto(true)}>↑ Publicar</DSBtn>
             <div className="gh-more-wrap">
               <DSBtn variant="ghost" size="icon" onClick={() => setMaisAberto(v => !v)} aria-label="Mais ações">⋮</DSBtn>
               {maisAberto && <div className="gh-more-menu">
@@ -647,10 +652,9 @@ function AbaVisao({ repo, readme, toastShow, onRepoAtualizado }) {
 
       <section className="gh-readme-section">
         <div className="gh-readme-head"><div><span>Documentação</span><b>README.md</b></div>{readme?.nome && <DSBadge variant="gray">{readme.nome}</DSBadge>}</div>
-        {readme === null ? <div className="gh-muted-box">Sem README.</div>
-          : readme?.html ? <article className="gh-readme" dangerouslySetInnerHTML={{ __html: readme.html }} />
+        {readme?.html ? <article className="gh-readme" dangerouslySetInnerHTML={{ __html: readme.html }} />
           : readme?.conteudo ? <pre className="gh-readme-fallback">{readme.conteudo}</pre>
-          : <div className="gh-muted-box">Carregando README…</div>}
+          : <div className="gh-muted-box">Este repositório não possui README.</div>}
       </section>
     </div>
   )
@@ -1417,7 +1421,7 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                 <div style={{ fontSize: FONT.base, fontWeight: 700, color: C.text }}>⚙ {wf.nome}</div>
                 <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>{wf.arquivo}</div>
               </div>
-              <DSBadge variant={ativo ? 'green' : 'amber'}>{wf.estado}</DSBadge>
+              <DSBadge variant={ativo ? 'green' : 'amber'}>{runStatusLabel(wf.estado)}</DSBadge>
             </button>
           )
         })}
@@ -1456,8 +1460,8 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                       </div>
                       <div className="gh-run-actions" style={{ display: 'flex', gap: SPACE.sm, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <DSBtn size="sm" onClick={() => analisarRun(run, 'resumo')}>Resumo</DSBtn>
-                        <DSBtn size="sm" variant="primary" onClick={() => analisarRun(run, 'diagnostico')}>✨ Analisar IA</DSBtn>
-                        {run.conclusao === 'failure' && <DSBtn size="sm" onClick={() => analisarRun(run, 'correcao')}>🛠 Sugestão</DSBtn>}
+                        <DSBtn size="sm" variant="primary" onClick={() => analisarRun(run, 'diagnostico')} title="Analisar esta execução com IA">✨ IA</DSBtn>
+                        {run.conclusao === 'failure' && <DSBtn size="sm" onClick={() => analisarRun(run, 'correcao')} title="Gerar sugestão de correção">🛠 Correção</DSBtn>}
                         <DSBtn size="sm" onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
                           {isAberto ? 'Fechar' : 'Jobs'}
                         </DSBtn>
@@ -1465,7 +1469,7 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                           onClick={() => githubService.baixarLogs(run.id, owner, repo)
                             .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}
                           style={{ fontSize: FONT.sm, fontWeight: 600, color: C.text, cursor: 'pointer', background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, whiteSpace: 'nowrap' }}
-                          title="Baixar todos os logs como ZIP">⬇ ZIP</button>
+                          title="Baixar todos os logs como ZIP">⬇ Logs</button>
                       </div>
                     </div>
 
@@ -1769,6 +1773,7 @@ export default function AdminGitHub() {
   const [filtroVis,    setFiltroVis]    = useState('todos')
   const [repoAberto,   setRepoAberto]   = useState(null)
   const [showPerfil,    setShowPerfil]    = useState(false)
+  const [novoProjetoAberto, setNovoProjetoAberto] = useState(false)
   const [metas,        setMetas]        = useState({})
   const [insights,     setInsights]     = useState({})
 
@@ -1867,9 +1872,10 @@ export default function AdminGitHub() {
         .gh-readme-fallback{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:14px;font-size:11px;color:var(--adm-text);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
         .gh-profile-edit-head{display:flex;align-items:center;gap:12px;padding:10px;background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:10px}.gh-profile-edit-avatar{width:54px;height:54px;border-radius:50%;object-fit:cover}.gh-external-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 9px;border:1px solid var(--adm-border);border-radius:8px;color:var(--adm-text);font-size:10px;font-weight:700;text-decoration:none;background:var(--adm-surface)}
         .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
+        .gh-new-project-launch{width:100%;margin:0 0 14px;display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:11px;align-items:center;text-align:left;padding:12px 14px;border:1px solid color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border));border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));color:var(--adm-text);cursor:pointer}.gh-new-project-launch-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));color:var(--adm-accent);font-size:21px;font-weight:700}.gh-new-project-launch>span:nth-child(2){display:grid;gap:2px;min-width:0}.gh-new-project-launch b{font-size:12px}.gh-new-project-launch small{font-size:9px;color:var(--adm-muted);line-height:1.35}.gh-new-project-launch-arrow{font-size:24px;color:var(--adm-muted)}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-command-card{min-height:105px;padding:9px 8px;grid-template-columns:1fr;align-content:start;gap:7px}.gh-command-card-icon{width:29px;height:29px;font-size:14px}.gh-command-card-copy b{font-size:9.5px}.gh-command-card-copy small{font-size:7.4px;line-height:1.28}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{gap:6px}.gh-command-card{min-height:101px;padding:8px 7px;border-radius:12px}.gh-command-card-copy b{font-size:9px}.gh-command-card-copy small{font-size:7px}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;justify-content:flex-start!important}.gh-run-actions>*{flex:1;justify-content:center}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-command-card{min-height:105px;padding:9px 8px;grid-template-columns:1fr;align-content:start;gap:7px}.gh-command-card-icon{width:29px;height:29px;font-size:14px}.gh-command-card-copy b{font-size:9.5px}.gh-command-card-copy small{font-size:7.4px;line-height:1.28}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{gap:6px}.gh-command-card{min-height:101px;padding:8px 7px;border-radius:12px}.gh-command-card-copy b{font-size:9px}.gh-command-card-copy small{font-size:7px}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
       `}</style>
 
       <PerfilGitHubModal
@@ -1915,6 +1921,14 @@ export default function AdminGitHub() {
           </div>
         )}
       </section>
+
+      {!erro && !loading && status?.ok && (
+        <button type="button" className="gh-new-project-launch" onClick={() => setNovoProjetoAberto(true)}>
+          <span className="gh-new-project-launch-icon">＋</span>
+          <span><b>Novo projeto GitHub</b><small>Crie o repositório, envie um ZIP e faça o primeiro commit em um assistente.</small></span>
+          <span className="gh-new-project-launch-arrow">›</span>
+        </button>
+      )}
 
       {/* Filtros */}
       {!erro && !loading && (
@@ -1974,6 +1988,7 @@ export default function AdminGitHub() {
       )}
 
       {repoAberto && <PainelDetalhes repo={repoAberto} onFechar={fecharPainel} toastShow={toastShow} />}
+      {novoProjetoAberto && <NovoProjetoGitHubWizard status={status} onClose={() => setNovoProjetoAberto(false)} onCreated={() => recarregar()} />}
     </div>
   )
 }

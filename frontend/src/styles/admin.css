@@ -615,7 +615,7 @@ select.adm-input { max-width: 100%; }
   .gh-repo-head > div:last-child { width: 100%; flex-wrap: wrap; }
   .gh-repo-head > div:last-child > * { flex: 1 1 auto; justify-content: center; }
   .gh-command-deck { top: 0 !important; padding: 10px 13px !important; }
-  .gh-command-grid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+  .gh-command-grid { grid-template-columns: repeat(3,minmax(0,1fr)) !important; }
   .gh-clean-stats { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
   .gh-file-row { grid-template-columns: minmax(0,1fr) !important; }
 

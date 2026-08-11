@@ -63,6 +63,7 @@ import {
   PutObjectCommand,
   DeleteObjectsCommand,
   ListObjectsV2Command,
+  GetObjectCommand,
 } from '@aws-sdk/client-s3'
 
 const router   = Router()
@@ -858,9 +859,34 @@ function r2S3Client() {
   const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
   return new S3Client({
     region:   'auto',
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    endpoint: process.env.CF_R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: { accessKeyId, secretAccessKey },
   })
+}
+
+
+async function listarObjetosR2S3(bucket, prefix = '', maxPages = 50) {
+  const s3 = r2S3Client()
+  const objetos = []
+  let token
+  let pages = 0
+  do {
+    const data = await s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix || undefined,
+      ContinuationToken: token,
+      MaxKeys: 1000,
+    }))
+    objetos.push(...(data.Contents || []).map(o => ({
+      key: o.Key,
+      size: o.Size || 0,
+      uploaded: o.LastModified || null,
+      etag: String(o.ETag || '').replace(/^"|"$/g, ''),
+    })))
+    token = data.IsTruncated ? data.NextContinuationToken : undefined
+    pages += 1
+  } while (token && pages < maxPages)
+  return { objetos, truncado: Boolean(token), paginas: pages }
 }
 
 /* ── GET /r2 ─────────────────────────────────────────────── */
@@ -1052,32 +1078,44 @@ router.get('/r2/health', autenticar, async (_req, res) => {
   }
 
   // ── 4. Listar objetos para obter métricas reais ───────────────
+  // Preferimos a API S3 do R2, que é a mesma usada pelo upload/commit e
+  // suporta paginação sem depender do formato REST de listagem da Cloudflare.
   let totalObjetos = 0, tamanhoTotal = 0, prefixos = [], truncado = false
   try {
-    const lResp = await fetch(
-      `${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?per_page=1000`,
-      { headers }
-    )
-    if (lResp.ok) {
-      const lData    = await lResp.json()
-      const objetos  = lData.result?.objects ?? []
-      truncado       = lData.result?.truncated ?? false
-      totalObjetos   = objetos.length
-      tamanhoTotal   = objetos.reduce((s, o) => s + (o.size || 0), 0)
-
-      // Coleta prefixos (pastas de projeto)
-      const prefMap = new Map()
-      for (const obj of objetos) {
-        const key  = obj.key.replace(/%2F/gi, '/')
-        const sep  = key.indexOf('/')
-        const nome = sep > 0 ? key.slice(0, sep) : key
-        if (!prefMap.has(nome)) prefMap.set(nome, { nome, arquivos: 0, tamanho: 0 })
-        const p = prefMap.get(nome)
-        p.arquivos++
-        p.tamanho += obj.size || 0
+    const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID
+    const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
+    let objetos = []
+    if (accessKeyId && secretAccessKey) {
+      const listagem = await listarObjetosR2S3(bucket)
+      objetos = listagem.objetos
+      truncado = listagem.truncado
+    } else {
+      // Compatibilidade com instalações antigas que ainda tenham apenas token REST.
+      const lResp = await fetch(
+        `${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?per_page=1000`,
+        { headers }
+      )
+      if (lResp.ok) {
+        const lData = await lResp.json()
+        objetos = Array.isArray(lData.result) ? lData.result : (lData.result?.objects ?? [])
+        truncado = Boolean(lData.result_info?.is_truncated ?? lData.result?.truncated)
       }
-      prefixos = [...prefMap.values()].sort((a, b) => a.nome.localeCompare(b.nome))
     }
+    totalObjetos = objetos.length
+    tamanhoTotal = objetos.reduce((sum, obj) => sum + Number(obj.size || 0), 0)
+
+    const prefMap = new Map()
+    for (const obj of objetos) {
+      const key = String(obj.key || '').replace(/%2F/gi, '/')
+      if (!key) continue
+      const sep = key.indexOf('/')
+      const nome = sep > 0 ? key.slice(0, sep) : key
+      if (!prefMap.has(nome)) prefMap.set(nome, { nome, arquivos: 0, tamanho: 0 })
+      const item = prefMap.get(nome)
+      item.arquivos += 1
+      item.tamanho += Number(obj.size || 0)
+    }
+    prefixos = [...prefMap.values()].sort((a, b) => a.nome.localeCompare(b.nome))
   } catch { /* métricas opcionais — não falha */ }
 
   // ── 5. Testar escrita (PUT objeto de teste) e leitura/delete ──
@@ -1124,48 +1162,35 @@ router.get('/r2/health', autenticar, async (_req, res) => {
 
 router.get('/r2', autenticar, async (_req, res, next) => {
   try {
-    const accountId = process.env.CF_ACCOUNT_ID
-    const bucket    = process.env.CF_R2_BUCKET
-    const token     = process.env.CF_API_TOKEN
+    const bucket = process.env.CF_R2_BUCKET
+    const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID
+    const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
 
-    if (!accountId || !bucket || !token) {
+    if (!bucket || !accessKeyId || !secretAccessKey) {
       return res.json({
-        projetos: [], bucket: null, total: 0,
-        aviso: 'Cloudflare/R2 não configurado. Abra Integrações e APIs → Cloudflare.',
+        projetos: [], bucket: bucket || null, total: 0,
+        aviso: 'Cloudflare/R2 S3 não configurado. Abra Integrações e APIs → Cloudflare → R2 Storage.',
       })
     }
 
-    const CF_BASE = 'https://api.cloudflare.com/client/v4'
-    const resp = await fetch(
-      `${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?per_page=1000`,
-      { headers: r2Headers() }
-    )
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '')
-      return res.json({ projetos: [], bucket, total: 0, aviso: `R2 ${resp.status}: ${txt.slice(0, 120)}` })
-    }
-    const data    = await resp.json()
-    const objetos = data.result?.objects     ?? []
-    const truncado = data.result?.truncated  ?? false
-
-    // Agrupa por primeiro segmento do path (nome do projeto)
-    // Normaliza %2F → / para tratar uploads antigos com chaves mal-codificadas
+    const { objetos, truncado } = await listarObjetosR2S3(bucket)
     const map = new Map()
     for (const obj of objetos) {
-      const normalKey = obj.key.replace(/%2F/gi, '/')
-      const sep  = normalKey.indexOf('/')
+      const normalKey = String(obj.key || '').replace(/%2F/gi, '/')
+      if (!normalKey) continue
+      const sep = normalKey.indexOf('/')
       const nome = sep > 0 ? normalKey.slice(0, sep) : normalKey
       if (!map.has(nome)) map.set(nome, { nome, totalArquivos: 0, tamanhoTotal: 0, ultimaModificacao: null })
-      const p = map.get(nome)
-      p.totalArquivos++
-      p.tamanhoTotal += obj.size || 0
-      if (!p.ultimaModificacao || obj.uploaded > p.ultimaModificacao) p.ultimaModificacao = obj.uploaded
+      const item = map.get(nome)
+      item.totalArquivos += 1
+      item.tamanhoTotal += Number(obj.size || 0)
+      if (obj.uploaded && (!item.ultimaModificacao || new Date(obj.uploaded) > new Date(item.ultimaModificacao))) item.ultimaModificacao = obj.uploaded
     }
 
     const projetos = [...map.values()].sort((a, b) => a.nome.localeCompare(b.nome))
-    res.json({
+    return res.json({
       projetos, bucket, total: projetos.length,
-      aviso: truncado ? 'Bucket tem mais de 1000 objetos — listagem pode estar incompleta.' : undefined,
+      aviso: truncado ? 'A listagem atingiu o limite de páginas configurado; refine por projeto para ver todos os objetos.' : undefined,
     })
   } catch (err) { next(err) }
 })
@@ -1173,97 +1198,53 @@ router.get('/r2', autenticar, async (_req, res, next) => {
 /* ── GET /r2/:nome ───────────────────────────────────────── */
 router.get('/r2/:nome', autenticar, async (req, res, next) => {
   try {
-    const { nome }  = req.params
-    const accountId = process.env.CF_ACCOUNT_ID
-    const bucket    = process.env.CF_R2_BUCKET
-    const token     = process.env.CF_API_TOKEN
+    const { nome } = req.params
+    const bucket = process.env.CF_R2_BUCKET
+    const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID
+    const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
+    if (!bucket || !accessKeyId || !secretAccessKey)
+      return res.status(500).json({ erro: 'Cloudflare/R2 S3 não configurado. Abra Integrações e APIs → Cloudflare → R2 Storage.' })
 
-    if (!accountId || !bucket || !token)
-      return res.status(500).json({ erro: 'Cloudflare/R2 não configurado. Abra Integrações e APIs → Cloudflare.' })
-
-    const CF_BASE = 'https://api.cloudflare.com/client/v4'
-    // Busca com prefixo normal E com prefixo codificado (compatibilidade com uploads antigos)
-    const encodedPrefix = encodeURIComponent(nome) + '%2F'
-    const [respNormal, respEncoded] = await Promise.all([
-      fetch(`${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?${new URLSearchParams({ prefix: `${nome}/`, per_page: '1000' })}`, { headers: r2Headers() }),
-      fetch(`${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?${new URLSearchParams({ prefix: encodedPrefix, per_page: '1000' })}`, { headers: r2Headers() }),
-    ])
-    if (!respNormal.ok) {
-      const txt = await respNormal.text().catch(() => '')
-      return res.status(502).json({ erro: `R2 ${respNormal.status}: ${txt.slice(0, 120)}` })
-    }
-    const dataNormal  = await respNormal.json()
-    const dataEncoded = respEncoded.ok ? await respEncoded.json() : { result: { objects: [] } }
-
-    const allObjects = [
-      ...(dataNormal.result?.objects  ?? []),
-      ...(dataEncoded.result?.objects ?? []),
-    ]
-    // Remove duplicatas por key
-    const seen = new Set()
-    const unique = allObjects.filter(o => { if (seen.has(o.key)) return false; seen.add(o.key); return true })
-    const prefix  = `${nome}/`
-    // Normaliza chaves com %2F de uploads antigos
-    const arquivos = unique
-      .map(obj => {
-        const normalKey = obj.key.replace(/%2F/gi, '/')
-        return {
-          key:       obj.key,
-          relPath:   normalKey.startsWith(prefix) ? normalKey.slice(prefix.length) : normalKey,
-          tamanho:   obj.size      || 0,
-          uploadedAt: obj.uploaded || null,
-        }
-      })
-      .filter(a => a.relPath && a.relPath !== nome)
-    const tamanhoTotal = arquivos.reduce((s, a) => s + a.tamanho, 0)
-    res.json({ nome, bucket, arquivos, total: arquivos.length, tamanhoTotal })
+    const prefix = `${nome}/`
+    const { objetos, truncado } = await listarObjetosR2S3(bucket, prefix)
+    const arquivos = objetos.map(obj => {
+      const normalKey = String(obj.key || '').replace(/%2F/gi, '/')
+      return {
+        key: obj.key,
+        relPath: normalKey.startsWith(prefix) ? normalKey.slice(prefix.length) : normalKey,
+        tamanho: Number(obj.size || 0),
+        uploadedAt: obj.uploaded || null,
+      }
+    }).filter(a => a.relPath)
+    const tamanhoTotal = arquivos.reduce((sum, a) => sum + a.tamanho, 0)
+    return res.json({ nome, bucket, arquivos, total: arquivos.length, tamanhoTotal, truncado })
   } catch (err) { next(err) }
 })
 
 /* ── DELETE /r2/:nome ────────────────────────────────────────── */
 router.delete('/r2/:nome', autenticar, async (req, res, next) => {
   try {
-    const { nome }  = req.params
-    const accountId = process.env.CF_ACCOUNT_ID
-    const bucket    = process.env.CF_R2_BUCKET
-    const token     = process.env.CF_API_TOKEN
+    const { nome } = req.params
+    const bucket = process.env.CF_R2_BUCKET
+    const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID
+    const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
+    if (!bucket || !accessKeyId || !secretAccessKey)
+      return res.status(500).json({ erro: 'Cloudflare/R2 S3 não configurado. Abra Integrações e APIs → Cloudflare → R2 Storage.' })
 
-    if (!accountId || !bucket || !token)
-      return res.status(500).json({ erro: 'Cloudflare/R2 não configurado. Abra Integrações e APIs → Cloudflare.' })
-
-    const CF_BASE   = 'https://api.cloudflare.com/client/v4'
-    // Lista todos os objetos com o prefixo do projeto (normal + encoded)
-    const prefixos  = [`${nome}/`, encodeURIComponent(nome) + '%2F']
-    let   allKeys   = []
-
-    for (const prefix of prefixos) {
-      const listResp = await fetch(
-        `${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects?${new URLSearchParams({ prefix, per_page: '1000' })}`,
-        { headers: r2Headers() }
-      ).catch(() => null)
-      if (listResp?.ok) {
-        const data = await listResp.json().catch(() => ({}))
-        for (const obj of (data.result?.objects ?? [])) {
-          if (!allKeys.includes(obj.key)) allKeys.push(obj.key)
-        }
-      }
-    }
-
+    const { objetos } = await listarObjetosR2S3(bucket, `${nome}/`)
+    const allKeys = objetos.map(o => o.key).filter(Boolean)
     if (allKeys.length === 0)
       return res.status(404).json({ erro: `Projeto "${nome}" não encontrado no R2.` })
 
-    // Deleta todos em lotes de 20
-    const DEL_BATCH = 20
+    const s3 = r2S3Client()
     let deletados = 0
-    for (let i = 0; i < allKeys.length; i += DEL_BATCH) {
-      await Promise.all(allKeys.slice(i, i + DEL_BATCH).map(async key => {
-        const keyPath = key.split('/').map(encodeURIComponent).join('/')
-        const delResp = await fetch(
-          `${CF_BASE}/accounts/${accountId}/r2/buckets/${bucket}/objects/${keyPath}`,
-          { method: 'DELETE', headers: r2Headers() }
-        ).catch(() => null)
-        if (delResp?.ok || delResp?.status === 204) deletados++
+    for (let i = 0; i < allKeys.length; i += 1000) {
+      const lote = allKeys.slice(i, i + 1000)
+      const result = await s3.send(new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: lote.map(Key => ({ Key })), Quiet: true },
       }))
+      deletados += lote.length - (result.Errors?.length || 0)
     }
 
     res.json({ ok: true, nome, deletados, mensagem: `Projeto "${nome}" removido do R2 (${deletados} arquivos).` })
@@ -2111,7 +2092,7 @@ router.get('/:nome/commit-status', autenticar, async (req, res) => {
      8. registrando               ( 94%)
      9. concluido                  (100%)
 ────────────────────────────────────────────────────────────── */
-router.get('/:nome/commit-stream', autenticar, async (req, res) => {
+async function commitStreamHandler(req, res) {
   /* ── Cabeçalhos SSE ──────────────────────────────────────── */
   res.setHeader('Content-Type',              'text/event-stream')
   res.setHeader('Cache-Control',             'no-cache, no-transform')
@@ -2150,9 +2131,11 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
   /* ════════════════════════════════════════════════════════════
      PIPELINE DE COMMIT + PUSH NARRADO
   ════════════════════════════════════════════════════════════ */
-  const { nome }   = req.params
-  const { message, branch: branchParam, autor, force, destPath: destPathParam, fonte } = req.query
-  const isGridFS   = fonte === 'gridfs'
+  const { nome } = req.params
+  const input = req.method === 'POST' ? (req.body || {}) : (req.query || {})
+  const { message, branch: branchParam, autor, force, destPath: destPathParam, fonte } = input
+  const isGridFS = fonte === 'gridfs'
+  const isR2 = fonte === 'r2'
   const destPath   = (destPathParam || '').replace(/^\/|\/$/g, '').trim()  // ex: "projetos/meu-app"
 
   try {
@@ -2198,16 +2181,26 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
     // Verificar fonte dos arquivos
     let dirPath = null
     if (isGridFS) {
-      // GridFS — verifica se projeto existe no bucket
-      const bucket   = gridBucket()
+      const bucket = gridBucket()
       const existentes = await bucket.find({ 'metadata.projetoNome': nome }).limit(1).toArray()
       if (!existentes.length) {
         narrar(`Projeto "${nome}" não encontrado no GridFS.`, 'error')
         return done('error', { msg: `Projeto "${nome}" não existe no GridFS.` })
       }
       narrar(`Fonte: MongoDB GridFS · projeto "${nome}" encontrado`)
+    } else if (isR2) {
+      const bucket = process.env.CF_R2_BUCKET
+      if (!bucket || !process.env.CF_R2_ACCESS_KEY_ID || !process.env.CF_R2_SECRET_ACCESS_KEY) {
+        narrar('Cloudflare R2 não está configurado para leitura S3.', 'error')
+        return done('error', { msg: 'R2 não configurado em Integrações e APIs.' })
+      }
+      const probe = await r2S3Client().send(new ListObjectsV2Command({ Bucket: bucket, Prefix: `${nome}/`, MaxKeys: 1 }))
+      if (!(probe.Contents || []).length) {
+        narrar(`Projeto "${nome}" não encontrado no R2.`, 'error')
+        return done('error', { msg: `Projeto "${nome}" não existe no R2.` })
+      }
+      narrar(`Fonte: Cloudflare R2 · ${bucket}/${nome}/`)
     } else {
-      // Local filesystem
       dirPath = path.join(PROJETOS_DIR, nome)
       if (!fs.existsSync(dirPath)) {
         narrar(`Diretório local "${nome}" não encontrado em projetos/`, 'error')
@@ -2232,60 +2225,42 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
     narrar(`Repositório: ${repoData.full_name}`)
     narrar(`Branch de destino: ${targetBranch} · visibilidade: ${repoData.private ? 'privado' : 'público'}`)
 
-    // Obter SHA atual da branch (commit HEAD)
-    let refData
+    // Obter SHA atual da branch (commit HEAD). Repositórios recém-criados não
+    // possuem ref ainda; nesse caso o primeiro commit cria a branch do zero.
+    let headCommitSha = null
+    let baseTreeSha = null
+    let emptyBranch = false
+    let githubTreeMap = new Map()
     try {
-      refData = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${targetBranch}`)
-    } catch (err) {
-      if (err.status === 404) {
-        narrar(`Branch "${targetBranch}" não encontrada no repositório.`, 'error')
-        return done('error', { msg: `Branch "${targetBranch}" não existe em ${owner}/${repo}.` })
+      const refData = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${targetBranch}`)
+      headCommitSha = refData.object.sha
+      narrar(`HEAD atual da branch: ${headCommitSha.slice(0, 7)}`)
+
+      const ultimoCommitLocal = doc?.metadados?.ultimoCommitSha
+      if (ultimoCommitLocal && ultimoCommitLocal !== headCommitSha) {
+        narrar(`⚠ Divergência detectada: GitHub avançou desde o último commit registrado (${ultimoCommitLocal.slice(0, 7)} → ${headCommitSha.slice(0, 7)}).`, 'warn')
       }
-      narrar(`Erro ao obter referência da branch: ${err.message}`, 'error')
-      return done('error', { msg: err.message })
-    }
 
-    const headCommitSha = refData.object.sha
-    narrar(`HEAD atual da branch: ${headCommitSha.slice(0, 7)}`)
-
-    /* ── Verificar divergência com último commit local ────────── */
-    const ultimoCommitLocal = doc?.metadados?.ultimoCommitSha
-    if (ultimoCommitLocal && ultimoCommitLocal !== headCommitSha) {
-      narrar(
-        `⚠ Divergência detectada: o GitHub avançou desde o último commit registrado ` +
-        `(local: ${ultimoCommitLocal.slice(0, 7)} → remoto: ${headCommitSha.slice(0, 7)}). ` +
-        `Pode haver mudanças no GitHub não presentes localmente.`,
-        'warn'
-      )
-    }
-
-    // Obter tree SHA do commit HEAD
-    let headCommitData
-    try {
-      headCommitData = await githubFetch(`/repos/${owner}/${repo}/git/commits/${headCommitSha}`)
-    } catch (err) {
-      narrar(`Erro ao obter dados do commit HEAD: ${err.message}`, 'error')
-      return done('error', { msg: err.message })
-    }
-
-    const baseTreeSha = headCommitData.tree.sha
-    narrar(`Tree base: ${baseTreeSha.slice(0, 7)}`)
-
-    /* ── Buscar tree atual do GitHub para diff ───────────────── */
-    narrar('Buscando tree atual do GitHub para detectar mudanças...')
-    let githubTreeMap = new Map() // path → sha (blobs atuais no GitHub)
-    try {
-      const treeData = await githubFetch(
-        `/repos/${owner}/${repo}/git/trees/${baseTreeSha}?recursive=1`
-      )
-      for (const item of treeData.tree) {
-        if (item.type === 'blob') githubTreeMap.set(item.path, item.sha)
+      const headCommitData = await githubFetch(`/repos/${owner}/${repo}/git/commits/${headCommitSha}`)
+      baseTreeSha = headCommitData.tree.sha
+      narrar(`Tree base: ${baseTreeSha.slice(0, 7)}`)
+      try {
+        const treeData = await githubFetch(`/repos/${owner}/${repo}/git/trees/${baseTreeSha}?recursive=1`)
+        for (const item of treeData.tree || []) if (item.type === 'blob') githubTreeMap.set(item.path, item.sha)
+        narrar(`Tree remota carregada: ${githubTreeMap.size} arquivo(s) indexado(s)`)
+      } catch (err) {
+        narrar(`Não foi possível carregar a tree remota, enviando todos os arquivos: ${err.message}`, 'warn')
+        githubTreeMap = null
       }
-      narrar(`Tree remota carregada: ${githubTreeMap.size} arquivo(s) indexado(s)`)
     } catch (err) {
-      // Não bloqueia — degradação graciosa: envia tudo se não conseguir a tree
-      narrar(`Não foi possível carregar a tree remota, enviando todos os arquivos: ${err.message}`, 'warn')
-      githubTreeMap = null
+      if (err.status === 404 || err.status === 409) {
+        emptyBranch = true
+        githubTreeMap = new Map()
+        narrar(`Branch "${targetBranch}" ainda não existe. O primeiro commit criará a branch automaticamente.`, 'info')
+      } else {
+        narrar(`Erro ao consultar a branch: ${err.message}`, 'error')
+        return done('error', { msg: `GitHub inacessível: ${err.message}` })
+      }
     }
 
     /* ── Resolver autor do commit ────────────────────────────── */
@@ -2316,7 +2291,6 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
       narrar(`Lendo arquivos do GridFS para "${nome}"...`)
       const bucket = gridBucket()
       const files  = await bucket.find({ 'metadata.projetoNome': nome }).toArray()
-
       const ignoradosGridFS = []
       const arquivosBrutos = files.map(f => ({
         relPath: caminhoSeguroProjeto(f.metadata?.relPath || f.filename.replace(`${nome}/`, '')),
@@ -2324,40 +2298,40 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
         absPath: null,
         gridFSId: f._id,
       }))
-
-      // Corrige também projetos antigos que já foram salvos no GridFS
-      // com uma pasta invólucro (ex.: alsistemas/alsistemas/... ).
       const normalizacaoLegada = removerPastasInvólucro(arquivosBrutos.map(f => f.relPath))
-      if (normalizacaoLegada.prefixoRemovido) {
-        narrar(`Estrutura corrigida antes do commit: removida pasta invólucro "${normalizacaoLegada.prefixoRemovido}/"`, 'warn')
-      }
-
-      arquivosLocais = arquivosBrutos
-        .map((f, i) => {
-          const relPath = normalizacaoLegada.paths[i]
-          const ext     = relPath.split('.').pop().toLowerCase()
-          const binario = COMMIT_EXTENSOES_BINARIAS.has(ext)
-          return { ...f, relPath, binario }
-        })
-        .filter(f => {
-          if (!f.relPath || f.relPath.startsWith('..')) return false
-          // Aplica as mesmas regras de segurança do commit local
-          const segmentos = f.relPath.split('/')
-          if (segmentos.some(seg => COMMIT_IGNORADOS.has(seg))) {
-            ignoradosGridFS.push(f.relPath)
-            return false
-          }
-          const ext = f.relPath.split('.').pop().toLowerCase()
-          if (COMMIT_EXTENSOES_IGNORADAS.has(ext)) {
-            ignoradosGridFS.push(f.relPath)
-            return false
-          }
-          return true
-        })
-
-      if (ignoradosGridFS.length > 0)
-        narrar(`${ignoradosGridFS.length} arquivo(s) ignorado(s) por segurança (ex: .env, node_modules): ${ignoradosGridFS.slice(0, 5).join(', ')}${ignoradosGridFS.length > 5 ? '…' : ''}`, 'warn')
+      if (normalizacaoLegada.prefixoRemovido) narrar(`Estrutura corrigida antes do commit: removida pasta invólucro "${normalizacaoLegada.prefixoRemovido}/"`, 'warn')
+      arquivosLocais = arquivosBrutos.map((f, i) => {
+        const relPath = normalizacaoLegada.paths[i]
+        const ext = relPath.split('.').pop().toLowerCase()
+        return { ...f, relPath, binario: COMMIT_EXTENSOES_BINARIAS.has(ext) }
+      }).filter(f => {
+        if (!f.relPath || f.relPath.startsWith('..')) return false
+        const segmentos = f.relPath.split('/')
+        const ext = f.relPath.split('.').pop().toLowerCase()
+        if (segmentos.some(seg => COMMIT_IGNORADOS.has(seg)) || COMMIT_EXTENSOES_IGNORADAS.has(ext)) { ignoradosGridFS.push(f.relPath); return false }
+        return true
+      })
+      if (ignoradosGridFS.length > 0) narrar(`${ignoradosGridFS.length} arquivo(s) ignorado(s) por segurança: ${ignoradosGridFS.slice(0, 5).join(', ')}${ignoradosGridFS.length > 5 ? '…' : ''}`, 'warn')
       narrar(`${arquivosLocais.length} arquivo(s) elegíveis lidos do GridFS`)
+    } else if (isR2) {
+      narrar(`Lendo arquivos do R2 para "${nome}"...`)
+      const bucket = process.env.CF_R2_BUCKET
+      const { objetos } = await listarObjetosR2S3(bucket, `${nome}/`)
+      const ignoradosR2 = []
+      arquivosLocais = objetos.map(o => {
+        const normalKey = String(o.key || '').replace(/%2F/gi, '/')
+        const relPath = caminhoSeguroProjeto(normalKey.startsWith(`${nome}/`) ? normalKey.slice(nome.length + 1) : normalKey)
+        const ext = relPath.split('.').pop().toLowerCase()
+        return { relPath, bytes: Number(o.size || 0), absPath: null, r2Key: o.key, binario: COMMIT_EXTENSOES_BINARIAS.has(ext) }
+      }).filter(f => {
+        if (!f.relPath || f.relPath.startsWith('..')) return false
+        const segmentos = f.relPath.split('/')
+        const ext = f.relPath.split('.').pop().toLowerCase()
+        if (segmentos.some(seg => COMMIT_IGNORADOS.has(seg)) || COMMIT_EXTENSOES_IGNORADAS.has(ext)) { ignoradosR2.push(f.relPath); return false }
+        return true
+      })
+      if (ignoradosR2.length) narrar(`${ignoradosR2.length} arquivo(s) do R2 ignorado(s) por segurança.`, 'warn')
+      narrar(`${arquivosLocais.length} arquivo(s) elegíveis lidos do R2`)
     } else {
       narrar('Listando arquivos do projeto local...')
       arquivosLocais = listarArquivosCommit(dirPath)
@@ -2413,25 +2387,22 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
       let conteudo
       try {
         if (isGridFS) {
-          // Lê do GridFS via stream com timeout de 30s para evitar travamento
           const bucket = gridBucket()
           const chunks = []
           await new Promise((resolve, reject) => {
-            const dl      = bucket.openDownloadStream(arquivo.gridFSId)
-            const timeout = setTimeout(() => {
-              dl.destroy()
-              reject(new Error(`Timeout (30s) ao ler "${arquivo.relPath}" do GridFS`))
-            }, 30_000)
-            dl.on('data',  c   => chunks.push(c))
-            dl.on('end',   ()  => { clearTimeout(timeout); resolve() })
+            const dl = bucket.openDownloadStream(arquivo.gridFSId)
+            const timeout = setTimeout(() => { dl.destroy(); reject(new Error(`Timeout (30s) ao ler "${arquivo.relPath}" do GridFS`)) }, 30_000)
+            dl.on('data', c => chunks.push(c))
+            dl.on('end', () => { clearTimeout(timeout); resolve() })
             dl.on('error', err => { clearTimeout(timeout); reject(err) })
           })
           const buf = Buffer.concat(chunks)
-          if (arquivo.binario) {
-            conteudo = { content: buf.toString('base64'), encoding: 'base64' }
-          } else {
-            conteudo = { content: buf.toString('utf8'), encoding: 'utf-8' }
-          }
+          conteudo = arquivo.binario ? { content: buf.toString('base64'), encoding: 'base64' } : { content: buf.toString('utf8'), encoding: 'utf-8' }
+        } else if (isR2) {
+          const data = await r2S3Client().send(new GetObjectCommand({ Bucket: process.env.CF_R2_BUCKET, Key: arquivo.r2Key }))
+          if (!data.Body) throw new Error('R2 não retornou o conteúdo do objeto.')
+          const buf = Buffer.from(await data.Body.transformToByteArray())
+          conteudo = arquivo.binario ? { content: buf.toString('base64'), encoding: 'base64' } : { content: buf.toString('utf8'), encoding: 'utf-8' }
         } else if (arquivo.binario) {
           conteudo = { content: fs.readFileSync(arquivo.absPath).toString('base64'), encoding: 'base64' }
         } else {
@@ -2533,8 +2504,8 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
       novaTree = await githubFetch(`/repos/${owner}/${repo}/git/trees`, {
         method: 'POST',
         body: JSON.stringify({
-          base_tree: baseTreeSha,   // herda arquivos não alterados
-          tree:      treeItems,
+          ...(baseTreeSha ? { base_tree: baseTreeSha } : {}),
+          tree: treeItems,
         }),
       })
     } catch (err) {
@@ -2553,7 +2524,7 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
     const commitPayload  = {
       message: mensagem,
       tree:    novaTree.sha,
-      parents: [headCommitSha],
+      ...(headCommitSha ? { parents: [headCommitSha] } : {}),
       author:  { name: autorNome, email: autorEmail, date: agora },
       committer: { name: autorNome, email: autorEmail, date: agora },
     }
@@ -2578,13 +2549,17 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
     narrar(`Atualizando referência heads/${targetBranch} no GitHub...`)
 
     try {
-      await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${targetBranch}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          sha:   novoCommit.sha,
-          force: force === 'true',
-        }),
-      })
+      if (emptyBranch) {
+        await githubFetch(`/repos/${owner}/${repo}/git/refs`, {
+          method: 'POST',
+          body: JSON.stringify({ ref: `refs/heads/${targetBranch}`, sha: novoCommit.sha }),
+        })
+      } else {
+        await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${targetBranch}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ sha: novoCommit.sha, force: force === 'true' }),
+        })
+      }
     } catch (err) {
       // Erro mais comum: branch protegida requer PR
       const motivo = err.status === 422
@@ -2689,7 +2664,11 @@ router.get('/:nome/commit-stream', autenticar, async (req, res) => {
     narrar(`Erro inesperado no pipeline: ${err.message}`, 'error')
     done('error', { msg: err.message || 'Erro interno ao fazer commit.' })
   }
-})
+}
+
+// GET legado preservado para VPS/Termux e POST autenticado para Vercel → Render.
+router.get('/:nome/commit-stream', autenticar, commitStreamHandler)
+router.post('/:nome/commit-stream', autenticar, commitStreamHandler)
 
 export default router
 

@@ -22,7 +22,7 @@ import multer                  from 'multer'
 import { autenticar }          from '../middleware/auth.js'
 import { verificarPermissao }  from '../middleware/verificarPermissao.js'
 import { logger }              from '../utils/logger.js'
-import { S3Client, PutObjectCommand, ListBucketsCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, ListBucketsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { hydrateCloudflareEnv, getCloudflareConfig } from '../utils/cloudflareConfig.js'
 import { getCredential, setCredential } from '../utils/credentialStore.js'
 
@@ -666,24 +666,49 @@ router.delete('/r2/buckets/:bucket', async (req, res, next) => {
 router.get('/r2/buckets/:bucket/objects', async (req, res, next) => {
   try {
     const { bucket }  = req.params
-    const limit  = Math.min(1000, parseInt(req.query.limit  || '250'))
-    const prefix = req.query.prefix  || ''
-    const cursor = req.query.cursor  || ''
-    const delim  = req.query.delim   || ''    // '/' para navegação por pastas
+    const limit  = Math.min(1000, Math.max(1, parseInt(req.query.limit || '250') || 250))
+    const prefix = String(req.query.prefix || '')
+    const cursor = String(req.query.cursor || '')
+    const delim  = String(req.query.delim || '')
 
+    // Quando as credenciais S3 do R2 existem, use a API S3-compatible para listar.
+    // Ela é a mesma credencial usada pelo upload e evita depender do formato REST
+    // da Cloudflare, que passou a retornar `result` como array + `result_info`.
+    if (process.env.CF_R2_ACCESS_KEY_ID && process.env.CF_R2_SECRET_ACCESS_KEY) {
+      const data = await r2S3Client().send(new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix || undefined,
+        Delimiter: delim || undefined,
+        MaxKeys: limit,
+        ContinuationToken: cursor || undefined,
+      }))
+      return res.json({
+        objetos: (data.Contents || []).map(o => ({
+          key: o.Key,
+          size: o.Size || 0,
+          etag: String(o.ETag || '').replace(/^"|"$/g, ''),
+          uploaded: o.LastModified || null,
+          storage_class: o.StorageClass || null,
+        })),
+        prefixos: (data.CommonPrefixes || []).map(x => x.Prefix).filter(Boolean),
+        truncated: Boolean(data.IsTruncated),
+        cursor: data.NextContinuationToken || null,
+      })
+    }
+
+    // Fallback REST para instalações antigas que ainda não configuraram S3.
     const params = new URLSearchParams({ per_page: String(limit) })
     if (prefix) params.set('prefix', prefix)
     if (cursor) params.set('cursor', cursor)
     if (delim)  params.set('delimiter', delim)
-
-    const data = await cfFetch(
-      `/accounts/${accountId()}/r2/buckets/${bucket}/objects?${params}`
-    )
-    res.json({
-      objetos:      data.result?.objects      ?? [],
-      prefixos:     data.result?.delimited_prefixes ?? [],
-      truncated:    data.result?.truncated    ?? false,
-      cursor:       data.result?.cursor       ?? null,
+    const data = await cfFetch(`/accounts/${accountId()}/r2/buckets/${bucket}/objects?${params}`)
+    const info = data.result_info || {}
+    const objetos = Array.isArray(data.result) ? data.result : (data.result?.objects || [])
+    return res.json({
+      objetos,
+      prefixos: info.delimited || data.result?.delimited_prefixes || [],
+      truncated: Boolean(info.is_truncated ?? data.result?.truncated ?? false),
+      cursor: info.cursor || data.result?.cursor || null,
     })
   } catch (err) { next(err) }
 })

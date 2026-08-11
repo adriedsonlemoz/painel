@@ -99,6 +99,16 @@ ensureBootstrapSecrets()
 
 const app  = express()
 const PORT = process.env.PORT || 3001
+
+// Render/Vercel/Railway ficam atrás de proxy reverso. Sem trust proxy o
+// express-rate-limit interpreta X-Forwarded-For como configuração inválida.
+// Em Termux/local continua desligado; VPS pode ativar explicitamente via
+// TRUST_PROXY=1 quando estiver atrás de Nginx/Cloudflare/proxy confiável.
+const TRUST_PROXY = Boolean(
+  process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL ||
+  process.env.VERCEL || process.env.RAILWAY_ENVIRONMENT || process.env.TRUST_PROXY === '1'
+)
+if (TRUST_PROXY) app.set('trust proxy', 1)
 let APP_VERSION = 'desconhecida'
 try {
   APP_VERSION = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version || APP_VERSION

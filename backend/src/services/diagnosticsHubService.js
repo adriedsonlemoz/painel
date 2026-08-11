@@ -72,8 +72,15 @@ export async function renderSnapshot(){
     const results=await Promise.allSettled(services.slice(0,10).map(async s=>{
       const data=await readJson(`https://api.render.com/v1/services/${encodeURIComponent(s.id)}/deploys?limit=5`,h,9000)
       const ds=(Array.isArray(data)?data:[]).map(r=>r.deploy||r)
-      const bad=ds.find(d=>['build_failed','update_failed','canceled','deactivated','error'].includes(d.status))
-      return bad?{id:`render:${bad.id}`,source:'render',severity:['build_failed','update_failed','error'].includes(bad.status)?'critical':'warning',title:`${s.name} · ${bad.status}`,message:bad.commit?.message||'Deployment com problema.',createdAt:iso(bad.finishedAt||bad.createdAt),url:s.serviceDetails?.url||s.url||null,meta:{serviceId:s.id,ownerId:s.ownerId||s.owner_id||s.owner?.id||null,deployId:bad.id,service:s.name,repo:repoSlug(s.repo)||s.repo||null,sha:bad.commit?.id||null}}:null
+      // A lista vem do mais recente para o mais antigo. Um deploy antigo
+      // `deactivated`/`canceled` é normal quando uma versão posterior saudável
+      // assumiu o tráfego; só tratamos o estado mais recente relevante como falha.
+      const latest=ds[0]||null
+      const hardFail=['build_failed','update_failed','error'].includes(latest?.status)
+      const transientBad=['canceled','deactivated'].includes(latest?.status)
+      const newerHealthy=!latest?false:['live','succeeded','deployed','update_in_progress','build_in_progress','queued'].includes(latest.status)
+      const bad=(hardFail||transientBad) && !newerHealthy ? latest : null
+      return bad?{id:`render:${bad.id}`,source:'render',severity:hardFail?'critical':'warning',title:`${s.name} · ${bad.status}`,message:bad.commit?.message||'Deployment com problema.',createdAt:iso(bad.finishedAt||bad.createdAt),url:s.serviceDetails?.url||s.url||null,meta:{serviceId:s.id,ownerId:s.ownerId||s.owner_id||s.owner?.id||null,deployId:bad.id,service:s.name,repo:repoSlug(s.repo)||s.repo||null,sha:bad.commit?.id||null}}:null
     }))
     const events=results.filter(r=>r.status==='fulfilled'&&r.value).map(r=>r.value).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
     return {source:'render',configured:true,ok:events.length===0,label:'Render',summary:events.length?`${events.length} deploy(s) com problema`:'Deploys recentes saudáveis',events:events.slice(0,8)}

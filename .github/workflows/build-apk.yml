@@ -43,7 +43,7 @@ on:
           - release
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
   JAVA_VERSION: '17'
   WORKING_DIR: frontend
 
@@ -84,17 +84,23 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: 📦 Instalar dependências npm
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --prefer-offline
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 🔎 Conferir versões do Capacitor
+        run: npm ls @capacitor/core @capacitor/cli @capacitor/android tar --depth=2
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
-        run: npm run build
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          echo "Versão do pacote: $APP_VERSION"
+          VITE_APP_VERSION="$APP_VERSION" npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
           VITE_APP_NAME: AL Sistemas
           VITE_APP_TAGLINE: Painel de Gerenciamento
-          VITE_APP_VERSION: ${{ github.ref_name || 'dev' }}
 
       - name: 🔗 Configurar portal hospedado no Capacitor
         run: echo "WebView → $CAPACITOR_WEB_URL"
@@ -178,17 +184,23 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: 📦 Instalar dependências npm
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --prefer-offline
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 🔎 Conferir versões do Capacitor
+        run: npm ls @capacitor/core @capacitor/cli @capacitor/android tar --depth=2
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
-        run: npm run build
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          echo "Versão do pacote: $APP_VERSION"
+          VITE_APP_VERSION="$APP_VERSION" npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
           VITE_APP_NAME: AL Sistemas
           VITE_APP_TAGLINE: Painel de Gerenciamento
-          VITE_APP_VERSION: ${{ github.ref_name || 'release' }}
 
       - name: 🔗 Configurar portal hospedado no Capacitor
         run: echo "WebView → $CAPACITOR_WEB_URL"

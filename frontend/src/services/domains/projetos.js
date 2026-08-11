@@ -4,7 +4,45 @@
  * Sprint 3 — ADIÇÃO PURA.
  * Sprint 7 — GitHub Sync: vincular, desvincular, syncStatus, registrarSincronizacao.
  */
-import { api } from './http.js'
+import { api, BASE_URL, withAuthHeaders } from './http.js'
+
+async function uploadProjetoPersistente(destino, file, nomeProjeto, { substituir = false, onProgress } = {}) {
+  if (!['gridfs','r2'].includes(destino)) throw new Error('Destino persistente inválido.')
+  const endpoint = destino === 'r2' ? '/projetos/upload-r2' : '/projetos/upload-gridfs'
+  const form = new FormData()
+  form.append('zip', file)
+  form.append('nomeProjeto', nomeProjeto)
+  form.append('substituir', String(Boolean(substituir)))
+  const initial = await new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest()
+    xhr.open('POST', `${BASE_URL}${endpoint}`)
+    xhr.withCredentials=true
+    withAuthHeaders().forEach((value,key)=>xhr.setRequestHeader(key,value))
+    xhr.upload.onprogress=e=>{
+      if(e.lengthComputable)onProgress?.({phase:'upload',percent:Math.min(82,Math.round((e.loaded/e.total)*82)),loaded:e.loaded,total:e.total})
+    }
+    xhr.onerror=()=>reject(new Error(`Não foi possível conectar ao backend em ${BASE_URL}.`))
+    xhr.onload=()=>{
+      let data={};try{data=JSON.parse(xhr.responseText||'{}')}catch{}
+      if(xhr.status<200||xhr.status>=300)return reject(new Error(data.erro||`Erro ${xhr.status}`))
+      resolve(data)
+    }
+    xhr.send(form)
+  })
+  if(!initial?.jobId){onProgress?.({phase:'done',percent:100});return initial}
+  const statusPath=destino==='r2'?`/projetos/upload-r2/status/${encodeURIComponent(initial.jobId)}`:`/projetos/upload-gridfs/status/${encodeURIComponent(initial.jobId)}`
+  const deadline=Date.now()+15*60_000
+  while(Date.now()<deadline){
+    await new Promise(r=>setTimeout(r,850))
+    const job=await api(statusPath,{timeoutMs:15000})
+    const total=Number(job.total||initial.total||0), enviados=Number(job.enviados||0)
+    const pct=total?Math.round((enviados/total)*100):0
+    onProgress?.({phase:job.fase||'processando',percent:Math.max(83,Math.min(99,83+Math.round(pct*.16))),enviados,total})
+    if(['done','success'].includes(job.status)){onProgress?.({phase:'done',percent:100,enviados,total});return {...initial,...job}}
+    if(job.status==='error')throw new Error(job.msg||job.erro||'Falha ao processar o ZIP.')
+  }
+  throw new Error('O processamento do pacote excedeu 15 minutos.')
+}
 
 export const projetosService = {
   /* ── Originais (Sprint 3 — inalterados) ──────────────────── */
@@ -79,6 +117,9 @@ export const projetosService = {
   /** Upload de um .zip → extração em memória → GridFS (retorna { jobId, total, nomeProjeto }) */
   uploadGridFS: (formData) =>
     api('/projetos/upload-gridfs', { method: 'POST', body: formData, headers: {} }),
+
+  /** Upload persistente com progresso real para o novo fluxo GitHub. */
+  uploadPersistente: (destino, file, nomeProjeto, options = {}) => uploadProjetoPersistente(destino, file, nomeProjeto, options),
 
   /** Polling do progresso de um job de upload GridFS */
   uploadGridFSStatus: (jobId) =>

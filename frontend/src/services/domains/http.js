@@ -53,8 +53,10 @@ export async function probeCookieSession(timeoutMs = 5000) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(`${BASE_URL}/auth/me`, { credentials:'include', cache:'no-store', signal:controller.signal })
-    return res.ok
+    const res = await fetch(`${BASE_URL}/auth/cookie-probe`, { credentials:'include', cache:'no-store', signal:controller.signal })
+    if (!res.ok) return false
+    const data = await res.json().catch(() => ({}))
+    return data?.ok === true
   } catch { return false }
   finally { clearTimeout(timer) }
 }

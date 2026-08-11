@@ -18,7 +18,8 @@ import { githubService }   from '../../services/domains/github.js'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import { DSModal, DSBtn, DSAlert }      from '../../components/admin/ui/DS'
 import toast from 'react-hot-toast'
-import { authFetch } from '../../services/domains/http.js'
+import { authFetch, BASE_URL } from '../../services/domains/http.js'
+import { consumeSse } from '../../services/sseFetch.js'
 
 // ── Helpers ───────────────────────────────────────────────────
 function fmtBytes(b) {
@@ -459,25 +460,26 @@ function Passo3Push({ nomeProjeto, owner, repo, msgCommit, onConcluido }) {
   const logRef                    = useRef(null)
 
   const iniciar = useCallback(() => {
-    const q   = new URLSearchParams({ message: msgCommit, autor: '' })
-    const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:3001/api' : '/api')
-    const url  = `${base}/projetos/${encodeURIComponent(nomeProjeto)}/commit-stream?${q}`
-    const es   = new EventSource(url, { withCredentials: true })
-
-    es.onmessage = e => {
-      try {
-        const ev = JSON.parse(e.data)
+    const controller = new AbortController()
+    const url = `${BASE_URL}/projetos/${encodeURIComponent(nomeProjeto)}/commit-stream`
+    consumeSse(url, {
+      method: 'POST',
+      signal: controller.signal,
+      body: { message: msgCommit, autor: '' },
+      onEvent: ev => {
         if (ev.type === 'narration') {
           setLinhas(prev => [...prev, { msg: ev.msg, nivel: ev.nivel, ts: ev.ts || new Date().toISOString() }].slice(-500))
           requestAnimationFrame(() => logRef.current?.lastElementChild?.scrollIntoView({ behavior: 'smooth' }))
         }
         if (ev.type === 'step')  { setProg(ev.progresso || 0); setEtapa(ev.etapa || 'processando') }
         if (ev.type === 'files') setArquivos(ev.arquivos || [])
-        if (ev.type === 'done')  { setStatus(ev.status); setMsgFinal(ev.msg); es.close(); if (ev.status === 'success') onConcluido() }
-      } catch {}
-    }
-    es.onerror = () => { setStatus('error'); setMsgFinal('Conexão perdida.'); es.close() }
-    return () => es.close()
+        if (ev.type === 'done')  { setStatus(ev.status); setMsgFinal(ev.msg); if (ev.status === 'success') onConcluido() }
+      },
+    }).catch(err => {
+      if (err?.name === 'AbortError') return
+      setStatus('error'); setMsgFinal(err.message || 'Conexão perdida.')
+    })
+    return () => controller.abort()
   }, [nomeProjeto, msgCommit, onConcluido])
 
   useEffect(() => {

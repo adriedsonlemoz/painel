@@ -97,13 +97,11 @@ export default function AdminAtualizacoes(){
   async function prepare(){ if(!file)return toast.error('Selecione um pacote .zip.'); setUploading(true); setUploadProgress(0); try{
     const r=await updatesService.preparar(file,p=>setUploadProgress(p))
     const prepared=r.update
-    toast.success(`${prepared.packageType==='incremental'?'Atualização incremental':'Pacote completo'} ${prepared.version} validado.`)
     const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
     if(r.ephemeral||managedHost){
       if(r.ephemeral)setEphemeralStage(prepared)
       else { setEphemeralStage(null); setFile(null); setPackagePreview(null); await load({silent:true}) }
       setUiPanel(null)
-      if(prepared.cloudStored)toast.success('ZIP guardado no R2; você pode fechar o navegador sem perder a versão preparada.')
       // Em Render/Vercel a próxima etapa publica o pacote persistido no R2.
       await openGithubPublish(prepared)
     }else{
@@ -137,7 +135,6 @@ export default function AdminAtualizacoes(){
               poll.current=setTimeout(()=>window.location.reload(),900)
             }
           }else if(r.job.status==='completed'&&r.job.type==='github-publish'){
-            toast.success('Publicação concluída no GitHub.')
           }
           return
         }
@@ -173,7 +170,6 @@ export default function AdminAtualizacoes(){
           cloudRelease:rel,
         }))
         if(rel.productionReady){
-          toast.success(`AL Sistemas ${rel.version} está em produção na Vercel e Render.`)
           await load({silent:true})
           return
         }
@@ -349,7 +345,6 @@ export default function AdminAtualizacoes(){
     if(!checked?.github?.writable)return toast.error('O token do GitHub não tem permissão de escrita neste repositório.')
     if(!checked?.github?.branchExists){
       if(!checked?.github?.branchWillBeCreated)return toast.error('O GitHub não autorizou a criação desta branch. Revise o repositório e o token.')
-      toast.success(`A branch ${githubPublish.branch} não existe e será criada automaticamente durante a publicação.`)
     }
     const cfg={repository:githubPublish.repository,branch:githubPublish.branch,publishMode:githubPublish.publishMode}
     const stage=githubPublish.stage
@@ -368,7 +363,6 @@ export default function AdminAtualizacoes(){
           setJob(r.job)
           setEphemeralStage(null)
           setFile(null)
-          toast.success('Publicação de transição concluída no GitHub. As próximas versões usarão o R2 persistente.')
           await load({silent:true})
           return
         }
@@ -387,7 +381,6 @@ export default function AdminAtualizacoes(){
         setJob(r.job)
         setEphemeralStage(null)
         setFile(null)
-        toast.success('Commit publicado no GitHub. Acompanhando Vercel e Render…')
         if(r.release?.productionReady)await load({silent:true})
         else watchCloudRelease(stage.id)
       }else{
@@ -395,7 +388,6 @@ export default function AdminAtualizacoes(){
           ? await updatesService.publicarAtualGitHub(cfg)
           : await updatesService.publicarGitHub(stage.id,cfg)
         setGithubPublish(null)
-        toast.success(sourceType==='installed'?'Publicação da versão instalada iniciada.':'Publicação no GitHub iniciada.')
         watch(r.job.id,'github-publish')
       }
     }catch(e){
@@ -620,7 +612,8 @@ export default function AdminAtualizacoes(){
       .updates-progress-modal{width:min(650px,calc(100vw - 24px));max-height:90vh;overflow:auto;padding:0!important}.updates-progress-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:20px 20px 14px}.updates-progress-embedded{margin:0 20px;padding-bottom:4px}.updates-progress-close{border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);width:34px;height:34px;border-radius:10px;font-size:22px;line-height:1;cursor:pointer;flex:0 0 auto}.updates-progress-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px 20px;color:var(--adm-muted);font-size:12px}
       .updates-cloud-progress-modal{width:min(780px,calc(100vw - 24px))}.updates-cloud-pipeline{margin:0 20px;display:grid;gap:12px}.updates-cloud-summary{display:flex;justify-content:space-between;gap:12px;align-items:flex-end}.updates-cloud-summary>div{display:grid;gap:3px}.updates-cloud-summary span{font-size:9px;font-weight:900;letter-spacing:.12em;color:var(--adm-muted)}.updates-cloud-summary b{font-size:14px;color:var(--adm-text)}.updates-cloud-summary strong{font-size:23px;color:#2563eb}.updates-cloud-track{height:9px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.updates-cloud-track i{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .35s ease}.updates-cloud-chain{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;font-weight:900}.updates-cloud-chain>span{padding:5px 8px;border:1px solid var(--adm-border);border-radius:999px;color:var(--adm-muted);background:var(--adm-surface2)}.updates-cloud-chain>span.ok{color:#16803d;border-color:#16a34a55;background:#16a34a0a}.updates-cloud-chain>span.run{color:#2563eb;border-color:#3b82f655;background:#3b82f60a}.updates-cloud-chain>span.bad{color:#dc2626;border-color:#ef444455;background:#ef44440a}.updates-cloud-chain>span.warn{color:#b7791f;border-color:#f59e0b55;background:#f59e0b0a}.updates-cloud-chain i{font-style:normal;color:var(--adm-muted)}.updates-cloud-grid{display:grid;grid-template-columns:1fr;gap:9px}.updates-cloud-stage{min-width:0;padding:13px;border:1px solid var(--adm-border);border-radius:13px;background:var(--adm-surface2)}.updates-cloud-stage.ok{border-color:#16a34a55}.updates-cloud-stage.run{border-color:#3b82f666}.updates-cloud-stage.bad{border-color:#ef444466}.updates-cloud-stage.warn{border-color:#f59e0b66}.updates-cloud-stage-top{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:9px;align-items:center}.updates-cloud-stage-number{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--adm-border);border-radius:9px;font-weight:900;color:var(--adm-muted);background:var(--adm-surface)}.updates-cloud-stage.ok .updates-cloud-stage-number{color:#16a34a;border-color:#16a34a55}.updates-cloud-stage.run .updates-cloud-stage-number{color:#2563eb;border-color:#3b82f655}.updates-cloud-stage.bad .updates-cloud-stage-number{color:#dc2626;border-color:#ef444455}.updates-cloud-stage.warn .updates-cloud-stage-number{color:#b7791f;border-color:#f59e0b55}.updates-cloud-stage-top>div{min-width:0;display:grid;gap:1px}.updates-cloud-stage-top b{font-size:12px;color:var(--adm-text)}.updates-cloud-stage-top small{font-size:9px;color:var(--adm-muted)}.updates-cloud-stage-status{font-size:9px;font-weight:900;padding:5px 7px;border-radius:999px;background:var(--adm-surface);color:var(--adm-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.updates-stage-progress{height:7px;border-radius:999px;background:var(--adm-surface);overflow:hidden;margin-top:11px}.updates-stage-progress i{display:block;height:100%;border-radius:inherit;background:#94a3b8;transition:width .35s ease}.updates-cloud-stage.ok .updates-stage-progress i{background:#16a34a}.updates-cloud-stage.run .updates-stage-progress i{background:#2563eb}.updates-cloud-stage.bad .updates-stage-progress i{background:#dc2626}.updates-cloud-stage.warn .updates-stage-progress i{background:#f59e0b}.updates-stage-progress-label{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-top:7px}.updates-stage-progress-label span{font-size:10px;line-height:1.4;color:var(--adm-muted)}.updates-stage-progress-label b{font-size:10px;color:var(--adm-text);white-space:nowrap}.updates-cloud-stage-meta{margin-top:8px;padding-top:8px;border-top:1px solid var(--adm-border);display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--adm-muted)}.updates-cloud-stage-meta code{font-size:9px;overflow-wrap:anywhere}.updates-cloud-stage-meta a{color:#2563eb;font-weight:800;text-decoration:none}.updates-cloud-mini-steps{display:grid;gap:4px;margin-top:8px;font-size:9px;color:var(--adm-muted)}.updates-cloud-error{padding:10px;border-radius:10px;border:1px solid #ef444466;background:#ef44440a;color:#dc2626;font-size:11px}.updates-cloud-footnote{font-size:10px;line-height:1.45;color:var(--adm-muted);padding-bottom:2px}.updates-progress-footer-clean{justify-content:flex-start;border-top:1px solid var(--adm-border);margin-top:12px;padding-top:12px}
       @media(max-width:760px){.updates-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-status-pill{display:none}}
-      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:12px 10px;gap:8px}.updates-command-icon{width:31px;height:31px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:0;align-items:flex-end;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0;border-bottom:0;padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0}.updates-cloud-pipeline{margin:0 14px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}}
+      .updates-cloud-wizard{max-width:560px;margin:0 auto;padding:0 20px 10px}.updates-cloud-wizard-dots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.updates-cloud-wizard-dots>span{min-width:0;display:grid;justify-items:center;gap:4px;color:var(--adm-muted)}.updates-cloud-wizard-dots i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-style:normal;font-size:9px;font-weight:900}.updates-cloud-wizard-dots small{font-size:7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.updates-cloud-wizard-dots .active i{border-color:#3b82f6;color:#2563eb;box-shadow:0 0 0 3px #3b82f611}.updates-cloud-wizard-dots .ok i{border-color:#16a34a55;color:#16a34a;background:#16a34a0a}.updates-cloud-wizard-dots .bad i{border-color:#ef444466;color:#dc2626}.updates-cloud-current{display:grid;gap:10px;align-content:start}.updates-cloud-current .updates-cloud-stage{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:center}.updates-cloud-current-caption{text-align:center;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-cloud-finish{min-height:250px;display:grid;justify-items:center;align-content:center;gap:8px;text-align:center;padding:20px}.updates-cloud-finish-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:#16a34a12;color:#16a34a;font-size:28px;font-weight:900}.updates-cloud-finish h3{margin:0;color:var(--adm-text);font-size:18px}.updates-cloud-finish p{margin:0;max-width:390px;font-size:11px;line-height:1.5;color:var(--adm-muted)}.updates-cloud-finish-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:5px}.updates-cloud-finish-list span{font-size:8px;font-weight:850;padding:5px 7px;border-radius:999px;border:1px solid #16a34a44;color:#16803d;background:#16a34a08}.updates-progress-overlay{align-items:center!important;justify-content:center!important;padding:14px!important}.updates-cloud-progress-modal{max-height:88dvh!important}
+      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:12px 10px;gap:8px}.updates-command-icon{width:31px;height:31px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:0;align-items:flex-end;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0;border-bottom:0;padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}}
       @media(max-width:390px){.updates-command small{font-size:9px}.updates-command b{font-size:12px}.updates-overview>div{padding:9px}}
     `}</style>
   </div>
@@ -832,27 +825,41 @@ function CloudPublishProgress({job}){
     :{tone:'run',icon:'●',label:'Preparando pacote',detail:'Validando a atualização e salvando o ZIP no armazenamento persistente.',progress:Math.min(95,Number(job.progress||0))}
   const githubProgress=hasCommit?100:failed?100:Math.max(8,Math.min(94,Math.round(((Number(job.progress||28)-20)/72)*100)))
   const ghState=hasCommit
-    ?{tone:'ok',icon:'✓',label:'Commit publicado',detail:'Código enviado ao GitHub. Vercel e Render já podem implantar este SHA.',progress:100}
+    ?{tone:'ok',icon:'✓',label:'Commit publicado',detail:'Código enviado ao GitHub. As plataformas já podem implantar este SHA.',progress:100}
     :failed?{tone:'bad',icon:'✕',label:'Falhou',detail:'A publicação no GitHub não foi concluída.',progress:100}
     :{tone:'run',icon:'●',label:'Publicando',detail:'Comparando a release, criando o commit e enviando a branch.',progress:githubProgress}
-  const stages=[r2State,ghState,vercel,render]
-  const completedCount=stages.filter(s=>s.tone==='ok').length
-  const overall=done?100:Math.round(stages.reduce((sum,s)=>sum+Number(s.progress||0),0)/4)
-  return <div className="updates-cloud-pipeline">
+
+  const stages=[
+    {number:'1',name:'Atualização principal',subtitle:'Pacote e R2',state:r2State,meta:(job.objectKey||rel.objectKey)?<><span>{job.bucket||rel.bucket||'bucket'}</span><code>{job.objectKey||rel.objectKey}</code></>:null},
+    {number:'2',name:'GitHub',subtitle:'Repositório e commit',state:ghState,meta:hasCommit?<><code>{String(job.commitSha||rel.commitSha).slice(0,12)}</code>{(job.commitUrl||rel.commitUrl)&&<a href={job.commitUrl||rel.commitUrl} target="_blank" rel="noreferrer">Abrir commit ↗</a>}</>:null,children:!hasCommit&&Array.isArray(job.timeline)&&job.timeline.length>0?<div className="updates-cloud-mini-steps">{job.timeline.slice(-3).map((x,i)=><span key={`${x.key}-${i}`}>{i===job.timeline.slice(-3).length-1?'●':'✓'} {x.label||STEP_LABELS[x.key]||x.key}</span>)}</div>:null},
+    {number:'3',name:'Vercel',subtitle:'Frontend',state:vercel,meta:<><span>{rel.vercel?.checkedAt?`Consultado às ${new Date(rel.vercel.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.vercel?.url&&<a href={rel.vercel.url} target="_blank" rel="noreferrer">Abrir produção ↗</a>}</>},
+    {number:'4',name:'Render',subtitle:'Backend',state:render,meta:<><span>{rel.render?.checkedAt?`Consultado às ${new Date(rel.render.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.render?.url&&<a href={rel.render.url} target="_blank" rel="noreferrer">Abrir backend ↗</a>}</>},
+  ]
+  const completedCount=stages.filter(s=>s.state.tone==='ok').length
+  const overall=done?100:Math.round(stages.reduce((sum,s)=>sum+Number(s.state.progress||0),0)/4)
+  let activeIndex=stages.findIndex(s=>s.state.tone!=='ok')
+  if(activeIndex<0)activeIndex=3
+  if(failed){const bad=stages.findIndex(s=>s.state.tone==='bad');if(bad>=0)activeIndex=bad}
+  const current=stages[activeIndex]
+
+  return <div className="updates-cloud-pipeline updates-cloud-wizard">
     <div className="updates-cloud-summary">
-      <div><span>ATUALIZAÇÃO {job.version||rel.version?`AL SISTEMAS ${job.version||rel.version}`:'EM PRODUÇÃO'}</span><b>{done?'Produção atualizada':failed?'Atualização com falha':`${completedCount} de 4 etapas concluídas`}</b></div><strong>{overall}%</strong>
+      <div><span>{job.version||rel.version?`AL SISTEMAS ${job.version||rel.version}`:'ATUALIZAÇÃO EM PRODUÇÃO'}</span><b>{done?'Produção atualizada':failed?'Atualização com falha':`Etapa ${activeIndex+1} de 4`}</b></div><strong>{overall}%</strong>
     </div>
     <div className="updates-cloud-track"><i style={{width:`${overall}%`}}/></div>
-    <div className="updates-cloud-grid">
-      <CloudStage number="1" name="Atualização principal" subtitle="Pacote e R2" state={r2State} meta={(job.objectKey||rel.objectKey)?<><span>{job.bucket||rel.bucket||'bucket'}</span><code>{job.objectKey||rel.objectKey}</code></>:null}/>
-      <CloudStage number="2" name="Publicando no GitHub" subtitle="Repositório e commit" state={ghState} meta={hasCommit?<><code>{String(job.commitSha||rel.commitSha).slice(0,12)}</code>{(job.commitUrl||rel.commitUrl)&&<a href={job.commitUrl||rel.commitUrl} target="_blank" rel="noreferrer">Abrir commit ↗</a>}</>:null}>
-        {!hasCommit&&Array.isArray(job.timeline)&&job.timeline.length>0&&<div className="updates-cloud-mini-steps">{job.timeline.slice(-4).map((x,i)=><span key={`${x.key}-${i}`}>{i===job.timeline.slice(-4).length-1?'●':'✓'} {x.label||STEP_LABELS[x.key]||x.key}</span>)}</div>}
-      </CloudStage>
-      <CloudStage number="3" name="Vercel" subtitle="Frontend" state={vercel} meta={<><span>{rel.vercel?.checkedAt?`Consultado às ${new Date(rel.vercel.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.vercel?.url&&<a href={rel.vercel.url} target="_blank" rel="noreferrer">Abrir produção ↗</a>}</>}/>
-      <CloudStage number="4" name="Render" subtitle="Backend" state={render} meta={<><span>{rel.render?.checkedAt?`Consultado às ${new Date(rel.render.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.render?.url&&<a href={rel.render.url} target="_blank" rel="noreferrer">Abrir backend ↗</a>}</>}/>
+    <div className="updates-cloud-wizard-dots">
+      {stages.map((stage,i)=><span key={stage.name} className={`${stage.state.tone==='ok'?'ok':''} ${i===activeIndex&&!done?'active':''} ${stage.state.tone==='bad'?'bad':''}`} title={`${stage.name}: ${stage.state.label}`}><i>{stage.state.tone==='ok'?'✓':i+1}</i><small>{stage.name}</small></span>)}
     </div>
+    {done ? <div className="updates-cloud-finish">
+      <div className="updates-cloud-finish-icon">✓</div>
+      <h3>Atualização concluída</h3>
+      <p>R2, GitHub, Vercel e Render confirmaram o fluxo desta versão.</p>
+      <div className="updates-cloud-finish-list">{stages.map(s=><span key={s.name}>✓ {s.name}</span>)}</div>
+    </div> : <div className="updates-cloud-current">
+      <CloudStage number={current.number} name={current.name} subtitle={current.subtitle} state={current.state} meta={current.meta}>{current.children}</CloudStage>
+      <div className="updates-cloud-current-caption">{completedCount} de 4 etapa(s) concluída(s). A próxima tela aparece automaticamente quando esta etapa terminar.</div>
+    </div>}
     {job.error&&<div className="updates-cloud-error"><b>Falha da etapa:</b> {job.error}</div>}
-    <div className="updates-cloud-footnote">Cada card termina em 100% separadamente. A atualização geral só conclui quando o pacote estiver preservado, o commit estiver no GitHub e as plataformas vinculadas confirmarem a produção.</div>
   </div>
 }
 

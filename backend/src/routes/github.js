@@ -243,35 +243,55 @@ async function montarRepoInsight(owner, repo, branch='main') {
    POST /api/github/repos/criar
    Body: { nome, descricao?, privado?, org? }
 ═══════════════════════════════════════════════════════════ */
+router.get('/orgs', autenticar, async (_req, res) => {
+  try {
+    const orgs = await githubFetch('/user/orgs?per_page=100')
+    res.json({ orgs: Array.isArray(orgs) ? orgs.map(o => ({ login:o.login, avatar:o.avatar_url, descricao:o.description||'' })) : [] })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
 router.post('/repos/criar', autenticar, async (req, res) => {
-  const { nome, descricao = '', privado = true, org } = req.body
+  const {
+    nome, descricao = '', privado = true, org, homepage = '',
+    issues = true, projects = true, wiki = false, discussions = false,
+  } = req.body || {}
   if (!nome || !/^[a-zA-Z0-9._-]{1,100}$/.test(nome))
     return res.status(400).json({ erro: 'Nome de repositório inválido.' })
+  if (org && !/^[a-zA-Z0-9._-]{1,100}$/.test(String(org)))
+    return res.status(400).json({ erro: 'Organização GitHub inválida.' })
 
   try {
     const endpoint = org ? `/orgs/${org}/repos` : '/user/repos'
     const repo = await githubFetch(endpoint, {
       method: 'POST',
       body: JSON.stringify({
-        name:         nome,
-        description:  descricao,
-        private:      privado,
-        auto_init:    false,  // não cria README — o commit-stream vai inicializar
+        name: nome,
+        description: String(descricao || '').slice(0, 350),
+        homepage: String(homepage || '').trim() || undefined,
+        private: Boolean(privado),
+        has_issues: Boolean(issues),
+        has_projects: Boolean(projects),
+        has_wiki: Boolean(wiki),
+        has_discussions: Boolean(discussions),
+        auto_init: false,
       }),
     })
     res.json({
-      ok:           true,
+      ok: true,
       nomeCompleto: repo.full_name,
-      owner:        repo.owner.login,
-      repo:         repo.name,
-      url:          repo.html_url,
-      privado:      repo.private,
+      owner: repo.owner.login,
+      repo: repo.name,
+      url: repo.html_url,
+      privado: repo.private,
+      defaultBranch: repo.default_branch || 'main',
+      descricao: repo.description || '',
+      homepage: repo.homepage || '',
     })
   } catch (err) {
     const status = err.status || 500
-    const msg = status === 422
-      ? `Já existe um repositório com o nome "${nome}" nessa conta.`
-      : err.message
+    const msg = status === 422 ? `Não foi possível criar "${nome}". O nome pode já existir ou alguma opção não é permitida pela conta.` : err.message
     res.status(status).json({ erro: msg })
   }
 })

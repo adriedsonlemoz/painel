@@ -1,16 +1,19 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.101",
+  "version": "1.0.103",
   "packageFormat": 2,
   "changelog": [
-    "GitHub recebe uma Central do Repositório visualmente alinhada à Central de Atualizações, com cards maiores, ícones, títulos e descrições curtas.",
-    "No celular, as opções internas do repositório permanecem em 3 cards por linha, conforme o padrão solicitado; desktop usa grade mais ampla e responsiva.",
-    "As ações são organizadas em Projeto, Código e Automação e produção; cada card continua abrindo seu conteúdo em modal/drawer sem expandir a página para baixo.",
-    "O topo do repositório ganha card de estado GitHub conectado com conta/repositório e branch atual, aproximando a linguagem visual dos demais hubs do painel.",
-    "A área vazia inferior foi substituída por resumo compacto de Branch, Linguagem, Tamanho e Último push.",
-    "Excluir repositório deixa de competir visualmente com ações comuns e passa para o menu Mais (⋮), mantendo a confirmação destrutiva existente.",
-    "Baixar projeto e Publicar continuam no cabeçalho e todas as funcionalidades GitHub/R2/Vercel/Render permanecem inalteradas.",
-    "Versão interna, manifesto do atualizador, frontend, backend, Setup e backup/exportação foram sincronizados em 1.0.101."
+    "GitHub ganha Novo projeto na página principal: um assistente centralizado cria o repositório, coleta dados do GitHub, recebe um ZIP, prepara os arquivos e só então libera o primeiro commit.",
+    "O novo assistente foi dividido em telas curtas para celular: Projeto → Detalhes → Arquivos → Revisão → Commit → Pronto, com R2 como armazenamento cloud recomendado e GridFS como alternativa persistente.",
+    "Novo projeto GitHub permite escolher conta pessoal ou organização, nome, visibilidade, descrição, homepage, Issues, Projects, Wiki e Discussions antes de criar o repositório vazio.",
+    "Uploads do novo projeto mostram progresso real; após a descompactação o AL exibe uma prévia dos arquivos, branch, pasta de destino e mensagem antes de qualquer commit.",
+    "R2 corrige a listagem de objetos enviados: navegador Cloudflare e Projetos passam a usar a API S3 compatível com paginação, mantendo fallback REST compatível com o formato atual da Cloudflare.",
+    "Projetos armazenados no R2 passam a ser fonte direta do commit e repositórios GitHub vazios podem receber o primeiro commit, com criação automática da branch escolhida.",
+    "Commit e sincronização do módulo Projetos deixam de depender de EventSource puro e passam a usar streaming autenticado por fetch/POST, preservando cookie e o fallback Bearer entre Vercel e Render.",
+    "O fluxo antigo GET/SSE permanece disponível para compatibilidade com Termux/VPS, enquanto o fluxo cloud usa o transporte autenticado novo.",
+    "Atualizador cloud passa a ser um assistente centralizado de uma tela por etapa: Atualização/R2 → GitHub → Vercel → Render; a etapa seguinte aparece automaticamente quando a atual termina.",
+    "O monitor do atualizador foi compactado para telas pequenas e deixa de empilhar mensagens de sucesso rotineiras; erros e avisos que exigem ação continuam destacados.",
+    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.103."
   ],
   "updatePackages": {
     "full": true,

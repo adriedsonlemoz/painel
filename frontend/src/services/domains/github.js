@@ -30,6 +30,7 @@ async function baixarAutenticado(url, fallbackName = 'download') {
 export const githubService = {
   /* ── Originais (preservados) ─────────────────────────── */
   status: () => api('/github/status'),
+  orgs: () => api('/github/orgs'),
   atualizarPerfil: (dados) => api('/github/profile', { method: 'PATCH', body: JSON.stringify(dados) }),
   repos: ({ page = 1, per_page = 30, sort = 'updated', type = 'all' } = {}) =>
     api(`/github/repos?page=${page}&per_page=${per_page}&sort=${sort}&type=${type}`),
@@ -166,10 +167,10 @@ export const githubService = {
   },
 
   /** Cria um novo repositório na conta autenticada */
-  criarRepo: (nome, descricao = '', privado = true, org = null) =>
+  criarRepo: (nome, descricao = '', privado = true, org = null, extras = {}) =>
     api('/github/repos/criar', {
       method: 'POST',
-      body: JSON.stringify({ nome, descricao, privado, org }),
+      body: JSON.stringify({ nome, descricao, privado, org, ...extras }),
     }),
 
   /* ── Sprint 5: Salvar repositório na pasta Projetos ────── */
