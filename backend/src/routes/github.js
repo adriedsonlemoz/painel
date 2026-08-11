@@ -130,30 +130,63 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   const prefix=normalizarTargetPath(targetPath)
   let initializedRepository=false
 
-  // Reutiliza a estratégia do publicador do módulo Atualizações: a Git Database
-  // API não consegue criar a primeira ref de um repositório totalmente vazio.
-  // A Contents API grava um arquivo real na branch padrão, criando o primeiro
-  // commit; depois retomamos o fluxo normal de blobs/tree/commit. Se o usuário
-  // escolheu outra branch, ela nasce a partir desse commit inicial.
+  // Repositórios totalmente vazios não aceitam criação de refs pela Git Database API.
+  // O fluxo abaixo é o mesmo princípio usado no publicador de projetos/atualizações:
+  // 1) cria um arquivo real pela Contents API na branch padrão, sem forçar `branch`;
+  // 2) usa o SHA retornado como base;
+  // 3) se o destino pedido for outra branch, cria essa branch a partir do commit inicial;
+  // 4) publica o projeto completo pela Git Database API.
   if(!base.parentSha){
-    const defaultBranch=String(base.repoInfo.default_branch||'main')
+    const defaultBranch=String(base.repoInfo.default_branch||'main').trim()||'main'
     const seed=files.find(f=>f.path==='README.md')||files.find(f=>f.path==='.gitignore')||files[0]
     const seedDest=prefix?`${prefix}/${seed.path}`:seed.path
     const initBody={
       message:String(message||'Inicializa repositório pelo AL Sistemas').slice(0,240),
       content:seed.data.toString('base64'),
     }
-    if(base.branch===defaultBranch) initBody.branch=defaultBranch
-    const initialized=await githubFetch(`/repos/${owner}/${repo}/contents/${encodeGitPath(seedDest)}`,{method:'PUT',body:JSON.stringify(initBody)})
+
+    // IMPORTANTE: em repositório vazio não envie `branch`.
+    // A Contents API inicializa a branch padrão do próprio repositório.
+    const initialized=await githubFetch(
+      `/repos/${owner}/${repo}/contents/${encodeGitPath(seedDest)}`,
+      {method:'PUT',body:JSON.stringify(initBody)}
+    )
     const initialSha=initialized?.commit?.sha||''
-    if(!initialSha){const e=new Error('O GitHub inicializou o repositório, mas não retornou o primeiro commit.');e.status=502;throw e}
-    if(base.branch!==defaultBranch){
-      await githubFetch(`/repos/${owner}/${repo}/git/refs`,{method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:initialSha})})
+    if(!initialSha){
+      const e=new Error('O GitHub inicializou o repositório, mas não retornou o primeiro commit.')
+      e.status=502
+      throw e
     }
+
+    const initialCommit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${initialSha}`)
+    const initialTreeSha=initialCommit?.tree?.sha||''
+    if(!initialTreeSha){
+      const e=new Error('O primeiro commit foi criado, mas a árvore inicial não pôde ser obtida.')
+      e.status=502
+      throw e
+    }
+
+    if(base.branch!==defaultBranch){
+      await githubFetch(`/repos/${owner}/${repo}/git/refs`,{
+        method:'POST',
+        body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:initialSha}),
+      })
+    }
+
     initializedRepository=true
-    base=await obterBranchBase(owner,repo,base.branch)
-    if(!base.parentSha){const e=new Error('O primeiro commit foi criado, mas a branch ainda não ficou disponível no GitHub.');e.status=502;throw e}
+    // Não reconsulta imediatamente a ref: o GitHub pode levar alguns instantes para
+    // refletir a branch recém-criada. O SHA retornado pela Contents API já é a fonte
+    // de verdade suficiente para continuar a publicação.
+    base={
+      ...base,
+      exists:true,
+      parentSha:initialSha,
+      baseTreeSha:initialTreeSha,
+      empty:false,
+      defaultBranch,
+    }
   }
+
   const tree=[]
   const incomingPaths=new Set(files.map(file=>prefix?`${prefix}/${file.path}`:file.path))
   let removidos=0
@@ -166,25 +199,67 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
       if(within && !incomingPaths.has(item.path)){tree.push({path:item.path,mode:'100644',type:'blob',sha:null});removidos++}
     }
   }
+
   let enviados=0
   for(const file of files){
-    const blob=await githubFetch(`/repos/${owner}/${repo}/git/blobs`,{method:'POST',body:JSON.stringify({content:file.data.toString('base64'),encoding:'base64'})})
+    const blob=await githubFetch(`/repos/${owner}/${repo}/git/blobs`,{
+      method:'POST',
+      body:JSON.stringify({content:file.data.toString('base64'),encoding:'base64'}),
+    })
     const dest=prefix?`${prefix}/${file.path}`:file.path
     tree.push({path:dest,mode:'100644',type:'blob',sha:blob.sha})
     enviados++
   }
+
   const treeBody={tree}
   if(base.baseTreeSha) treeBody.base_tree=base.baseTreeSha
-  const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{method:'POST',body:JSON.stringify(treeBody)})
-  if(base.baseTreeSha && newTree.sha===base.baseTreeSha) return {changed:false,branch:base.branch,commitSha:base.parentSha,commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,enviados:0,removidos:0,initializedRepository}
-  const commitBody={message:String(message||'Publicação pelo AL Sistemas').slice(0,240),tree:newTree.sha,parents:base.parentSha?[base.parentSha]:[]}
-  const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{method:'POST',body:JSON.stringify(commitBody)})
-  if(base.exists){
-    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false})})
-  }else{
-    await githubFetch(`/repos/${owner}/${repo}/git/refs`,{method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha})})
+  const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{
+    method:'POST',
+    body:JSON.stringify(treeBody),
+  })
+  if(base.baseTreeSha && newTree.sha===base.baseTreeSha){
+    return {
+      changed:false,
+      branch:base.branch,
+      commitSha:base.parentSha,
+      commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,
+      enviados:0,
+      removidos:0,
+      initializedRepository,
+    }
   }
-  return {changed:true,branch:base.branch,commitSha:commit.sha,commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,enviados,removidos,initializedRepository}
+
+  const commitBody={
+    message:String(message||'Publicação pelo AL Sistemas').slice(0,240),
+    tree:newTree.sha,
+    parents:base.parentSha?[base.parentSha]:[],
+  }
+  const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{
+    method:'POST',
+    body:JSON.stringify(commitBody),
+  })
+
+  if(base.exists){
+    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
+      method:'PATCH',
+      body:JSON.stringify({sha:commit.sha,force:false}),
+    })
+  }else{
+    await githubFetch(`/repos/${owner}/${repo}/git/refs`,{
+      method:'POST',
+      body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha}),
+    })
+  }
+
+  return {
+    changed:true,
+    branch:base.branch,
+    commitSha:commit.sha,
+    commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,
+    enviados,
+    removidos,
+    initializedRepository,
+  }
 }
 
 const PROJETOS_DIR = process.env.PROJETOS_PATH

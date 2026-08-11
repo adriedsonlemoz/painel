@@ -1,20 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.120",
+  "version": "1.0.121",
   "packageFormat": 2,
   "changelog": [
-    "Corrige definitivamente o cadastro/importação RSS quando Fonte e Categoria chegam da API com _id, evitando o erro “Selecione uma Fonte editorial válida”.",
-    "Feeds sugeridos são verificados ao vivo e a lista padrão foi reduzida aos endpoints RSS gerais que realmente respondem como feed.",
-    "A importação grava as notícias antes de processar capas no R2 e IA, deixando o retorno manual muito mais rápido e visível.",
-    "Evolui o módulo Conteúdo com dashboard editorial, histórico e restauração de notícias, autosave, fluxo de responsáveis/revisores e comentários internos.",
-    "Categorias e Fontes ganham metadados completos, imagens R2, contadores e mesclagem segura.",
-    "Adiciona Biblioteca de Mídia com upload R2, referência de uso e limpeza de órfãos.",
-    "Eventos ganham capa, endereço/mapa, organizador, ingressos, preço, recorrência, agendamento, arquivamento automático e dados estruturados.",
-    "Newsletter passa a ter campanhas, teste, agendamento, envio via Resend configurado em Integrações e exportação global de assinantes.",
-    "Home ganha compositor visual com ordenação por arrastar, visibilidade, categoria, quantidade e prévia mobile/desktop, além de Hero no R2.",
-    "SEO editorial ganha canonical, OG, noindex, SEO por categoria e redirecionamento de slugs antigos.",
-    "Central de Qualidade identifica pendências de mídia, fonte, alt, SEO, RSS, codificação, origem e possíveis duplicatas.",
-    "Métricas editoriais passam a incluir categoria, fonte, feed RSS, buscas do portal e newsletter."
+    "Corrige a publicação pelo módulo GitHub quando o repositório de destino ainda não possui nenhum commit.",
+    "O primeiro commit passa a inicializar o repositório pela Contents API antes de usar blobs, trees, commits e refs.",
+    "A inicialização não força uma branch inexistente no primeiro PUT; a branch padrão nasce primeiro e branches alternativas partem desse commit.",
+    "A publicação continua diretamente a partir do SHA retornado pelo GitHub, sem depender de uma reconsulta imediata da nova branch.",
+    "Mantém Mesclar/Substituir, Snapshot R2, metadados e AuditLog no mesmo fluxo de publicação."
   ],
   "updatePackages": {
     "full": true,

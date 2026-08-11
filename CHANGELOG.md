@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.121 — Primeiro commit unificado no módulo GitHub
+- Corrige a opção **GitHub → Publicar projeto** quando o repositório escolhido está totalmente vazio.
+- A publicação inicializa o repositório com um arquivo real pela **Contents API** antes de usar a Git Database API, evitando `409 Git Repository is empty.`.
+- O primeiro `PUT /contents` não força uma branch ainda inexistente; o GitHub cria a branch padrão e, se o usuário escolheu outra branch, ela é criada a partir desse commit inicial.
+- O restante do pacote é publicado imediatamente usando o SHA/tree do primeiro commit, sem depender de uma reconsulta da branch recém-criada.
+- Mantém Mesclar/Substituir, Snapshot R2, metadados e AuditLog no mesmo fluxo, agora com inicialização segura do primeiro commit.
+- Frontend, backend, Setup, exportação e manifesto sincronizados em **1.0.121**.
+
 ## 1.0.120 — Conteúdo editorial completo e RSS corrigido
 - Corrige o erro de RSS em que Fonte/Categoria existentes chegavam como `_id` e o formulário enviava valores vazios. A API também passa a devolver `id` explícito para Categorias e Fontes.
 - Cadastro de feed sugerido pode criar/vincular automaticamente a Fonte editorial e a Categoria padrão quando ainda não existem.
