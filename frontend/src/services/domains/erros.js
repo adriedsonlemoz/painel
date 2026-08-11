@@ -58,6 +58,22 @@ export const errosService = {
   async detalhesCentral(event) { return api('/erros/central/detalhes', { method: 'POST', body: JSON.stringify({ event }), timeoutMs: 30000 }) },
   async analisarCentral(event) { return api('/erros/central/analisar', { method: 'POST', body: JSON.stringify({ event }), timeoutMs: 60000 }) },
   async triagemCentral(events, status, nota = '') { return api('/erros/central/triage', { method: 'POST', body: JSON.stringify({ events, status, nota }) }) },
+  async exportarCentral() {
+    const res = await authFetch(`${BASE_URL_ERROS}/central/export`, { method: 'POST', credentials: 'include' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.erro || `Erro ${res.status}`)
+    }
+    const blob = await res.blob()
+    const disposition = res.headers.get('content-disposition') || ''
+    const match = disposition.match(/filename=\"?([^\";]+)\"?/i)
+    const filename = match?.[1] || `al-sistemas-diagnostico-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1500)
+    return { ok: true, filename, size: blob.size }
+  },
   async contagem()              { return api('/erros/contagem') },
   async marcarLido(id, lido = true) {
     return api(`/erros/${id}/lido`, { method: 'PATCH', body: JSON.stringify({ lido }) })

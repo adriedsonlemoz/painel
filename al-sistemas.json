@@ -1,18 +1,16 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.97",
+  "version": "1.0.98",
   "packageFormat": 2,
   "changelog": [
-    "Home pública ganha carrossel editorial com exatamente 3 notícias em destaque, navegação por indicadores e gesto lateral no celular.",
-    "História, Belezas naturais, Ônibus e Eventos voltam a ocupar uma única linha compacta de quatro atalhos no mobile.",
-    "Filtros de Últimas Notícias ficam compactos: categorias principais visíveis e demais opções recolhidas em Mais, reduzindo a altura antes do conteúdo.",
-    "Brasil e Mundo passa a priorizar agregação dinâmica das fontes RSS ativas, com deduplicação, ordenação por data e hierarquia editorial; notícias externas manuais permanecem como fallback.",
-    "Nova previsão do tempo usa serviço backend com Open-Meteo, localização configurável, cache, condição atual e próximos dias sem expor integração no frontend.",
-    "Novo bloco opcional de Futebol usa API-Football para placares ao vivo ou jogos do dia, com cache, prioridades configuráveis e credencial central em Integrações e APIs.",
-    "Novo bloco opcional de Horóscopo usa API Ninjas, abre cada signo sob demanda e pode traduzir o texto por Gemini/OpenRouter já configurados no AL.",
-    "Integrações e APIs ganha configurações e teste para API Ninjas e API-Football; backup/importação de .env inclui as novas credenciais.",
-    "Admin de módulos ganha a seção Tempo + Esportes para ativar/desativar clima, RSS, futebol e horóscopo e configurar a cidade da previsão.",
-    "Vercel/Render permanecem como produção principal, enquanto os fluxos existentes de VPS/Termux continuam compatíveis; pacote completo 1.0.97 inclui todas as melhorias anteriores."
+    "Central de Erros e logs ganha exportação ZIP unificada com registros do AL Sistemas e snapshots/detalhes disponíveis de GitHub Actions, Vercel, Render e MongoDB, com mascaramento de padrões comuns de credenciais.",
+    "Ao selecionar um pacote na Central de Atualizações, o frontend lê o al-sistemas.json dentro do ZIP e mostra imediatamente a próxima versão e as alterações descritas antes do envio ao backend.",
+    "O botão de nova versão recebe visual mais compacto e o upload continua exibindo progresso real, com bloqueio visual antecipado para versões iguais ou inferiores à instalada.",
+    "A publicação cloud passa a ser apresentada em quatro cards sequenciais: Atualização principal/R2, GitHub, Vercel e Render, cada um com progresso e estado próprios.",
+    "Estados técnicos de Vercel e Render são traduzidos para português na interface: Disponível, Construindo, Iniciando, Na fila, Compilando, Implantando, No ar, Falhou e equivalentes.",
+    "O progresso geral é calculado a partir das quatro etapas, sem tratar o commit do GitHub como conclusão da atualização; cada plataforma termina seu próprio card em 100%.",
+    "O botão Fechar deixa o rodapé dos monitores de atualização e permanece como X no topo somente quando a operação pode ser encerrada.",
+    "O fluxo local de atualização em VPS/Termux permanece compatível; as alterações desta versão concentram-se em diagnóstico/exportação e clareza visual do atualizador cloud."
   ],
   "updatePackages": {
     "full": true,

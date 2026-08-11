@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.98 — Exportação completa de diagnóstico e atualização cloud por etapas
+
+- Central de Erros e logs ganha exportação ZIP unificada de AL Sistemas, GitHub Actions, Vercel, Render e MongoDB, incluindo triagem e detalhes disponíveis, com mascaramento de padrões comuns de segredos.
+- A seleção de um ZIP no atualizador passa a ler localmente o manifesto `al-sistemas.json` e mostrar a próxima versão e seu changelog antes do upload.
+- Pacotes iguais ou inferiores à versão instalada são sinalizados antecipadamente na interface; a validação oficial do backend continua sendo a autoridade final.
+- Monitor cloud passa a usar quatro cards sequenciais: Atualização principal/R2 → GitHub → Vercel → Render, cada um com barra e porcentagem própria.
+- Estados técnicos de Vercel/Render deixam de aparecer crus e são apresentados em português.
+- O progresso geral só representa a soma real das etapas; GitHub em 100% não significa produção concluída.
+- O botão Fechar sai do rodapé dos monitores; após conclusão/falha, o fechamento fica disponível pelo X do topo.
+- Fluxo local de VPS/Termux é preservado.
+
 ## 1.0.97
 
 - **Home editorial mais compacta:** os destaques passam a formar um carrossel com exatamente 3 notícias, troca automática, indicadores e gesto lateral no celular.

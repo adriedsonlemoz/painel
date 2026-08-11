@@ -64,6 +64,7 @@ export default function AdminErros(){
   const [diagnostic,setDiagnostic]=useState(null)
   const [confirm,setConfirm]=useState({aberto:false,titulo:'',msg:'',fn:null,carregando:false})
   const [triageNote,setTriageNote]=useState('')
+  const [exporting,setExporting]=useState(false)
 
   const load=useCallback(async()=>{
     setLoading(true)
@@ -107,6 +108,15 @@ export default function AdminErros(){
       load()
     }catch(e){toast.error(e.message)}
   }
+  async function exportAll(){
+    if(exporting)return
+    setExporting(true)
+    try{
+      const r=await errosService.exportarCentral()
+      toast.success(`Diagnóstico exportado: ${r.filename}`)
+    }catch(e){toast.error(e.message)}finally{setExporting(false)}
+  }
+
   async function runDiagnostic(){
     if(diagMode==='cloud'){setDiagnostic(central);return}
     if(diagMode==='vps'){setDiagnostic({vps:central.vps,note:'Suporte preparado. Ative AL_ENABLE_VPS_DIAGNOSTICS quando houver um servidor VPS para monitorar.'});return}
@@ -120,7 +130,7 @@ export default function AdminErros(){
 
     <div className="adm-page-header" style={{marginBottom:SPACE.lg}}>
       <div><div className="adm-page-title">Erros e logs</div><div className="adm-page-sub">Central online de diagnóstico e produção</div></div>
-      <div className="adm-page-actions"><button className="adm-btn adm-btn-secondary" onClick={()=>setDiagOpen(true)}>Diagnóstico</button><button className="adm-btn adm-btn-ghost adm-btn-icon" onClick={()=>setSettingsOpen(true)} title="Configurações">⚙</button></div>
+      <div className="adm-page-actions"><button className="adm-btn adm-btn-secondary" onClick={exportAll} disabled={exporting}>{exporting?'Gerando ZIP…':'Exportar logs'}</button><button className="adm-btn adm-btn-secondary" onClick={()=>setDiagOpen(true)}>Diagnóstico</button><button className="adm-btn adm-btn-ghost adm-btn-icon" onClick={()=>setSettingsOpen(true)} title="Configurações">⚙</button></div>
     </div>
 
     <div style={{display:'flex',gap:SPACE.sm,flexWrap:'wrap',alignItems:'center',marginBottom:SPACE.lg}}>
@@ -142,7 +152,7 @@ export default function AdminErros(){
 
     <DSModal open={filtersOpen} onClose={()=>setFiltersOpen(false)} title="Filtros" size="sm"><div style={{display:'grid',gap:SPACE.lg}}><label>Período<select className="adm-filter-select" style={{width:'100%',marginTop:6}} value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24h</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="">Todo período</option></select></label><label>Status salvo pelo AL<select className="adm-filter-select" style={{width:'100%',marginTop:6}} value={status} onChange={e=>setStatus(e.target.value)}><option value="">Todos</option><option value="novo">Novo</option><option value="investigando">Investigando</option><option value="resolvido">Resolvido</option><option value="ignorado">Ignorado</option></select></label><button className="adm-btn adm-btn-primary" onClick={()=>{setFiltersOpen(false);load()}}>Aplicar</button></div></DSModal>
 
-    <DSModal open={settingsOpen} onClose={()=>setSettingsOpen(false)} title="Gerenciar registros" size="sm"><p style={{color:'var(--adm-muted)',marginTop:0}}>Ações de limpeza atingem apenas registros armazenados pelo AL. Logs externos permanecem nas plataformas de origem.</p><div style={{display:'grid',gap:SPACE.sm}}><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar resolvidos?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'resolvido'}))}>Limpar resolvidos</button><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar ignorados?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'ignorado'}))}>Limpar ignorados</button><button className="adm-btn" style={{background:T.redBg,color:T.red}} onClick={()=>ask('Limpar todos os registros do AL?','GitHub, Vercel, Render e MongoDB não serão apagados.',()=>errosService.limpar({}))}>Limpar tudo do AL</button></div></DSModal>
+    <DSModal open={settingsOpen} onClose={()=>setSettingsOpen(false)} title="Gerenciar registros" size="sm"><p style={{color:'var(--adm-muted)',marginTop:0}}>A exportação reúne AL Sistemas, GitHub, Vercel, Render e MongoDB em um ZIP, mascarando padrões comuns de segredos. A limpeza continua atingindo apenas registros armazenados pelo AL.</p><div style={{display:'grid',gap:SPACE.sm}}><button className="adm-btn adm-btn-primary" onClick={exportAll} disabled={exporting}>{exporting?'Consultando serviços e gerando ZIP…':'⬇ Exportar diagnóstico completo'}</button><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar resolvidos?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'resolvido'}))}>Limpar resolvidos</button><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar ignorados?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'ignorado'}))}>Limpar ignorados</button><button className="adm-btn" style={{background:T.redBg,color:T.red}} onClick={()=>ask('Limpar todos os registros do AL?','GitHub, Vercel, Render e MongoDB não serão apagados.',()=>errosService.limpar({}))}>Limpar tudo do AL</button></div></DSModal>
 
     <DSModal open={diagOpen} onClose={()=>setDiagOpen(false)} title="Assistente de diagnóstico" size="md"><div style={{display:'grid',gap:SPACE.lg}}><div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:SPACE.sm}}>{[['cloud','Produção cloud'],['vps','VPS futuro'],['legacy','Termux legado']].map(([k,l])=><button key={k} className={`adm-btn ${diagMode===k?'adm-btn-primary':'adm-btn-secondary'}`} onClick={()=>{setDiagMode(k);setDiagnostic(null)}}>{l}</button>)}</div><div style={{color:'var(--adm-muted)',lineHeight:1.55}}>{diagMode==='cloud'?'Verifica AL, GitHub, Vercel, Render e MongoDB usando as integrações atuais.':diagMode==='vps'?'Estrutura preparada para um servidor VPS futuro, sem poluir a produção atual.':'Mantém o diagnóstico local antigo para compatibilidade.'}</div><button className="adm-btn adm-btn-primary" onClick={runDiagnostic}>Executar diagnóstico</button>{diagnostic&&<pre style={{whiteSpace:'pre-wrap',wordBreak:'break-word',fontSize:FONT.sm,background:'var(--adm-surface2)',padding:SPACE.md,borderRadius:RADIUS.md,maxHeight:300,overflow:'auto'}}>{JSON.stringify(diagnostic,null,2)}</pre>}</div></DSModal>
 

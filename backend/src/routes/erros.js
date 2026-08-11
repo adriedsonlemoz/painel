@@ -9,6 +9,7 @@ import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { diagnosticsSnapshot, diagnosticsEventDetails } from '../services/diagnosticsHubService.js'
 import { enviarMensagem } from '../utils/aiClient.js'
+import JSZip from 'jszip'
 
 const router = Router()
 
@@ -122,6 +123,93 @@ router.post('/central/analisar', autenticar, verificarPermissao('erros.ver'), as
 })
 
 
+
+
+const EXPORT_SECRET_RE=/(?:gh[pousr]_|github_pat_|sk-or-|cfat_|AIza|AKIA)[A-Za-z0-9_\-./+=]{8,}/g
+function exportSafeText(value=''){
+  return String(value??'')
+    .replace(EXPORT_SECRET_RE,'[SEGREDO]')
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,"'}]+/gi,'$1[SEGREDO]')
+    .replace(/((?:secret|token|password|senha|api[_-]?key|access[_-]?key)\s*["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,'$1[SEGREDO]')
+}
+function exportSafeJson(value){
+  try{return exportSafeText(JSON.stringify(value,null,2))}catch{return exportSafeText(String(value??''))}
+}
+function csvCell(value){return `"${exportSafeText(value).replace(/"/g,'""')}"`}
+
+// Exportação portátil da Central: reúne registros do AL e o snapshot atual das
+// integrações. Logs externos são consultados somente sob demanda nesta exportação
+// e nunca têm credenciais incluídas no arquivo gerado.
+router.post('/central/export', autenticar, verificarPermissao('erros.ver'), async (_req,res,next)=>{
+  try{
+    await importarErrosAtualizadorSpool().catch(()=>{})
+    const [live,local]=await Promise.all([
+      diagnosticsSnapshot(),
+      ErroLog.find({}).sort({criado_em:-1}).limit(MAX_ERROS).lean(),
+    ])
+    const externalEvents=(live.events||[]).filter(e=>e?.source&&e.source!=='al')
+    const triages=externalEvents.length
+      ? await DiagnosticTriage.find({event_id:{$in:externalEvents.map(e=>String(e.id||'')).filter(Boolean)}}).lean()
+      : []
+    const triageMap=new Map(triages.map(t=>[String(t.event_id),t]))
+    const localEvents=local.map(e=>({
+      id:`al:${e._id}`,source:'al',severity:e.status==='novo'?'critical':'warning',
+      title:e.mensagem,message:e.rota||e.url||'Erro registrado pelo AL Sistemas',
+      createdAt:e.ultima_ocorrencia||e.criado_em,
+      meta:{erroId:String(e._id),tipo:e.tipo,status:e.status,stack:e.stack,dados:e.dados},
+      triage:{status:e.status==='investigando'?'acompanhando':e.status==='resolvido'?'revisado':e.status==='ignorado'?'silenciado':'novo',nota:''},
+    }))
+    const allEvents=[...localEvents,...externalEvents.map(e=>({...e,triage:triageMap.get(String(e.id))||{status:'novo',nota:''}}))]
+      .sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))
+
+    const zip=new JSZip()
+    const generatedAt=new Date().toISOString()
+    zip.file('LEIA-ME.txt',[
+      'AL Sistemas — Exportação da Central de Diagnóstico',
+      `Gerado em: ${generatedAt}`,
+      '',
+      'Conteúdo:',
+      '- resumo.json: saúde e quantidade por origem.',
+      '- ocorrencias.csv: visão tabular de todas as ocorrências reunidas.',
+      '- al-sistemas/erros-salvos.json: registros persistidos pelo AL.',
+      '- fontes/: snapshot de GitHub, Vercel, Render e MongoDB.',
+      '- detalhes/: dados/logs disponíveis para as ocorrências externas atuais.',
+      '- triagem/: acompanhamento e notas locais do AL.',
+      '',
+      'Segredos e padrões comuns de credenciais são mascarados antes da geração.',
+    ].join('\n'))
+    const sourceSummary=(live.sources||[]).map(x=>({source:x.source,label:x.label,configured:x.configured,ok:x.ok,summary:x.summary,details:x.details||null,eventCount:(x.events||[]).length}))
+    zip.file('resumo.json',exportSafeJson({generatedAt,total:allEvents.length,local:local.length,external:externalEvents.length,sources:sourceSummary,vps:live.vps||null}))
+    const csv=[['origem','severidade','status_local','data','titulo','mensagem','url'].map(csvCell).join(',')]
+    for(const e of allEvents)csv.push([e.source,e.severity,e.triage?.status||'',e.createdAt||'',e.title||'',e.message||'',e.url||''].map(csvCell).join(','))
+    zip.file('ocorrencias.csv',csv.join('\n'))
+    zip.file('al-sistemas/erros-salvos.json',exportSafeJson(local))
+    zip.file('triagem/externa.json',exportSafeJson(triages))
+    for(const src of live.sources||[]) zip.file(`fontes/${String(src.source||'desconhecida')}/resumo.json`,exportSafeJson(src))
+
+    // Consulta os detalhes atuais em paralelo. Falhas de uma plataforma não
+    // impedem a exportação das demais fontes.
+    const detailResults=await Promise.allSettled(externalEvents.slice(0,40).map(async event=>({event,details:await diagnosticsEventDetails(event)})))
+    for(const item of detailResults){
+      if(item.status==='fulfilled'){
+        const {event,details}=item.value
+        const safeId=String(event.id||Date.now()).replace(/[^A-Za-z0-9_.-]+/g,'_').slice(0,120)
+        zip.file(`detalhes/${event.source}/${safeId}.json`,exportSafeJson({event,details}))
+      }else{
+        const idx=detailResults.indexOf(item)
+        const event=externalEvents[idx]||{}
+        const safeId=String(event.id||idx).replace(/[^A-Za-z0-9_.-]+/g,'_').slice(0,120)
+        zip.file(`detalhes/${event.source||'externo'}/${safeId}-erro.txt`,exportSafeText(item.reason?.message||'Não foi possível consultar os detalhes desta ocorrência.'))
+      }
+    }
+    const content=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}})
+    const stamp=new Date().toISOString().replace(/[:.]/g,'-')
+    res.setHeader('Content-Type','application/zip')
+    res.setHeader('Content-Disposition',`attachment; filename="al-sistemas-diagnostico-${stamp}.zip"`)
+    res.setHeader('Content-Length',String(content.length))
+    res.send(content)
+  }catch(err){next(err)}
+})
 
 // Triagem local para qualquer origem. Em eventos externos o AL não altera o erro na
 // plataforma: apenas registra acompanhamento/revisão/silenciamento e uma nota local.
