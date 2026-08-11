@@ -1,18 +1,17 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.91",
+  "version": "1.0.92",
   "packageFormat": 2,
   "changelog": [
-    "GitHub: todas as opções da Ponte de Comando agora abrem em popup/modal próprio; clicar em cards não expande mais conteúdo abaixo da grade.",
-    "A Ponte de Comando permanece compacta com 3 cards por linha no mobile e retorna ao mesmo ponto ao fechar cada seção.",
-    "Publicar passa a abrir um Wizard modal interativo em 6 etapas, em vez de exibir todos os campos na mesma página.",
-    "Wizard: 1) selecionar ZIP, 2) escolher repositório, 3) definir branch e pasta, 4) configurar substituição/snapshot R2, 5) conferir Vercel/Render e 6) revisar tudo antes do commit.",
-    "Nenhum commit é criado antes da confirmação final; o destino GitHub exato é exibido novamente na revisão.",
-    "O envio continua funcionando sem depender do módulo Projetos e usa o GitHub configurado em Integrações e APIs.",
-    "R2 permanece opcional para snapshot e Vercel/Render permanecem etapas opcionais apenas quando houver vínculo detectado com o repositório selecionado.",
-    "Após a publicação, o Wizard mostra SHA, quantidade de arquivos, estado do snapshot e ações de deploy Render disponíveis.",
-    "Termux/VPS e o modo local legado continuam preservados.",
-    "Pacote completo 1.0.91 inclui integralmente autenticação cloud/diagnóstico 1.0.90, GitHub-first 1.0.89 e atualizador R2 da 1.0.88."
+    "GitHub Actions: cada execução passa a oferecer Resumo, Analisar IA, Sugestão e download ZIP de logs no mesmo painel.",
+    "Resumo estrutural contabiliza jobs, etapas concluídas, falhas e etapas ignoradas sem consumir IA.",
+    "Analisar IA busca os logs no backend, prioriza jobs/etapas com falha e envia apenas trechos relevantes para Gemini/OpenRouter configurados em Integrações e APIs.",
+    "Sugestão de correção por IA apresenta causa provável, evidências, arquivos prováveis, risco e passos de validação sem alterar arquivos ou workflows automaticamente.",
+    "Logs são tratados como conteúdo não confiável e possíveis segredos não devem ser reproduzidos pela análise.",
+    "O download ZIP de logs continua disponível integralmente para backup, compartilhamento e diagnóstico manual.",
+    "A interface de análise abre em popup responsivo; no mobile os controles da execução reorganizam sem criar vazamento horizontal.",
+    "O uso da IA fica registrado no AuditLog com repositório, run, modo e provedor, sem registrar o conteúdo completo dos logs.",
+    "Pacote completo 1.0.92 inclui integralmente o Wizard de publicação 1.0.91, autenticação cloud/diagnóstico 1.0.90, GitHub-first 1.0.89 e atualizador R2 da 1.0.88."
   ],
   "updatePackages": {
     "full": true,

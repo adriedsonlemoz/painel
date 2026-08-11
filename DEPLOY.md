@@ -238,3 +238,8 @@ Dados persistentes como `.env`, `backend/.al-sistemas/`, uploads, backups e logs
 
 ### GitHub / publicação Wizard (1.0.91)
 - A publicação GitHub-first agora usa wizard modal e preserva o fluxo cloud R2/GitHub/Vercel/Render introduzido nas versões anteriores.
+
+
+### Diagnóstico de GitHub Actions (1.0.92)
+
+A análise de logs é feita no backend usando o token GitHub do cofre central. O ZIP completo continua disponível. Gemini/OpenRouter são opcionais: o resumo estrutural funciona sem IA; diagnóstico e sugestão exigem ao menos um provedor ativo em Integrações e APIs.

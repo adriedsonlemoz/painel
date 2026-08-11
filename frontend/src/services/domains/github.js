@@ -80,6 +80,8 @@ export const githubService = {
     api(`/github/repos/${owner}/${repo}/workflows/${workflowId}/runs?per_page=15&page=${page}`),
   jobs: (runId, owner, repo) =>
     api(`/github/runs/${runId}/jobs?owner=${owner}&repo=${repo}`),
+  analyzeRun: (runId, owner, repo, modo = 'resumo', workflow = '') =>
+    api(`/github/runs/${runId}/analyze`, { method: 'POST', body: JSON.stringify({ owner, repo, modo, workflow }) }),
 
   /* ── Sprint 4: Logs inline de um job ────────────────── */
   jobLogs: async (jobId, owner, repo) => {

@@ -1300,6 +1300,9 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   const [logTexto, setLogTexto] = useState(null)
   const [loadLog, setLoadLog]   = useState(false)
   const [artifactsCache, setArtifactsCache] = useState(null)
+  const [analiseModal, setAnaliseModal] = useState(null)
+  const [analiseLoad, setAnaliseLoad] = useState(false)
+  const [analiseDados, setAnaliseDados] = useState(null)
 
   async function selecionarWorkflow(wf) {
     setWfSel(wf); setRuns(null); setRunAberto(null); setJobs(null); setArtifactsCache(null)
@@ -1332,6 +1335,18 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
     try { const texto = await githubService.jobLogs(job.id, owner, repo); setLogTexto(texto) }
     catch (e) { setLogTexto(`Erro ao carregar log: ${e.message}`) }
     finally   { setLoadLog(false) }
+  }
+
+  async function analisarRun(run, modo) {
+    const titulo = modo === 'resumo' ? 'Resumo da execução' : modo === 'correcao' ? 'Sugestão de correção por IA' : 'Análise de erro por IA'
+    setAnaliseModal({ run, modo, titulo })
+    setAnaliseDados(null); setAnaliseLoad(true)
+    try {
+      const d = await githubService.analyzeRun(run.id, owner, repo, modo, wfSel?.nome || '')
+      setAnaliseDados(d)
+    } catch (e) {
+      setAnaliseDados({ erro: e.message || 'Falha ao analisar a execução.' })
+    } finally { setAnaliseLoad(false) }
   }
 
   if (!workflows) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
@@ -1378,7 +1393,7 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                 const isAberto = runAberto?.id === run.id
                 return (
                   <div key={run.id}>
-                    <div style={{
+                    <div className="gh-run-card" style={{
                       background: C.surface, border: `1px solid ${isAberto ? cor : C.border}`,
                       borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px 14px`,
                       display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: SPACE.md + 2,
@@ -1395,15 +1410,18 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                           {run.duracaoMs > 0 && <span>⏱ {fmtDuracao(run.duracaoMs)}</span>}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: SPACE.sm, flexShrink: 0 }}>
+                      <div className="gh-run-actions" style={{ display: 'flex', gap: SPACE.sm, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <DSBtn size="sm" onClick={() => analisarRun(run, 'resumo')}>Resumo</DSBtn>
+                        <DSBtn size="sm" variant="primary" onClick={() => analisarRun(run, 'diagnostico')}>✨ Analisar IA</DSBtn>
+                        {run.conclusao === 'failure' && <DSBtn size="sm" onClick={() => analisarRun(run, 'correcao')}>🛠 Sugestão</DSBtn>}
                         <DSBtn size="sm" onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
-                          {isAberto ? 'Fechar' : 'Ver Jobs'}
+                          {isAberto ? 'Fechar' : 'Jobs'}
                         </DSBtn>
                         <button type="button"
                           onClick={() => githubService.baixarLogs(run.id, owner, repo)
                             .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}
                           style={{ fontSize: FONT.sm, fontWeight: 600, color: C.text, cursor: 'pointer', background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, whiteSpace: 'nowrap' }}
-                          title="Baixar todos os logs como ZIP">⬇ Logs</button>
+                          title="Baixar todos os logs como ZIP">⬇ ZIP</button>
                       </div>
                     </div>
 
@@ -1496,6 +1514,57 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
           ) : null}
         </>
       )}
+
+      <DSModal open={!!analiseModal} onClose={() => !analiseLoad && setAnaliseModal(null)} title={analiseModal?.titulo || 'Execução'} size="lg">
+        {analiseLoad ? (
+          <div style={{ color: C.muted, fontSize: FONT.base, padding: `${SPACE.xl}px 0` }}>
+            {analiseModal?.modo === 'resumo' ? 'Montando resumo da execução...' : 'Lendo apenas os trechos relevantes dos logs e consultando a IA configurada em Integrações e APIs...'}
+          </div>
+        ) : analiseDados?.erro ? (
+          <div style={{ color: C.redSolid || '#ef4444', fontSize: FONT.base }}>{analiseDados.erro}</div>
+        ) : analiseDados ? (
+          <AnaliseWorkflowConteudo dados={analiseDados} modo={analiseModal?.modo} />
+        ) : null}
+      </DSModal>
+    </div>
+  )
+}
+
+function AnaliseWorkflowConteudo({ dados, modo }) {
+  const r = dados?.resumo || {}
+  const a = dados?.analise || {}
+  const lista = (titulo, itens) => Array.isArray(itens) && itens.filter(Boolean).length ? (
+    <div style={{ marginTop: SPACE.lg }}>
+      <div style={{ fontSize: FONT.sm, fontWeight: 800, color: C.text, marginBottom: SPACE.xs }}>{titulo}</div>
+      <div style={{ display: 'grid', gap: SPACE.xs }}>
+        {itens.filter(Boolean).map((x,i) => <div key={i} style={{ fontSize: FONT.sm, color: C.muted, lineHeight: 1.5 }}>• {typeof x === 'string' ? x : x.descricao || x.titulo || JSON.stringify(x)}</div>)}
+      </div>
+    </div>
+  ) : null
+  return (
+    <div>
+      <div className="gh-log-summary-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:SPACE.sm }}>
+        {[['Jobs',r.totalJobs],['Etapas OK',r.etapasConcluidas],['Falhas',r.etapasFalhas],['Ignoradas',r.etapasIgnoradas]].map(([label,value]) => (
+          <div key={label} style={{ background:C.surf2, border:`1px solid ${C.border}`, borderRadius:RADIUS.md, padding:SPACE.md, minWidth:0 }}>
+            <div style={{ fontSize:FONT.xs, color:C.muted }}>{label}</div><div style={{ fontSize:FONT.xl, fontWeight:800, color:C.text }}>{value ?? 0}</div>
+          </div>
+        ))}
+      </div>
+      {r.falhas?.length > 0 && lista('Etapas que falharam', r.falhas.map(f => `${f.job}${f.etapa ? ` → ${f.etapa}` : ''}`))}
+      {modo !== 'resumo' && (
+        <>
+          {a.erro_principal && <div style={{ marginTop:SPACE.xl, padding:SPACE.lg, border:`1px solid ${C.redSolid || '#ef4444'}55`, borderRadius:RADIUS.md, background:`${C.redSolid || '#ef4444'}0d` }}><div style={{fontSize:FONT.xs,fontWeight:800,color:C.muted,textTransform:'uppercase'}}>Erro principal</div><div style={{fontSize:FONT.base,fontWeight:800,color:C.text,marginTop:4}}>{a.erro_principal}</div>{a.etapa && <div style={{fontSize:FONT.sm,color:C.muted,marginTop:4}}>Etapa: {a.etapa}</div>}</div>}
+          {a.causa_provavel && <div style={{ marginTop:SPACE.lg }}><div style={{fontSize:FONT.sm,fontWeight:800,color:C.text}}>Causa provável</div><div style={{fontSize:FONT.sm,color:C.muted,lineHeight:1.6,marginTop:4}}>{a.causa_provavel}</div></div>}
+          {lista('Evidências encontradas', a.evidencias)}
+          {lista('O que funcionou', a.o_que_funcionou)}
+          {lista('Avisos adicionais', a.avisos)}
+          {lista('Próximos passos', a.proximos_passos)}
+          {Array.isArray(a.correcoes) && a.correcoes.length > 0 && <div style={{marginTop:SPACE.lg}}><div style={{fontSize:FONT.sm,fontWeight:800,color:C.text,marginBottom:SPACE.sm}}>Correções sugeridas</div><div style={{display:'grid',gap:SPACE.sm}}>{a.correcoes.map((c,i)=><div key={i} style={{border:`1px solid ${C.border}`,borderRadius:RADIUS.md,padding:SPACE.md,background:C.surf2}}><div style={{fontSize:FONT.sm,fontWeight:800,color:C.text}}>{c.titulo || `Correção ${i+1}`}</div><div style={{fontSize:FONT.sm,color:C.muted,lineHeight:1.5,marginTop:4}}>{c.descricao}</div>{c.arquivos_provaveis?.length>0&&<div style={{fontSize:FONT.xs,color:C.muted,marginTop:6}}>Arquivos prováveis: {c.arquivos_provaveis.join(', ')}</div>}{c.risco&&<div style={{fontSize:FONT.xs,color:C.muted,marginTop:3}}>Risco: {c.risco}</div>}</div>)}</div></div>}
+          {lista('Como validar depois', a.validacao)}
+          {a._meta && <div style={{fontSize:FONT.xs,color:C.muted,marginTop:SPACE.xl}}>IA: {a._meta.provedor} · {a._meta.modelo}{a._meta.fallback ? ' · fallback automático' : ''}</div>}
+        </>
+      )}
+      <div style={{fontSize:FONT.xs,color:C.muted,marginTop:SPACE.xl,lineHeight:1.5}}>O ZIP de logs continua disponível. A análise por IA lê os logs no backend, seleciona trechos relevantes e não altera arquivos nem workflows automaticamente.</div>
     </div>
   )
 }
@@ -1748,7 +1817,7 @@ export default function AdminGitHub() {
         .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-empty{padding:12px!important}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-empty{padding:12px!important}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;justify-content:flex-start!important}.gh-run-actions>*{flex:1;justify-content:center}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
       `}</style>
 
       <PerfilGitHubModal

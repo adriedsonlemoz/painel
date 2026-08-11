@@ -288,3 +288,8 @@ O pré-check valida espaço, permissões, Node.js, dependências, migrações, M
 - O gerenciador GitHub mantém a lista principal compacta; seções do repositório abrem em modal e não expandem o drawer.
 - Publicar abre um assistente em etapas: ZIP → repositório → branch/pasta → segurança/R2 → vínculos cloud → revisão.
 - O GitHub continua como destino principal; Vercel/Render aparecem somente quando vinculados ao repositório.
+
+
+## AL Sistemas 1.0.92 — Diagnóstico inteligente de GitHub Actions
+
+O painel GitHub mantém o ZIP de logs e adiciona resumo estrutural, análise por IA e sugestões de correção para cada execução. A IA usa apenas Gemini/OpenRouter configurados em Integrações e APIs, recebe trechos relevantes selecionados no backend e nunca altera workflows automaticamente.

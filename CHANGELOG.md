@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.92
+- GitHub Actions: cada execução passa a ter quatro ações no mesmo ponto do painel: `Resumo`, `Analisar IA`, `Sugestão` e `ZIP`.
+- `Resumo` é determinístico e não consome IA: contabiliza jobs, etapas concluídas, falhas, ignoradas e mostra exatamente quais etapas falharam.
+- `Analisar IA` busca os logs dos jobs diretamente no backend, prioriza jobs com falha, seleciona linhas de erro/exception/warning e contexto adjacente e consulta Gemini/OpenRouter configurados em Integrações e APIs.
+- A análise retorna erro principal, etapa, causa provável, evidências, itens que funcionaram, avisos e próximos passos; nenhuma alteração é aplicada automaticamente.
+- `Sugestão` usa o mesmo conjunto real de logs, mas pede à IA correções propostas, arquivos prováveis, nível de risco e como validar depois.
+- Logs são tratados como entrada não confiável para evitar prompt injection; a instrução da IA também exige ocultar possíveis segredos/tokens.
+- O ZIP completo de logs continua disponível e independente da IA para backup, compartilhamento ou análise externa.
+- O popup de análise é responsivo e os controles de run reorganizam no mobile para evitar vazamento horizontal.
+- Auditoria registra somente metadados da análise (repositório, run, modo e provedor), sem armazenar o conteúdo integral dos logs.
+
 ## 1.0.91
 - GitHub: todas as opções da Ponte de Comando passam a abrir em popup/modal próprio; nenhum card de Visão geral, Organização, Análise, Arquivos, Commits, Releases, Artefatos, Workflows, Secrets ou manutenção injeta conteúdo abaixo da grade.
 - A grade de comandos permanece visível e compacta, com 3 cards por linha no mobile. Ao fechar uma seção, o usuário volta à mesma Ponte de Comando.
