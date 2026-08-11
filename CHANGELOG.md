@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.101 — GitHub alinhado ao Design System da Central
+
+- O painel interno de cada repositório passa a usar cards inspirados na Central de Atualizações, com ícone, título e descrição curta.
+- No mobile, a navegação mantém **3 cards por linha**, sem retornar ao seletor vertical e sem abrir conteúdo embaixo da grade.
+- As ações foram organizadas em **Projeto**, **Código** e **Automação e produção**; cada opção continua abrindo em modal/drawer próprio.
+- O topo recebe um card de estado **GitHub conectado**, exibindo repositório e branch atual.
+- O espaço vazio abaixo dos comandos foi substituído por um resumo de **Branch, Linguagem, Tamanho e Último push**.
+- **Excluir repositório** saiu da grade principal e foi movido para `⋮ Mais`, preservando a confirmação existente.
+- **Baixar projeto** e **Publicar** permanecem no cabeçalho; integrações GitHub/R2/Vercel/Render e o Wizard de publicação não tiveram lógica alterada.
+- Manifesto do atualizador, frontend, backend, Setup e backup/exportação foram sincronizados em **1.0.101**.
+
 ## 1.0.100 — Motor central de IA robusto e observável
 
 - Gemini e OpenRouter passam a usar adapters únicos compartilhados por todos os módulos, eliminando testes/chamadas duplicadas com comportamentos diferentes.

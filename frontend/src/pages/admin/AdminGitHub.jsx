@@ -191,6 +191,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
   const [aba, setAba] = useState('visao')
   const [secaoModal, setSecaoModal] = useState(null)
   const [publicarAberto, setPublicarAberto] = useState(false)
+  const [maisAberto, setMaisAberto] = useState(false)
   const [meta, setMeta] = useState(null)
   const [readme, setReadme] = useState(null)
   const [commits, setCommits] = useState(null)
@@ -298,19 +299,24 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
   }
 
   const ABAS = [
-    { id:'visao', icon:'◈', label:'Visão geral', desc:'Status, README e informações', grupo:'Projeto' },
-    { id:'meta', icon:'⌁', label:'Organização', desc:'Alias, tags e preferências internas', grupo:'Projeto' },
-    { id:'analysis', icon:'◎', label:'Análise', desc:'Saúde e composição do código', grupo:'Projeto' },
-    { id:'arquivos', icon:'▤', label:'Arquivos', desc:'Navegar, limpar e remover itens', grupo:'Código' },
-    { id:'commits', icon:'⌘', label:'Commits', desc:'Histórico de alterações', grupo:'Código' },
+    { id:'visao', icon:'◈', label:'Visão geral', desc:'Status e README', grupo:'Projeto' },
+    { id:'meta', icon:'⌁', label:'Organização', desc:'Alias, tags e vínculo', grupo:'Projeto' },
+    { id:'analysis', icon:'◎', label:'Análise', desc:'Saúde do código', grupo:'Projeto' },
+    { id:'arquivos', icon:'▤', label:'Arquivos', desc:'Navegar e gerenciar', grupo:'Código' },
+    { id:'commits', icon:'⌘', label:'Commits', desc:'Histórico Git', grupo:'Código' },
     { id:'releases', icon:'◇', label:'Releases', desc:'Versões publicadas', grupo:'Código' },
-    { id:'artifacts', icon:'□', label:'Artefatos', desc:'Arquivos gerados por Actions', grupo:'Código' },
-    { id:'workflows', icon:'↯', label:'Workflows', desc:'Automações e execuções', grupo:'Automação' },
-    { id:'secrets', icon:'◆', label:'Secrets', desc:'Segredos de Actions', grupo:'Automação' },
-    { id:'push', icon:'↑', label:'Publicar', desc:'ZIP → GitHub → cloud opcional', grupo:'Publicação', destaque:true },
-    { id:'delete', icon:'×', label:'Excluir repositório', desc:'Zona de risco permanente', grupo:'Manutenção', perigo:true },
+    { id:'artifacts', icon:'□', label:'Artefatos', desc:'Arquivos do Actions', grupo:'Código' },
+    { id:'workflows', icon:'↯', label:'Workflows', desc:'Actions e execuções', grupo:'Automação' },
+    { id:'secrets', icon:'◆', label:'Secrets', desc:'Variáveis do GitHub', grupo:'Automação' },
+    { id:'push', icon:'↑', label:'Publicar', desc:'GitHub · Vercel · Render', grupo:'Produção', destaque:true },
   ]
-  const abaAtual = ABAS.find(a => a.id === aba) || ABAS[0]
+  const MANUTENCAO = { id:'delete', icon:'×', label:'Excluir repositório', desc:'Ação permanente', grupo:'Manutenção', perigo:true }
+  const abaAtual = [...ABAS, MANUTENCAO].find(a => a.id === aba) || ABAS[0]
+  const gruposAbas = [
+    { nome:'PROJETO', itens:ABAS.filter(a => a.grupo === 'Projeto') },
+    { nome:'CÓDIGO', itens:ABAS.filter(a => a.grupo === 'Código') },
+    { nome:'AUTOMAÇÃO E PRODUÇÃO', itens:ABAS.filter(a => ['Automação','Produção'].includes(a.grupo)) },
+  ]
 
   return (
     <div style={{
@@ -365,40 +371,58 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               {baixandoProjeto ? 'Gerando…' : 'Baixar projeto'}
             </button>
             <DSBtn variant="primary" size="sm" onClick={() => setPublicarAberto(true)}>↑ Publicar</DSBtn>
+            <div className="gh-more-wrap">
+              <DSBtn variant="ghost" size="icon" onClick={() => setMaisAberto(v => !v)} aria-label="Mais ações">⋮</DSBtn>
+              {maisAberto && <div className="gh-more-menu">
+                <button onClick={() => { setMaisAberto(false); mudarAba('delete') }}><span>×</span><span><b>Excluir repositório</b><small>Ação permanente</small></span></button>
+              </div>}
+            </div>
             <DSBtn variant="ghost" size="icon" onClick={fecharPainel} aria-label="Fechar repositório">✕</DSBtn>
           </div>
         </div>
 
-        {/* Ponte de comando — navegação por intenção */}
-        <div className="gh-command-deck" style={{padding:`${SPACE.lg}px ${SPACE.xl2}px`,borderBottom:`1px solid ${C.border}`,position:'sticky',top:57,background:C.bg,zIndex:9}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:SPACE.md,marginBottom:SPACE.md}}>
+        {/* Central do repositório — cards no padrão da Central de Atualizações */}
+        <div className="gh-command-deck" style={{padding:`${SPACE.lg}px ${SPACE.xl2}px`,borderBottom:`1px solid ${C.border}`,background:C.bg}}>
+          <div className="gh-repo-status-card">
+            <span className="gh-repo-status-icon">◉</span>
+            <span className="gh-repo-status-copy">
+              <b>GitHub conectado</b>
+              <small>{owner}/{repoNome} · {repoDetalhes.branch || repoDetalhes.default_branch || repo.branch || 'main'}</small>
+            </span>
+            <span className="gh-repo-status-dot" title="Conectado ao GitHub" />
+          </div>
+
+          <div className="gh-command-title">
             <div>
-              <div style={{fontSize:10,fontWeight:900,letterSpacing:'.16em',textTransform:'uppercase',color:C.accent}}>Ponte de comando</div>
-              <div style={{fontSize:FONT.sm,color:C.muted,marginTop:3}}>{abaAtual.grupo} · {abaAtual.label}</div>
+              <span>CENTRAL DO REPOSITÓRIO</span>
+              <b>Gerenciar {repoDetalhes.nome || repo.nome}</b>
             </div>
-            <div style={{width:8,height:8,borderRadius:'50%',background:C.greenSolid,boxShadow:`0 0 0 5px ${C.greenSolid}18`}} title="Conectado ao GitHub" />
+            <small>Escolha uma ação. Os detalhes abrem em uma janela própria.</small>
           </div>
-          <div className="gh-command-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:7}}>
-            {ABAS.map(a => (
-              <button key={a.id} onClick={() => mudarAba(a.id)} className="gh-command-btn" style={{
-                minWidth:0,textAlign:'center',padding:'9px 6px',borderRadius:RADIUS.md,cursor:'pointer',
-                border:`1px solid ${aba===a.id?(a.perigo?C.red:a.destaque?C.greenSolid:C.accent):C.border}`,
-                background:aba===a.id?(a.perigo?C.redBg:a.destaque?`${C.greenSolid}12`:`${C.accent}10`):C.surface,
-                color:a.perigo?C.red:a.destaque?C.greenSolid:C.text,
-              }}>
-                <span style={{display:'block',fontSize:15,fontWeight:900,lineHeight:1,marginBottom:5}}>{a.icon}</span>
-                <b style={{display:'block',fontSize:9.5,lineHeight:1.15,whiteSpace:'normal',overflowWrap:'anywhere'}}>{a.label}</b>
-              </button>
-            ))}
-          </div>
-          <style>{`@media(max-width:720px){.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}.gh-command-deck{position:relative!important;top:auto!important}.gh-repo-head{position:relative!important;top:auto!important}.gh-file-row{grid-template-columns:minmax(0,1fr)!important}.gh-file-actions{justify-content:flex-end!important}.gh-clean-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}}`}</style>
+
+          {gruposAbas.map(grupo => (
+            <section className="gh-command-group" key={grupo.nome}>
+              <div className="gh-command-group-label">{grupo.nome}</div>
+              <div className="gh-command-grid">
+                {grupo.itens.map(a => (
+                  <button key={a.id} onClick={() => mudarAba(a.id)} className={`gh-command-card${a.destaque?' destaque':''}`}>
+                    <span className="gh-command-card-icon">{a.icon}</span>
+                    <span className="gh-command-card-copy">
+                      <b>{a.label}</b>
+                      <small>{a.desc}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
 
-        <div className="gh-command-empty" style={{ padding: SPACE.xl2, flex: 1 }}>
-          <div style={{border:`1px dashed ${C.border}`,borderRadius:RADIUS.lg,padding:SPACE.xl2,textAlign:'center',color:C.muted}}>
-            <b style={{display:'block',fontSize:FONT.base,color:C.text,marginBottom:4}}>Escolha uma seção</b>
-            <span style={{fontSize:FONT.sm}}>Cada card abre suas informações em uma janela própria, sem aumentar esta página.</span>
-          </div>
+        <div className="gh-repo-overview-strip">
+          <div><span>Branch</span><b>{repoDetalhes.branch || repoDetalhes.default_branch || repo.branch || '—'}</b></div>
+          <div><span>Linguagem</span><b>{repoDetalhes.linguagem || repo.linguagem || '—'}</b></div>
+          <div><span>Tamanho</span><b>{fmtRepoSize(repoDetalhes.tamanho ?? repo.tamanho)}</b></div>
+          <div><span>Último push</span><b>{relTime(repoDetalhes.ultimoPush || repoDetalhes.ultimaAtualizacao || repo.ultimoPush || repo.ultimaAtualizacao)}</b></div>
         </div>
 
         <DSModal open={Boolean(secaoModal)} onClose={() => setSecaoModal(null)} title={`${abaAtual.grupo} · ${abaAtual.label}`} size="xl">
@@ -1817,6 +1841,11 @@ export default function AdminGitHub() {
         .gh-repo-counters{display:flex;align-items:center;gap:12px}.gh-repo-counters b{color:var(--adm-text)}
         .gh-filter-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:8px}
         .gh-command-select{display:none;width:100%;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:9px;padding:10px 11px;color:var(--adm-text);font-size:12px;font-weight:700;outline:none}
+        .gh-more-wrap{position:relative;flex:0 0 auto}.gh-more-menu{position:absolute;right:0;top:calc(100% + 7px);z-index:30;min-width:190px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(15,23,42,.16)}.gh-more-menu button{width:100%;border:0;background:transparent;color:var(--adm-text);border-radius:9px;padding:9px;display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;text-align:left;cursor:pointer}.gh-more-menu button:hover{background:var(--adm-surface2)}.gh-more-menu button>span:first-child{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:color-mix(in srgb,var(--adm-red,#dc2626) 9%,var(--adm-surface));color:var(--adm-red,#dc2626);font-size:15px;font-weight:900}.gh-more-menu b{display:block;font-size:10px;color:var(--adm-red,#dc2626)}.gh-more-menu small{display:block;margin-top:2px;font-size:8px;color:var(--adm-muted)}
+        .gh-repo-status-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px 14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));border:1px solid color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border));border-radius:14px;box-shadow:0 5px 18px rgba(15,23,42,.035)}.gh-repo-status-icon{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface);color:var(--adm-accent);font-size:16px}.gh-repo-status-copy{min-width:0;display:grid;gap:3px}.gh-repo-status-copy b{font-size:12px;color:var(--adm-text)}.gh-repo-status-copy small{font-size:9px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-repo-status-dot{width:9px;height:9px;border-radius:50%;background:var(--adm-green,#22c55e);box-shadow:0 0 0 5px color-mix(in srgb,var(--adm-green,#22c55e) 13%,transparent)}
+        .gh-command-title{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:16px 2px 10px}.gh-command-title>div{min-width:0}.gh-command-title span,.gh-command-group-label{display:block;font-size:8px;font-weight:900;letter-spacing:.13em;color:var(--adm-accent)}.gh-command-title b{display:block;margin-top:3px;font-size:14px;color:var(--adm-text)}.gh-command-title>small{max-width:260px;font-size:8.5px;line-height:1.4;color:var(--adm-muted);text-align:right}
+        .gh-command-group{margin-top:13px}.gh-command-group-label{margin:0 2px 6px;color:var(--adm-muted)}.gh-command-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.gh-command-card{min-width:0;min-height:72px;text-align:left;border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:14px;padding:11px;display:grid;grid-template-columns:32px minmax(0,1fr);gap:9px;align-items:center;color:var(--adm-text);cursor:pointer;box-shadow:0 5px 18px rgba(15,23,42,.03);transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}.gh-command-card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--adm-accent) 48%,var(--adm-border));box-shadow:0 9px 24px rgba(15,23,42,.055)}.gh-command-card.destaque{border-color:color-mix(in srgb,var(--adm-green,#16a34a) 36%,var(--adm-border));background:linear-gradient(145deg,var(--adm-surface),color-mix(in srgb,var(--adm-green,#16a34a) 4%,var(--adm-surface2)))}.gh-command-card-icon{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);font-size:15px;font-weight:900;color:var(--adm-text)}.gh-command-card.destaque .gh-command-card-icon{color:var(--adm-green,#16a34a);border-color:color-mix(in srgb,var(--adm-green,#16a34a) 28%,var(--adm-border))}.gh-command-card-copy{min-width:0;display:grid;gap:3px}.gh-command-card-copy b{font-size:10.5px;line-height:1.15;overflow-wrap:anywhere}.gh-command-card-copy small{font-size:8px;line-height:1.3;color:var(--adm-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        .gh-repo-overview-strip{margin:14px 20px 20px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--adm-border);border-radius:13px;overflow:hidden;background:var(--adm-surface)}.gh-repo-overview-strip>div{min-width:0;padding:10px 11px;border-right:1px solid var(--adm-border)}.gh-repo-overview-strip>div:last-child{border-right:0}.gh-repo-overview-strip span{display:block;font-size:7px;letter-spacing:.08em;text-transform:uppercase;font-weight:850;color:var(--adm-muted)}.gh-repo-overview-strip b{display:block;margin-top:4px;font-size:10px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .gh-repo-title{word-break:normal;overflow-wrap:anywhere;line-height:1.2}.gh-repo-path{overflow-wrap:anywhere}
         .gh-github-summary{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:10px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:12px}
         .gh-overview-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch}
@@ -1839,8 +1868,8 @@ export default function AdminGitHub() {
         .gh-profile-edit-head{display:flex;align-items:center;gap:12px;padding:10px;background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:10px}.gh-profile-edit-avatar{width:54px;height:54px;border-radius:50%;object-fit:cover}.gh-external-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 9px;border:1px solid var(--adm-border);border-radius:8px;color:var(--adm-text);font-size:10px;font-weight:700;text-decoration:none;background:var(--adm-surface)}
         .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-empty{padding:12px!important}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;justify-content:flex-start!important}.gh-run-actions>*{flex:1;justify-content:center}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-command-card{min-height:105px;padding:9px 8px;grid-template-columns:1fr;align-content:start;gap:7px}.gh-command-card-icon{width:29px;height:29px;font-size:14px}.gh-command-card-copy b{font-size:9.5px}.gh-command-card-copy small{font-size:7.4px;line-height:1.28}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{gap:6px}.gh-command-card{min-height:101px;padding:8px 7px;border-radius:12px}.gh-command-card-copy b{font-size:9px}.gh-command-card-copy small{font-size:7px}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;justify-content:flex-start!important}.gh-run-actions>*{flex:1;justify-content:center}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
       `}</style>
 
       <PerfilGitHubModal

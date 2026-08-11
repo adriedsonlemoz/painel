@@ -1,20 +1,16 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.100",
+  "version": "1.0.101",
   "packageFormat": 2,
   "changelog": [
-    "Motor central de IA reestruturado: Gemini e OpenRouter passam a usar adapters únicos, fila global com prioridades e perfis por tarefa para Assistente, Editorial, SEO, Diagnóstico, RSS, Tradução e ações rápidas.",
-    "Chamadas de IA ganham retry com backoff e Retry-After, circuit breaker/cooldown por provedor, timeout por tentativa e limite total da operação; falhas transitórias deixam de disparar chamadas repetidas sem controle.",
-    "Fallback Gemini ↔ OpenRouter passa a respeitar cooldown, prioridade, privacidade e estado real dos provedores; o Dashboard usa saúde em cache e não faz sondagens externas de IA a cada atualização.",
-    "Saídas estruturadas agora são validadas localmente contra JSON Schema mesmo quando o provedor recua para JSON simples, evitando respostas válidas em JSON porém incompletas para SEO, RSS ou diagnóstico.",
-    "Gemini passa a autenticar exclusivamente pelo cabeçalho x-goog-api-key; chamadas diretas duplicadas foram removidas de Integrações e APIs e centralizadas no mesmo adapter usado pelos módulos.",
-    "Contexto passa a ser limitado por orçamento aproximado de tokens e logs priorizam regiões próximas de erro/exception/falha; conteúdo externo é marcado como não confiável e segredos são mascarados por um redator central.",
-    "Integrações e APIs ganha controles de privacidade por classe de dados, diagnóstico unificado, informações de fila/cooldown e telemetria de uso dos últimos dias com sucesso, fallback, cache, latência, tokens e custo conhecido.",
-    "Foi adicionada telemetria AiUsage sem armazenar prompts/respostas completas e cache por hash para análises repetíveis, reduzindo consumo ao reabrir a mesma análise sem mudanças.",
-    "Assistente de IA passa a responder em streaming com status e botão Cancelar; análises longas de GitHub Actions usam jobs persistentes com progresso, resultado armazenado temporariamente e possibilidade de cancelamento.",
-    "Seleção de modelos passa a expor metadados de capacidade como contexto e suporte a JSON estruturado quando o provedor informa esses dados; OpenRouter exige parâmetros compatíveis em saídas estruturadas.",
-    "Falhas definitivas do motor de IA continuam integradas à Central de Erros, agora com mensagens de provedor/código mascaradas; documentos detalhados do MongoDB permanecem bloqueados para IA por padrão.",
-    "Foi adicionada suíte de testes do núcleo para schema, sanitização, circuit breaker, contexto e adapters; compatibilidade com Vercel/Render e os modos VPS/Termux legado foi preservada."
+    "GitHub recebe uma Central do Repositório visualmente alinhada à Central de Atualizações, com cards maiores, ícones, títulos e descrições curtas.",
+    "No celular, as opções internas do repositório permanecem em 3 cards por linha, conforme o padrão solicitado; desktop usa grade mais ampla e responsiva.",
+    "As ações são organizadas em Projeto, Código e Automação e produção; cada card continua abrindo seu conteúdo em modal/drawer sem expandir a página para baixo.",
+    "O topo do repositório ganha card de estado GitHub conectado com conta/repositório e branch atual, aproximando a linguagem visual dos demais hubs do painel.",
+    "A área vazia inferior foi substituída por resumo compacto de Branch, Linguagem, Tamanho e Último push.",
+    "Excluir repositório deixa de competir visualmente com ações comuns e passa para o menu Mais (⋮), mantendo a confirmação destrutiva existente.",
+    "Baixar projeto e Publicar continuam no cabeçalho e todas as funcionalidades GitHub/R2/Vercel/Render permanecem inalteradas.",
+    "Versão interna, manifesto do atualizador, frontend, backend, Setup e backup/exportação foram sincronizados em 1.0.101."
   ],
   "updatePackages": {
     "full": true,
