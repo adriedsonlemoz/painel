@@ -1,16 +1,18 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.96",
+  "version": "1.0.97",
   "packageFormat": 2,
   "changelog": [
-    "SEO & Metadados passa a salvar por rotas dedicadas com permissão seo.gerenciar ou configuracoes.gerenciar, corrigindo o caso em que a tela abria mas o usuário não conseguia persistir alterações.",
-    "Após salvar SEO, o backend relê os valores persistidos no MongoDB e o frontend confirma campo a campo; cache e bootstrap público são sincronizados imediatamente para não reaparecer valor antigo.",
-    "SEO ganha interface compacta por cards e popups responsivos, prévia acessível também no mobile e indicação explícita de alterações não salvas / salvando / salvo e confirmado.",
-    "SEO ganha Assistente IA usando Gemini/OpenRouter de Integrações e APIs, com auditoria, sugestões de título, descrição e palavras-chave aplicadas somente após revisão do usuário.",
-    "Central de Erros ganha triagem local para ocorrências externas: Novo, Acompanhando, Revisado e Silenciado, além de notas locais, sem apagar ou alterar o erro na plataforma de origem.",
-    "GitHub, Vercel, Render e MongoDB podem ser selecionados em massa para triagem no AL; a mensagem antiga que limitava ações de status somente aos erros internos foi removida.",
-    "Detalhes de ocorrências externas ganham Reconsultar origem, Abrir plataforma, Analisar com IA e nota de acompanhamento persistente no MongoDB.",
-    "Termux/VPS e todos os fluxos anteriores permanecem compatíveis; pacote completo 1.0.96 inclui todas as melhorias das versões anteriores."
+    "Home pública ganha carrossel editorial com exatamente 3 notícias em destaque, navegação por indicadores e gesto lateral no celular.",
+    "História, Belezas naturais, Ônibus e Eventos voltam a ocupar uma única linha compacta de quatro atalhos no mobile.",
+    "Filtros de Últimas Notícias ficam compactos: categorias principais visíveis e demais opções recolhidas em Mais, reduzindo a altura antes do conteúdo.",
+    "Brasil e Mundo passa a priorizar agregação dinâmica das fontes RSS ativas, com deduplicação, ordenação por data e hierarquia editorial; notícias externas manuais permanecem como fallback.",
+    "Nova previsão do tempo usa serviço backend com Open-Meteo, localização configurável, cache, condição atual e próximos dias sem expor integração no frontend.",
+    "Novo bloco opcional de Futebol usa API-Football para placares ao vivo ou jogos do dia, com cache, prioridades configuráveis e credencial central em Integrações e APIs.",
+    "Novo bloco opcional de Horóscopo usa API Ninjas, abre cada signo sob demanda e pode traduzir o texto por Gemini/OpenRouter já configurados no AL.",
+    "Integrações e APIs ganha configurações e teste para API Ninjas e API-Football; backup/importação de .env inclui as novas credenciais.",
+    "Admin de módulos ganha a seção Tempo + Esportes para ativar/desativar clima, RSS, futebol e horóscopo e configurar a cidade da previsão.",
+    "Vercel/Render permanecem como produção principal, enquanto os fluxos existentes de VPS/Termux continuam compatíveis; pacote completo 1.0.97 inclui todas as melhorias anteriores."
   ],
   "updatePackages": {
     "full": true,

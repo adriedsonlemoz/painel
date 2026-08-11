@@ -38,3 +38,5 @@ export { cloudflareService } from './domains/cloudflare.js'
 export { securityService } from './domains/security.js'
 
 export { updatesService } from './domains/updates.js'
+
+export { portalContentService } from './domains/portalContent.js'

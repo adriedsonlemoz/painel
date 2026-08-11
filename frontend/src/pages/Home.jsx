@@ -18,6 +18,7 @@ import {
   onibusService,
   newsletterService,
   noticiasService,
+  portalContentService,
 } from '../services/api'
 
 /* ─── Ícones de tópico ─────────────────────────────────────── */
@@ -186,31 +187,26 @@ function FaixaTopicos({ topicos, proximoEvento, proximoOnibus, modulos }) {
 ═══════════════════════════════════════════════════════════ */
 function AbasCategorias({ catAtual, onMudar }) {
   const { categorias } = useCategorias()
-
+  const [mais, setMais] = useState(false)
+  const principais = categorias.slice(0, 4)
+  const extras = categorias.slice(4)
+  const renderButton = c => (
+    <button
+      key={c._id || c.id}
+      onClick={() => onMudar(c.slug)}
+      className={`portal-cat-btn ${catAtual === c.slug ? 'active' : ''}`}
+      style={catAtual === c.slug ? { '--cat-color': c.cor || '#ff5c00' } : {}}>
+      {c.nome}
+    </button>
+  )
   return (
-    <div className="portal-category-tabs flex gap-2 flex-wrap pb-1">
-      <button
-        onClick={() => onMudar(null)}
-        className={`flex-shrink-0 font-grotesk font-bold text-sm px-4 py-2 rounded-xl
-                    border-2 transition-all whitespace-nowrap
-                    ${!catAtual
-                      ? 'bg-brand-500 border-brand-500 text-white shadow-sm'
-                      : 'bg-gray-50 border-transparent text-gray-600 hover:border-gray-200'}`}>
-        Tudo
-      </button>
-      {categorias.map(c => (
-        <button
-          key={c._id || c.id}
-          onClick={() => onMudar(c.slug)}
-          className={`flex-shrink-0 font-grotesk font-bold text-sm px-4 py-2 rounded-xl
-                      border-2 transition-all whitespace-nowrap
-                      ${catAtual === c.slug
-                        ? 'text-white border-transparent shadow-sm'
-                        : 'bg-gray-50 border-transparent text-gray-600 hover:border-gray-200'}`}
-          style={catAtual === c.slug ? { backgroundColor: c.cor || '#ff5c00' } : {}}>
-          {c.nome}
-        </button>
-      ))}
+    <div className="portal-categories-compact">
+      <div className="portal-category-primary">
+        <button onClick={() => onMudar(null)} className={`portal-cat-btn ${!catAtual ? 'active' : ''}`}>Tudo</button>
+        {principais.map(renderButton)}
+        {extras.length > 0 && <button className="portal-cat-btn more" onClick={() => setMais(v => !v)}>{mais ? 'Menos' : 'Mais'} <span>{mais ? '−' : '+'}</span></button>}
+      </div>
+      {mais && <div className="portal-category-more">{extras.map(renderButton)}</div>}
     </div>
   )
 }
@@ -218,57 +214,93 @@ function AbasCategorias({ catAtual, onMudar }) {
 /* ═══════════════════════════════════════════════════════════
    NOTÍCIAS EXTERNAS
 ═══════════════════════════════════════════════════════════ */
-function NoticiasExternas({ items }) {
-  if (!items.length) return null
+function formatAgo(date) {
+  if (!date) return ''
+  const min = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000))
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  const h = Math.round(min / 60)
+  if (h < 24) return `há ${h}h`
+  return new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+}
+
+function NoticiasExternas({ items = [], fallback = [] }) {
+  const rss = items.length ? items : fallback.map(x => ({ id:x._id||x.id, title:x.titulo, url:x.url_externa, source:x.fonte_nome, image:x.imagem_url, publishedAt:x.criado_em }))
+  if (!rss.length) return null
+  const [lead, ...rest] = rss.slice(0, 7)
   return (
-    <section>
-      <div className="section-title">
-        <h2 className="section-title-text font-grotesk">
-          <Globe size={20} className="text-brand-500"/> Notícias do Brasil e do Mundo
-        </h2>
+    <section className="world-news-section">
+      <div className="section-title mb-4">
+        <h2 className="section-title-text font-grotesk"><Globe size={20} className="text-brand-500"/> Brasil e Mundo</h2>
+        <span className="portal-source-pill">RSS</span>
       </div>
-      <div className="scroll-x pb-2">
-        {items.slice(0, 4).map(item => (
-          <a key={item._id || item.id} href={item.url_externa} target="_blank" rel="noopener noreferrer"
-            className="group block w-44 sm:w-52 flex-shrink-0">
-            <div className="card h-full flex flex-col">
-              <div className="relative h-28 overflow-hidden bg-gray-100 flex-shrink-0">
-                {item.imagem_url ? (
-                  <img src={item.imagem_url} alt={item.titulo}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-50">
-                    <Globe size={24} className="text-gray-300"/>
-                  </div>
-                )}
-                {item.categoria_label && (
-                  <div className="absolute top-2 left-2">
-                    <span className="text-[10px] font-bold font-grotesk px-2 py-0.5 rounded-full
-                                     text-white uppercase tracking-wide shadow-sm"
-                      style={{ backgroundColor: item.categoria_cor || '#ff5c00' }}>
-                      {item.categoria_label}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div className="p-3 flex flex-col flex-1">
-                <p className="font-display font-semibold text-gray-900 text-xs leading-snug
-                               group-hover:text-brand-500 transition-colors line-clamp-3 flex-1">
-                  {item.titulo}
-                </p>
-                <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
-                  <span className="text-xs font-grotesk font-bold text-gray-400 uppercase tracking-wide">
-                    {item.fonte_nome}
-                  </span>
-                  <ExternalLink size={12} className="text-gray-300 group-hover:text-brand-500 transition-colors"/>
-                </div>
-              </div>
-            </div>
-          </a>
-        ))}
+      <div className="world-news-layout">
+        <a className="world-lead group" href={lead.url} target="_blank" rel="noopener noreferrer">
+          {lead.image ? <img src={lead.image} alt=""/> : <div className="world-image-fallback"><Globe size={28}/></div>}
+          <div className="world-lead-body">
+            <div className="world-meta"><b>{lead.source || 'RSS'}</b><span>{formatAgo(lead.publishedAt)}</span></div>
+            <h3>{lead.title}</h3>
+            <span className="world-open">Abrir na fonte <ExternalLink size={13}/></span>
+          </div>
+        </a>
+        <div className="world-list">
+          {rest.map(item => <a key={item.id || item.url} href={item.url} target="_blank" rel="noopener noreferrer" className="world-row group">
+            {item.image && <img src={item.image} alt=""/>}
+            <div className="min-w-0"><div className="world-meta"><b>{item.source || 'RSS'}</b><span>{formatAgo(item.publishedAt)}</span></div><h4>{item.title}</h4></div>
+            <ChevronRight size={16} className="world-chevron"/>
+          </a>)}
+        </div>
       </div>
     </section>
   )
+}
+
+function weatherEmoji(code, isDay = true) {
+  if (code === 0) return isDay ? '☀️' : '🌙'
+  if ([1,2].includes(code)) return '🌤️'
+  if (code === 3) return '☁️'
+  if ([45,48].includes(code)) return '🌫️'
+  if ([51,53,55,56,57,61,63,65,66,67,80,81,82].includes(code)) return '🌧️'
+  if ([95,96,99].includes(code)) return '⛈️'
+  return '🌥️'
+}
+function WeatherBlock({ data }) {
+  if (!data?.available || !data.current) return null
+  const c = data.current
+  const days = (data.daily || []).slice(0, 4)
+  return <section className={`weather-card ${c.isDay ? 'day' : 'night'}`}>
+    <div className="weather-main">
+      <div><div className="weather-kicker">PREVISÃO DO TEMPO</div><h2>{data.location?.name || 'Iguatama'}{data.location?.admin1 ? ` · ${data.location.admin1}` : ''}</h2><p>{c.condition}</p></div>
+      <div className="weather-now"><span className="weather-icon">{weatherEmoji(c.weatherCode,c.isDay)}</span><strong>{Math.round(c.temperature)}°</strong></div>
+    </div>
+    <div className="weather-facts"><span>Sensação <b>{Math.round(c.apparentTemperature)}°</b></span><span>Umidade <b>{Math.round(c.humidity)}%</b></span><span>Vento <b>{Math.round(c.windSpeed)} km/h</b></span><span>Chuva <b>{Math.round(c.precipitation || 0)} mm</b></span></div>
+    <div className="weather-days">{days.map((d,i)=><div key={d.date}><span>{i===0?'Hoje':new Date(`${d.date}T12:00:00`).toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')}</span><b>{weatherEmoji(d.weatherCode,true)}</b><small>{Math.round(d.max)}° / {Math.round(d.min)}°</small><em>{Math.round(d.rainChance||0)}% chuva</em></div>)}</div>
+    <a className="weather-source" href={data.attributionUrl || 'https://open-meteo.com/'} target="_blank" rel="noreferrer">Dados meteorológicos: {data.source || 'Open-Meteo'}</a>
+  </section>
+}
+
+function FootballBlock({ data }) {
+  if (!data?.available || !data.matches?.length) return null
+  return <section className="football-section">
+    <div className="section-title mb-4"><h2 className="section-title-text font-grotesk">⚽ {data.mode === 'live' ? 'Futebol ao vivo' : 'Jogos de hoje'}</h2><span className={data.mode==='live'?'live-pill':'portal-source-pill'}>{data.mode==='live'?'● AO VIVO':'HOJE'}</span></div>
+    <div className="football-list">{data.matches.map(m=><div key={m.id} className="match-row">
+      <div className="match-league"><span>{m.league?.name}</span><small>{m.league?.country}</small></div>
+      <div className="match-teams"><span>{m.home?.logo&&<img src={m.home.logo} alt=""/>}{m.home?.name}</span><strong>{m.goals?.home ?? '–'} × {m.goals?.away ?? '–'}</strong><span>{m.away?.name}{m.away?.logo&&<img src={m.away.logo} alt=""/>}</span></div>
+      <div className="match-status">{data.mode==='live' ? `${m.elapsed || ''}${m.elapsed ? "'" : ''} ${m.status || ''}` : new Date(m.date).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
+    </div>)}</div>
+    <div className="football-source">Dados: API-Football</div>
+  </section>
+}
+
+const SIGNS = [['aries','Áries','♈'],['taurus','Touro','♉'],['gemini','Gêmeos','♊'],['cancer','Câncer','♋'],['leo','Leão','♌'],['virgo','Virgem','♍'],['libra','Libra','♎'],['scorpio','Escorpião','♏'],['sagittarius','Sagitário','♐'],['capricorn','Capricórnio','♑'],['aquarius','Aquário','♒'],['pisces','Peixes','♓']]
+function HoroscopeBlock({ status }) {
+  const [open,setOpen]=useState(null),[result,setResult]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('')
+  if (!status?.available || !status?.configured) return null
+  async function choose(sign){setOpen(sign);setResult(null);setError('');setBusy(true);try{setResult(await portalContentService.horoscope(sign))}catch(e){setError(e.message||'Não foi possível carregar o horóscopo.')}finally{setBusy(false)}}
+  const selected=SIGNS.find(x=>x[0]===open)
+  return <section className="horoscope-section"><div className="section-title mb-4"><h2 className="section-title-text font-grotesk">✨ Horóscopo de hoje</h2><span className="portal-source-pill">12 signos</span></div><div className="zodiac-grid">{SIGNS.map(([id,label,icon])=><button key={id} onClick={()=>choose(id)}><b>{icon}</b><span>{label}</span></button>)}</div>
+  {open&&<div className="horoscope-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setOpen(null)}}><div className="horoscope-modal"><button className="horoscope-close" onClick={()=>setOpen(null)}>×</button><div className="zodiac-big">{selected?.[2]}</div><h3>{selected?.[1]}</h3>{busy?<p>Consultando previsão…</p>:error?<p className="text-red-600">{error}</p>:<p>{result?.text || 'Previsão indisponível.'}</p>}<small>Fonte: API Ninjas</small></div></div>}
+  </section>
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -335,7 +367,7 @@ function selecionarCapa(noticias = [], cfg = {}) {
   const automaticas = noticiasSemRepeticao([...destaques, ...unicas])
     .filter(n => noticiaId(n) !== noticiaId(principal) && !escolhidasIds.has(noticiaId(n)))
 
-  return { principal, secundarios: [...escolhidas, ...automaticas].slice(0, 3) }
+  return { principal, secundarios: [...escolhidas, ...automaticas].slice(0, 2) }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -357,45 +389,20 @@ function Plantao({ noticia }) {
 
 function CapaJornalistica({ noticias, cfg }) {
   const { principal, secundarios } = selecionarCapa(noticias, cfg)
-  if (!principal) return null
-  const pid = noticiaId(principal)
-  const nome = cfg.nome_site || 'Portal de Notícias'
-  return (
-    <section className="bg-white border-b border-gray-100">
-      <div className="wrap py-7 sm:py-9">
-        <div className="flex items-end justify-between gap-4 border-b-2 border-gray-900 pb-3 mb-5">
-          <div>
-            <p className="font-grotesk text-[11px] uppercase tracking-[.18em] font-black text-brand-500">Capa</p>
-            <h1 className="font-display font-bold text-gray-900 text-2xl sm:text-3xl">{nome}</h1>
-          </div>
-          <span className="hidden sm:block font-grotesk text-xs text-gray-400">Notícias em destaque agora</span>
-        </div>
-        <div className="grid lg:grid-cols-5 gap-5">
-          <Link to={`/noticia/${pid}`} className="group lg:col-span-3 block">
-            <div className="rounded-2xl overflow-hidden bg-gray-100 mb-4" style={{aspectRatio:'16/9'}}>
-              {principal.imagem_url ? <img src={principal.imagem_url} alt={principal.titulo} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"/> : <div className="w-full h-full flex items-center justify-center text-6xl">📰</div>}
-            </div>
-            {principal.categoria_id?.nome && <span className="text-xs font-grotesk font-black uppercase tracking-wide text-brand-500">{principal.categoria_id.nome}</span>}
-            <h2 className="font-display font-bold text-gray-950 text-2xl sm:text-3xl leading-tight mt-1 group-hover:text-brand-600 transition-colors">{principal.titulo}</h2>
-            {principal.resumo && <p className="font-grotesk text-gray-500 mt-3 text-base sm:text-lg leading-relaxed line-clamp-3">{principal.resumo}</p>}
-          </Link>
-          <div className="lg:col-span-2 grid sm:grid-cols-2 lg:grid-cols-1 gap-0 border-t lg:border-t-0 lg:border-l border-gray-200 lg:pl-5">
-            {secundarios.map((n, i) => (
-              <Link key={n._id||n.id} to={`/noticia/${n._id||n.id}`} className={`group py-4 ${i ? 'border-t border-gray-100' : ''}`}>
-                <div className="flex gap-4">
-                  <div className="flex-1 min-w-0">
-                    {n.categoria_id?.nome && <span className="text-[10px] font-grotesk font-black uppercase text-brand-500">{n.categoria_id.nome}</span>}
-                    <h3 className="font-display font-bold text-gray-900 text-lg leading-snug mt-1 group-hover:text-brand-600 line-clamp-3">{n.titulo}</h3>
-                  </div>
-                  {n.imagem_url && <img src={n.imagem_url} alt="" className="w-24 h-20 object-cover rounded-xl flex-shrink-0"/>}
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  )
+  const slides = noticiasSemRepeticao([principal, ...secundarios].filter(Boolean)).slice(0, 3)
+  const [active,setActive]=useState(0)
+  const [touchStart,setTouchStart]=useState(null)
+  useEffect(()=>{ if(slides.length<2)return; const t=setInterval(()=>setActive(v=>(v+1)%slides.length),6500); return()=>clearInterval(t) },[slides.length])
+  if (!slides.length) return null
+  const n=slides[Math.min(active,slides.length-1)]
+  const id=noticiaId(n)
+  return <section className="headline-carousel-wrap"><div className="wrap py-5 sm:py-7"><div className="headline-carousel" onTouchStart={e=>setTouchStart(e.touches[0].clientX)} onTouchEnd={e=>{if(touchStart==null)return;const dx=e.changedTouches[0].clientX-touchStart;if(Math.abs(dx)>45)setActive(v=>(v+(dx<0?1:-1)+slides.length)%slides.length);setTouchStart(null)}}>
+    <Link to={`/noticia/${id}`} className="headline-slide group">
+      <div className="headline-image">{n.imagem_url?<img src={n.imagem_url} alt={n.titulo}/>:<div>📰</div>}<div className="headline-gradient"/></div>
+      <div className="headline-copy">{n.categoria_id?.nome&&<span>{n.categoria_id.nome}</span>}<h1>{n.titulo}</h1>{n.resumo&&<p>{n.resumo}</p>}</div>
+    </Link>
+    <div className="headline-controls"><div className="headline-dots">{slides.map((x,i)=><button key={noticiaId(x)} className={i===active?'active':''} onClick={()=>setActive(i)} aria-label={`Destaque ${i+1}`}/>)}</div><span>{active+1} / {slides.length}</span></div>
+  </div></div></section>
 }
 
 
@@ -556,6 +563,7 @@ export default function Home() {
   const [proximoEvento, setProximoEvento] = useState(null)
   const [proximoOnibus, setProximoOnibus] = useState(null)
   const [plantao,       setPlantao]       = useState(null)
+  const [portalContent,  setPortalContent] = useState({ weather:null, football:null, rssWorld:{items:[]}, horoscope:null })
 
   useEffect(() => {
     configuracoesService.listar().then(setCfg).catch(() => {})
@@ -567,6 +575,7 @@ export default function Home() {
     topicosService.listar().then(setTopicos).catch(() => {})
     noticiasExternasService.listar().then(setExternas).catch(() => {})
     noticiasService.listar({ urgente: true, limit: 1 }).then(r => setPlantao(r.noticias?.[0] || null)).catch(() => {})
+    portalContentService.home().then(setPortalContent).catch(() => {})
 
     eventosService.listar().then(evs => {
       const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
@@ -651,22 +660,13 @@ export default function Home() {
 
       {!emFiltro && <Plantao noticia={plantao} />}
 
-      {/* Capa jornalística — usa a manchete/destaques já definidos no editor de notícias */}
-      {!emFiltro && isAtivo('hero') && !loading && (
-        <CapaJornalistica noticias={noticiasUnicas} cfg={cfg} />
+      {/* Atalhos locais — quatro itens na mesma linha no mobile */}
+      {!emFiltro && isAtivo('topicos') && topicos.length > 0 && (
+        <div className="py-4"><FaixaTopicos topicos={topicos.slice(0,4)} proximoEvento={proximoEvento} proximoOnibus={proximoOnibus} modulos={modulos}/></div>
       )}
 
-      {/* Tópicos */}
-      {!emFiltro && isAtivo('topicos') && topicos.length > 0 && (
-        <div className="py-5">
-          <FaixaTopicos
-            topicos={topicos}
-            proximoEvento={proximoEvento}
-            proximoOnibus={proximoOnibus}
-            modulos={modulos}
-          />
-        </div>
-      )}
+      {/* Exatamente três destaques em carrossel editorial */}
+      {!emFiltro && isAtivo('hero') && !loading && <CapaJornalistica noticias={noticiasUnicas} cfg={cfg} />}
 
       {/* Conteúdo */}
       <div className="wrap py-8 space-y-10">
@@ -810,31 +810,14 @@ export default function Home() {
               </section>
             )}
 
-            {isAtivo('noticias_externas') && externas.length > 0 && (
-              <NoticiasExternas items={externas}/>
+            <WeatherBlock data={portalContent.weather}/>
+
+            {isAtivo('noticias_externas') && ((portalContent.rssWorld?.items?.length || 0) > 0 || externas.length > 0) && (
+              <NoticiasExternas items={portalContent.rssWorld?.items || []} fallback={externas}/>
             )}
 
-            {isAtivo('destaques') && destaquesRestantes.length > 0 && (
-              <section>
-                <div className="section-title">
-                  <h2 className="section-title-text font-grotesk">
-                    <Star size={20} className="text-brand-500"/> Destaques
-                  </h2>
-                  <Link to="/?view=todas"
-                    className="text-sm font-grotesk font-bold text-brand-500 hover:text-brand-600
-                               flex items-center gap-1 transition-colors">
-                    Ver todas <ArrowRight size={14}/>
-                  </Link>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {destaquesRestantes.slice(0, 3).map((n, i) => (
-                    <div key={n._id || n.id} className="animate-slide-up" style={{ animationDelay: `${i * 60}ms` }}>
-                      <NoticiaCardV noticia={n} fullWidth/>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+            <FootballBlock data={portalContent.football}/>
+            <HoroscopeBlock status={portalContent.horoscope}/>
 
             <MaisLidas noticias={maisLidas} />
 

@@ -105,12 +105,12 @@ function SecaoCapa({ cfg, onChange }) {
     <div className="adm-card" style={{ padding: 24 }}>
       <div style={{ marginBottom: 20 }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--adm-text)', marginBottom: 4 }}>Editor da capa jornalística</h3>
-        <p style={{ fontSize: 13, color: 'var(--adm-muted)' }}>Escolha a manchete e até quatro chamadas. Campos vazios são preenchidos automaticamente pelos destaques.</p>
+        <p style={{ fontSize: 13, color: 'var(--adm-muted)' }}>Escolha a manchete e duas chamadas. A Home exibirá exatamente 3 destaques no carrossel; campos vazios são preenchidos automaticamente.</p>
       </div>
       <div style={{ display:'grid', gap:14 }}>
         <SelectNoticia label="Manchete principal" value={cfg.home_manchete_id} onValue={v => onChange('home_manchete_id', v)} />
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:12 }}>
-          {[0,1,2,3].map(i => <SelectNoticia key={i} label={`Chamada secundária ${i+1}`} value={secundarias[i] || ''} onValue={v => setSecundaria(i, v)} />)}
+          {[0,1].map(i => <SelectNoticia key={i} label={`Chamada secundária ${i+1}`} value={secundarias[i] || ''} onValue={v => setSecundaria(i, v)} />)}
         </div>
       </div>
     </div>
@@ -377,7 +377,7 @@ function SecaoNoticiasExternas() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--adm-text)', marginBottom: 4 }}>Notícias do Brasil e do Mundo</h3>
-          <p style={{ fontSize: 13, color: 'var(--adm-muted)' }}>Gerencie as notícias externas exibidas na home</p>
+          <p style={{ fontSize: 13, color: 'var(--adm-muted)' }}>Fallback manual. A Home agora prioriza automaticamente as fontes RSS ativas; use estes itens apenas quando o RSS estiver indisponível</p>
         </div>
         <button onClick={() => abrirEditar(null)} className="adm-btn adm-btn-primary adm-btn-sm">
           <Plus size={14} style={{ marginRight: 6 }} /> Nova Notícia
@@ -475,6 +475,34 @@ function SecaoNoticiasExternas() {
       </DSModal>
     </div>
   )
+}
+
+// ─── Seção: Conteúdo dinâmico da Home ───────────────────────
+function SecaoConteudoDinamico({ cfg, onChange }) {
+  const defaults = { portal_weather_enabled:true, portal_rss_world_enabled:true, portal_football_enabled:false, portal_horoscope_enabled:false }
+  const bool = key => cfg[key] == null || cfg[key] === '' ? Boolean(defaults[key]) : cfg[key] !== 'false'
+  const toggle = key => onChange(key, bool(key) ? 'false' : 'true')
+  return <div className="adm-card" style={{ padding: 24 }}>
+    <div style={{ marginBottom: 18 }}><h3 style={{ fontSize:16,fontWeight:700,color:'var(--adm-text)',marginBottom:4 }}>Conteúdo dinâmico</h3><p style={{fontSize:13,color:'var(--adm-muted)'}}>Clima e RSS funcionam pelo backend. Horóscopo e futebol só aparecem quando as respectivas APIs estiverem configuradas em Integrações e APIs.</p></div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))',gap:12}}>
+      {[
+        ['portal_weather_enabled','Previsão do tempo','Open-Meteo · sem chave'],
+        ['portal_rss_world_enabled','Brasil e Mundo por RSS','Usa as fontes RSS ativas'],
+        ['portal_football_enabled','Futebol ao vivo','Requer API-Football'],
+        ['portal_horoscope_enabled','Horóscopo','Requer API Ninjas'],
+      ].map(([key,title,desc])=><button type="button" key={key} onClick={()=>toggle(key)} style={{textAlign:'left',padding:14,borderRadius:12,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',color:'var(--adm-text)'}}><div style={{display:'flex',alignItems:'center',gap:8}}><span style={{width:9,height:9,borderRadius:99,background:bool(key)?'var(--adm-accent)':'var(--adm-muted)'}}/><b>{title}</b><span style={{marginLeft:'auto',fontSize:10,fontWeight:900,color:bool(key)?'var(--adm-accent)':'var(--adm-muted)'}}>{bool(key)?'ATIVO':'OCULTO'}</span></div><div style={{fontSize:11,color:'var(--adm-muted)',marginTop:7}}>{desc}</div></button>)}
+    </div>
+    <div style={{marginTop:18,paddingTop:18,borderTop:'1px solid var(--adm-border)'}}>
+      <h4 style={{margin:'0 0 12px'}}>Local da previsão</h4>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:10}}>
+        <div className="adm-field"><label className="adm-label">Cidade</label><input className="adm-input" value={cfg.portal_weather_city || 'Iguatama, MG'} onChange={e=>onChange('portal_weather_city',e.target.value)} placeholder="Iguatama, MG"/></div>
+        <div className="adm-field"><label className="adm-label">Latitude opcional</label><input className="adm-input" value={cfg.portal_weather_lat || ''} onChange={e=>onChange('portal_weather_lat',e.target.value)} placeholder="Automática"/></div>
+        <div className="adm-field"><label className="adm-label">Longitude opcional</label><input className="adm-input" value={cfg.portal_weather_lon || ''} onChange={e=>onChange('portal_weather_lon',e.target.value)} placeholder="Automática"/></div>
+      </div>
+      <div className="adm-field" style={{marginTop:10,maxWidth:220}}><label className="adm-label">Dias de previsão</label><select className="adm-input" value={cfg.portal_weather_days || '4'} onChange={e=>onChange('portal_weather_days',e.target.value)}>{[3,4,5,6,7].map(n=><option key={n} value={n}>{n} dias</option>)}</select></div>
+      <p style={{fontSize:11,color:'var(--adm-muted)',marginTop:10}}>Se latitude/longitude ficarem vazias, o backend localiza a cidade pela API de geocodificação do Open-Meteo. As chaves de Horóscopo e Futebol ficam exclusivamente em <b>Integrações e APIs</b>.</p>
+    </div>
+  </div>
 }
 
 // ─── Seção: Visibilidade dos módulos ─────────────────────────
@@ -584,6 +612,7 @@ export default function AdminModulos() {
     { key: 'hero', label: 'Hero legado', icon: <Image size={15} /> },
     { key: 'topicos', label: 'Tópicos', icon: <Layout size={15} /> },
     { key: 'noticias_externas', label: 'Externas', icon: <Globe size={15} /> },
+    { key: 'dinamico', label: 'Tempo + Esportes', icon: <Star size={15} /> },
     { key: 'footer', label: 'Rodapé', icon: <Heart size={15} /> },
     { key: 'modulos', label: 'Visibilidade', icon: <Settings size={15} /> },
   ]
@@ -617,7 +646,7 @@ export default function AdminModulos() {
           <div className="adm-page-title">Módulos da Home</div>
           <div className="adm-page-sub">Configure textos, módulos e seções da home</div>
         </div>
-        {(aba === 'capa' || aba === 'hero' || aba === 'footer') && (
+        {(aba === 'capa' || aba === 'hero' || aba === 'footer' || aba === 'dinamico') && (
           <div className="adm-page-actions">
             <button onClick={salvarConfiguracoes} disabled={salvando} className="adm-btn adm-btn-primary">
               {salvando ? <><Loader2 size={14} className="adm-spin" style={{ marginRight: 6 }} /> Salvando...</> : <><Save size={14} style={{ marginRight: 6 }} /> Salvar</>}
@@ -640,6 +669,7 @@ export default function AdminModulos() {
       {aba === 'hero' && <SecaoHero cfg={cfgEdit} onChange={onCfgChange} />}
       {aba === 'topicos' && <SecaoTopicos />}
       {aba === 'noticias_externas' && <SecaoNoticiasExternas />}
+      {aba === 'dinamico' && <SecaoConteudoDinamico cfg={cfgEdit} onChange={onCfgChange} />}
       {aba === 'footer' && <SecaoFooter cfg={cfgEdit} onChange={onCfgChange} />}
       {aba === 'modulos' && <SecaoModulos modulos={modulos} onToggle={toggleModulo} />}
     </>

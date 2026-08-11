@@ -88,6 +88,7 @@ import cloudflareRoutes  from './routes/cloudflare.js'
 import securityRoutes    from './routes/security.js'
 import integracoesRoutes from './routes/integracoes.js'
 import updatesRoutes     from './routes/updates.js'
+import portalContentRoutes from './routes/portalContent.js'
 import { tratarErros }  from './middleware/erros.js'
 import { STATE_DIR } from './services/systemUpdateService.js'
 import { recoverInterruptedUpdates } from './update/recoveryManager.js'
@@ -259,6 +260,7 @@ app.use('/api/admin/cloudflare', cloudflareRoutes)
 app.use('/api/admin/security',   securityRoutes)
 app.use('/api/admin/integracoes', integracoesRoutes)
 app.use('/api/admin/updates',     updatesRoutes)
+app.use('/api/portal-content',    portalContentRoutes)
 
 // ─── #9 — Health check detalhado ─────────────────────────────
 app.use('/api/health', healthRoutes)

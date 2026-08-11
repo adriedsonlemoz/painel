@@ -13,7 +13,7 @@ import AuditLog from '../models/AuditLog.js'
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
 const EXPORT_MASK='****************'
-const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY' }
+const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY' }
 const safe = (d) => ({
   configured:Boolean(d?.value)||Boolean(d?.locked),
   usable:Boolean(d?.value),
@@ -127,7 +127,7 @@ async function integrationIdentity(id,c) {
     const accountId=c.metadata?.accountId||null
     return {available:Boolean(accountId),provider:id,kind:'cloud-account',label:accountId?`Conta Cloudflare: ${accountId}`:'Cloudflare configurado',accountId,email:null,detectedAt:new Date().toISOString(),note:'A API Token identifica a conta/permissões; o e-mail do proprietário não é necessário para o AL Sistemas.'}
   }
-  const labels={gemini:'Gemini',openrouter:'OpenRouter',render:'Render',vercel:'Vercel'}
+  const labels={gemini:'Gemini',openrouter:'OpenRouter',render:'Render',vercel:'Vercel',api_ninjas:'API Ninjas',api_football:'API-Football'}
   return {available:false,provider:id,kind:'api-key',label:`${labels[id]||id}: chave configurada`,email:null,detectedAt:new Date().toISOString(),note:'Este provedor não disponibiliza ao AL Sistemas o e-mail do proprietário por meio desta chave/API.'}
 }
 
@@ -430,6 +430,18 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
     if(!r.ok)throw new Error(body.error?.message||`Gemini respondeu ${r.status}`)
     const reply=body.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('').trim()
     result.mensagem=`Gemini conectado • modelo ${model} gerou resposta${reply?` (${reply.slice(0,24)})`:''}.`
+  } else if(id==='api_ninjas'){
+    const r=await fetch('https://api.api-ninjas.com/v1/horoscope?zodiac=aries',{headers:{'X-Api-Key':c.value}})
+    const body=await r.json().catch(()=>({}))
+    if(!r.ok)throw new Error(body.error||body.message||`API Ninjas respondeu ${r.status}`)
+    result.mensagem='API Ninjas conectada • horóscopo disponível.'
+  } else if(id==='api_football'){
+    const r=await fetch('https://v3.football.api-sports.io/status',{headers:{'x-apisports-key':c.value}})
+    const body=await r.json().catch(()=>({}))
+    const apiErrors=body.errors
+    const hasErrors=Array.isArray(apiErrors)?apiErrors.length>0:Boolean(apiErrors&&typeof apiErrors==='object'&&Object.keys(apiErrors).length)
+    if(!r.ok||hasErrors)throw new Error(Array.isArray(apiErrors)?apiErrors[0]:Object.values(apiErrors||{})[0]||body.message||`API-Football respondeu ${r.status}`)
+    result.mensagem='API-Football conectada • placares e jogos disponíveis.'
   } else if(id==='openrouter'){
     const model=c.metadata?.model||'openrouter/free'
     const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${c.value}`,'Content-Type':'application/json','HTTP-Referer':process.env.FRONTEND_URL||'http://localhost','X-Title':'AL Sistemas'},body:JSON.stringify({model,messages:[{role:'user',content:'Responda somente OK'}],max_tokens:8,temperature:0})})
@@ -491,6 +503,15 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
       add('VERCEL_TEAM_ID',c.metadata?.teamId||process.env.VERCEL_TEAM_ID||'',c.source)
     }else if(id==='render'){
       add('RENDER_API_KEY',c.value,c.source)
+    }else if(id==='api_ninjas'){
+      add('API_NINJAS_KEY',c.value,c.source)
+      add('API_NINJAS_TRANSLATE_PT_BR',String(c.metadata?.translatePtBr!==false),c.source)
+    }else if(id==='api_football'){
+      add('API_FOOTBALL_KEY',c.value,c.source)
+      add('API_FOOTBALL_LEAGUES',c.metadata?.leagueIds||'',c.source)
+      add('API_FOOTBALL_MAX_MATCHES',String(c.metadata?.maxMatches||6),c.source)
+      add('API_FOOTBALL_LIVE_CACHE_SECONDS',String(c.metadata?.liveCacheSeconds||300),c.source)
+      add('API_FOOTBALL_SHOW_INTERNATIONAL',String(c.metadata?.showInternational!==false),c.source)
     }else add(envName,c.value,c.source)
   }
   return rows
@@ -517,7 +538,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.96',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.97',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
@@ -579,6 +600,12 @@ router.post('/import', async(req,res,next)=>{ try {
 
   const vercel=val('VERCEL_TOKEN')
   if(vercel&&!isMasked(vercel)){const old=await getCredential('vercel',defs.vercel);await setCredential('vercel',vercel,{...(old.metadata||{}),teamId:val('VERCEL_TEAM_ID')||old.metadata?.teamId||''});imported.push('Vercel')}else if(vercel)skipped.push('Vercel')
+
+  const ninjas=val('API_NINJAS_KEY')
+  if(ninjas&&!isMasked(ninjas)){const old=await getCredential('api_ninjas',defs.api_ninjas);const tr=val('API_NINJAS_TRANSLATE_PT_BR');await setCredential('api_ninjas',ninjas,{...(old.metadata||{}),translatePtBr:tr?tr!=='false':old.metadata?.translatePtBr!==false});imported.push('API Ninjas')}else if(ninjas)skipped.push('API Ninjas')
+
+  const football=val('API_FOOTBALL_KEY')
+  if(football&&!isMasked(football)){const old=await getCredential('api_football',defs.api_football);const max=Number(val('API_FOOTBALL_MAX_MATCHES'));const refresh=Number(val('API_FOOTBALL_LIVE_CACHE_SECONDS'));const intl=val('API_FOOTBALL_SHOW_INTERNATIONAL');await setCredential('api_football',football,{...(old.metadata||{}),leagueIds:val('API_FOOTBALL_LEAGUES')||old.metadata?.leagueIds||'',maxMatches:Number.isFinite(max)&&max>=2&&max<=12?max:(old.metadata?.maxMatches||6),liveCacheSeconds:Number.isFinite(refresh)&&refresh>=60&&refresh<=900?refresh:(old.metadata?.liveCacheSeconds||300),showInternational:intl?intl!=='false':old.metadata?.showInternational!==false});imported.push('API-Football')}else if(football)skipped.push('API-Football')
 
   await audit(req,'integracoes.importar',{imported,skipped})
   res.json({ok:true,imported,skipped,mensagem:imported.length?`${imported.length} configuração(ões) importada(s) com segurança.`:'Nenhuma credencial válida encontrada para importar.'})

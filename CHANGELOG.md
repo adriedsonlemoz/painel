@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.97
+
+- **Home editorial mais compacta:** os destaques passam a formar um carrossel com exatamente 3 notícias, troca automática, indicadores e gesto lateral no celular.
+- **Atalhos locais restaurados:** História, Belezas naturais, Ônibus e Eventos voltam para uma única linha com 4 colunas no mobile.
+- **Últimas Notícias sem excesso de categorias:** a Home mostra apenas as categorias principais e recolhe as demais em `Mais`, evitando várias linhas antes das notícias.
+- **Brasil e Mundo por RSS real:** o backend consulta as fontes RSS ativas, deduplica links, ordena por publicação e monta uma seção editorial; os cards externos manuais continuam apenas como fallback quando não houver RSS disponível.
+- **Previsão do tempo:** novo serviço backend consulta Open-Meteo, resolve a cidade quando latitude/longitude não forem informadas, mantém cache e entrega condição atual, sensação, umidade, vento, chuva e próximos dias.
+- **Futebol ao vivo / jogos de hoje:** integração opcional com API-Football via chave central, com cache curto para partidas ao vivo, cache do dia e filtros de ligas/prioridade configuráveis.
+- **Horóscopo opcional:** integração com API Ninjas, carregada somente quando o visitante escolhe um signo; tradução pt-BR pode reutilizar Gemini/OpenRouter já configurados em Integrações e APIs.
+- **Integrações centralizadas:** API Ninjas e API-Football entram em Integrações e APIs com teste de credencial, Mostrar/Ocultar, parâmetros próprios e participação no backup/importação `.env`.
+- **Configuração editorial:** Admin → Módulos ganha `Tempo + Esportes` para ativar clima, Brasil e Mundo/RSS, futebol e horóscopo, além de cidade, coordenadas opcionais e quantidade de dias da previsão.
+- **Compatibilidade preservada:** Vercel + Render continuam o foco de produção online, sem remover suporte legado a VPS/Termux e sem expor chaves das novas APIs no frontend.
+
 ## 1.0.96
 
 - **SEO corrigido de verdade:** a tela agora usa endpoints dedicados de SEO, aceitando `seo.gerenciar` ou `configuracoes.gerenciar`, sem afrouxar as demais configurações do sistema.

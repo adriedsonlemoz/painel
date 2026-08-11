@@ -4,10 +4,10 @@ import { authFetch } from '../../services/domains/http.js'
 
 const INTEGRATIONS_BASE=`${import.meta.env.VITE_API_URL||'/api'}/admin/integracoes`
 const API=(path,options={})=>authFetch(`${INTEGRATIONS_BASE}${path}`,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.erro||'Falha na operação');return d})
-const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter']]
+const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter'],['api_ninjas','API Ninjas · Horóscopo'],['api_football','API-Football · Futebol']]
 const AI_PROVIDERS=['gemini','openrouter']
 const API_DEFAULTS={gemini:'https://generativelanguage.googleapis.com/v1beta',openrouter:'https://openrouter.ai/api/v1'}
-const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',r2Endpoint:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.'}}
+const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',r2Endpoint:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.',translatePtBr:true,leagueIds:'',maxMatches:6,showInternational:true,liveCacheSeconds:300}}
 
 const integrationHelp={
  mongodb:{
@@ -68,6 +68,20 @@ const integrationHelp={
   ],
   expected:'sk-or-...',
  },
+ api_ninjas:{
+  title:'API Ninjas — Horóscopo',
+  text:'Fornece o horóscopo diário usado no portal. A chave fica somente no backend e o bloco da Home só aparece quando estiver ativado nos Módulos da Home.',
+  steps:['Crie uma conta no API Ninjas.','Abra a área da API Key.','Cole a chave abaixo e use Testar.','O AL pode traduzir o texto para pt-BR usando Gemini/OpenRouter já configurados.'],
+  links:[['Documentação oficial do Horóscopo','https://api-ninjas.com/api/horoscope']],
+  expected:'X-Api-Key do API Ninjas',
+ },
+ api_football:{
+  title:'API-Football — placares e jogos',
+  text:'Alimenta Futebol ao vivo e Jogos de hoje. O AL consulta a API apenas pelo backend e aplica cache para proteger a cota.',
+  steps:['Crie/abra sua conta API-Sports.','Copie a API key do dashboard.','Cole a chave e use Testar.','Opcionalmente informe IDs de ligas separados por vírgula para limitar a Home.'],
+  links:[['Documentação oficial API-Football','https://www.api-football.com/documentation-v3']],
+  expected:'API key enviada no header x-apisports-key',
+ },
  custom:{
   title:'Provedor personalizado',
   text:'Use uma API própria ou compatível com autenticação Bearer. Como cada serviço é diferente, consulte a documentação oficial do provedor escolhido.',
@@ -120,6 +134,8 @@ export default function AdminIntegracoes(){
     <IntegrationCard id="vercel" name="Vercel" description="Projetos e deploys hospedados na Vercel, usando uma única credencial central." status={status?.integrations?.vercel} onOpen={openIntegration}/>
     <IntegrationCard id="gemini" name="Google Gemini" description="IA para Assistente, editor de notícias e recursos opcionais do RSS." status={status?.integrations?.gemini} onOpen={openIntegration}/>
     <IntegrationCard id="openrouter" name="OpenRouter" description="Provedor alternativo de IA com acesso unificado a vários modelos." status={status?.integrations?.openrouter} onOpen={openIntegration}/>
+    <IntegrationCard id="api_ninjas" name="Horóscopo" description="API Ninjas para o horóscopo diário exibido no portal." status={status?.integrations?.api_ninjas} onOpen={openIntegration}/>
+    <IntegrationCard id="api_football" name="Futebol" description="API-Football para jogos ao vivo e partidas do dia." status={status?.integrations?.api_football} onOpen={openIntegration}/>
    </div>
   </section>
 
@@ -135,6 +151,7 @@ export default function AdminIntegracoes(){
      :tab==='render'?<RenderConnector current={current} form={form} setForm={setForm}/>
      :tab==='vercel'?<VercelConnector current={current} form={form} setForm={setForm}/>
      :AI_PROVIDERS.includes(tab)?<AIWizard provider={tab} form={form} setForm={setForm} current={current}/>
+     :['api_ninjas','api_football'].includes(tab)?<PortalApiConnector provider={tab} current={current} form={form} setForm={setForm}/>
      :<><SecretField label="API Secret" value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a credencial'}/>{tab==='cloudinary'&&<><Field label="Cloud Name" value={form.metadata.cloudName} onChange={v=>setForm({...form,metadata:{...form.metadata,cloudName:v}})} placeholder="ex.: meu-cloud"/><Field label="API Key" value={form.metadata.apiKey} onChange={v=>setForm({...form,metadata:{...form.metadata,apiKey:v}})} placeholder="API Key do Console"/></>}</>}
     <div className="modal-actions">
      {tab!=='github'&&<><button className="primary" onClick={save} disabled={busy}>{busy?'Salvando…':tab==='mongodb'?'Salvar e reconectar':'Salvar'}</button><button onClick={test} disabled={busy}>Testar</button></>}
@@ -224,6 +241,25 @@ function IntegrationInstructions({info}){
   {!!info.steps?.length&&<ol style={{margin:'10px 0 0',paddingLeft:20,color:'var(--adm-text)'}}>{info.steps.map((step,i)=><li key={i} style={{margin:'4px 0'}}>{step}</li>)}</ol>}
   {info.expected&&<div style={{marginTop:9,fontSize:12,color:'var(--adm-muted)'}}><b>Formato/dados esperados:</b> <code>{info.expected}</code></div>}
   {!!info.links?.length&&<div className="integration-help-links" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>{info.links.map(([label,url])=><a key={url} href={url} target="_blank" rel="noreferrer" style={{display:'inline-block',padding:'7px 9px',borderRadius:8,border:'1px solid var(--adm-border)',background:'var(--adm-bg)',color:'var(--adm-accent)',fontWeight:700,textDecoration:'none'}}>{label} ↗</a>)}</div>}
+ </div>
+}
+
+function PortalApiConnector({provider,current,form,setForm}){
+ const setMeta=(key,value)=>setForm(f=>({...f,metadata:{...f.metadata,[key]:value}}))
+ const football=provider==='api_football'
+ return <div>
+  <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
+   <b>{football?'Futebol na Home':'Horóscopo na Home'}</b>
+   <div style={{color:'var(--adm-muted)',marginTop:5}}>{football?'A chave nunca vai para o navegador. Live scores usam cache curto; jogos do dia usam cache maior para economizar cota.':'A chave nunca vai para o navegador. Cada signo é consultado sob demanda e fica em cache por várias horas.'}</div>
+  </div>
+  <SecretField label={current?.configured?'Nova API Key (deixe vazio para manter)':'API Key'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a chave da API'}/>
+  {football?<>
+   <Field label="IDs de ligas prioritárias (opcional)" value={form.metadata.leagueIds||''} onChange={v=>setMeta('leagueIds',v)} placeholder="Ex.: 71,72,73"/>
+   <Field label="Máximo de jogos no portal" type="number" min="2" max="12" value={form.metadata.maxMatches||6} onChange={v=>setMeta('maxMatches',Number(v)||6)}/>
+   <Field label="Atualização durante jogo ao vivo (segundos)" type="number" min="60" max="900" value={form.metadata.liveCacheSeconds||300} onChange={v=>setMeta('liveCacheSeconds',Math.max(60,Math.min(900,Number(v)||300)))}/>
+   <div style={{fontSize:11,color:'var(--adm-muted)',marginTop:-6,marginBottom:10}}>Padrão: 300 s (5 min). Quando não há partida ao vivo, o AL reduz automaticamente as consultas para proteger a cota da API.</div>
+   <label className="ai-toggle-row"><input type="checkbox" checked={form.metadata.showInternational!==false} onChange={e=>setMeta('showInternational',e.target.checked)}/><span><b>Completar com jogos internacionais</b><small>Sem IDs de liga, o AL prioriza partidas do Brasil e depois completa a lista.</small></span></label>
+  </>:<label className="ai-toggle-row"><input type="checkbox" checked={form.metadata.translatePtBr!==false} onChange={e=>setMeta('translatePtBr',e.target.checked)}/><span><b>Traduzir para português com a IA do AL</b><small>Usa Gemini/OpenRouter já configurados; se a IA falhar, mostra o texto original.</small></span></label>}
  </div>
 }
 

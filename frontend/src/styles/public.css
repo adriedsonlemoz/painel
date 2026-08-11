@@ -135,3 +135,74 @@
   .portal-topic-grid { grid-template-columns: 1fr 1fr; }
   .section-title-text { font-size: 1rem; }
 }
+
+/* ── Home 1.0.97: atalhos, carrossel editorial e conteúdo dinâmico ── */
+.portal-topic-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+.portal-topic-grid>a,.portal-topic-grid>button{min-width:0}
+.portal-categories-compact{display:grid;gap:8px}
+.portal-category-primary{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.portal-category-more{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:8px;border-top:1px solid #eef0f2}
+.portal-cat-btn{border:1px solid #e8eaed;background:#fff;color:#4b5563;border-radius:999px;padding:8px 13px;font-size:.77rem;font-weight:800;line-height:1;white-space:nowrap;transition:.18s ease}
+.portal-cat-btn.active{background:var(--cat-color,#ff5c00);border-color:var(--cat-color,#ff5c00);color:#fff;box-shadow:0 4px 12px rgba(17,24,39,.08)}
+.portal-cat-btn.more{background:#f6f7f8}
+
+.headline-carousel-wrap{background:#fff;border-bottom:1px solid #eef0f2}
+.headline-carousel{position:relative;border-radius:22px;overflow:hidden;background:#111827;min-height:380px;box-shadow:0 14px 34px rgba(17,24,39,.12)}
+.headline-slide{display:block;position:relative;min-height:380px;color:#fff}
+.headline-image{position:absolute;inset:0;background:#e5e7eb}
+.headline-image img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .55s ease}
+.headline-slide:hover .headline-image img{transform:scale(1.015)}
+.headline-image>div:not(.headline-gradient){height:100%;display:grid;place-items:center;font-size:4rem}
+.headline-gradient{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 20%,rgba(4,10,20,.86) 100%)}
+.headline-copy{position:absolute;left:0;right:0;bottom:0;padding:28px 28px 48px;max-width:840px}
+.headline-copy>span{display:inline-flex;padding:5px 9px;border-radius:999px;background:#ff5c00;color:#fff;font-size:.68rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+.headline-copy h1{margin:9px 0 0;font-family:var(--font-display,Georgia,serif);font-size:clamp(1.55rem,4vw,2.35rem);line-height:1.06;font-weight:800;color:#fff;text-wrap:balance}
+.headline-copy p{margin:9px 0 0;color:rgba(255,255,255,.82);font-size:.9rem;line-height:1.5;max-width:680px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.headline-controls{position:absolute;left:26px;right:26px;bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;color:rgba(255,255,255,.75);font-size:.7rem;font-weight:800}
+.headline-dots{display:flex;align-items:center;gap:7px}
+.headline-dots button{width:28px;height:4px;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.35)}
+.headline-dots button.active{background:#fff}
+
+.weather-card{position:relative;overflow:hidden;border-radius:22px;padding:22px;color:#fff;box-shadow:0 14px 34px rgba(15,23,42,.13)}
+.weather-card.day{background:linear-gradient(135deg,#1677b8,#55a7d8 56%,#91c9e6)}
+.weather-card.night{background:linear-gradient(135deg,#111827,#25385e 60%,#344b76)}
+.weather-card:after{content:'';position:absolute;width:220px;height:220px;border-radius:50%;right:-75px;top:-110px;background:rgba(255,255,255,.1)}
+.weather-main{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:flex-start;gap:18px}
+.weather-kicker{font-size:.64rem;font-weight:900;letter-spacing:.14em;opacity:.82}
+.weather-main h2{margin:4px 0 2px;font-size:1.25rem;font-weight:850}
+.weather-main p{margin:0;font-size:.86rem;opacity:.85}
+.weather-now{display:flex;align-items:center;gap:7px;flex:none}
+.weather-now strong{font-size:2.2rem;line-height:1;font-weight:850}
+.weather-icon{font-size:2rem}
+.weather-facts{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:18px}
+.weather-facts span{padding:9px 10px;border-radius:12px;background:rgba(255,255,255,.12);font-size:.68rem;display:grid;gap:2px}
+.weather-facts b{font-size:.78rem}
+.weather-days{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:9px}
+.weather-days>div{padding:10px 8px;border-radius:13px;background:rgba(255,255,255,.13);display:grid;place-items:center;gap:3px;text-align:center}
+.weather-days span{font-size:.64rem;font-weight:800;text-transform:capitalize}.weather-days b{font-size:1.18rem}.weather-days small{font-size:.7rem;font-weight:850}.weather-days em{font-size:.57rem;font-style:normal;opacity:.78}
+.weather-source{position:relative;z-index:1;display:inline-block;margin-top:10px;color:rgba(255,255,255,.7);font-size:.58rem;text-decoration:none}
+
+.portal-source-pill,.live-pill{display:inline-flex;align-items:center;border-radius:999px;padding:5px 8px;font-size:.6rem;font-weight:900;letter-spacing:.05em;background:#f1f3f5;color:#667085}.live-pill{background:#fff0f1;color:#dc2626}
+.world-news-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:14px}
+.world-lead,.world-list{background:#fff;border:1px solid #edf0f2;border-radius:18px;overflow:hidden;box-shadow:0 4px 14px rgba(17,24,39,.04)}
+.world-lead>img,.world-image-fallback{width:100%;height:245px;object-fit:cover;display:grid;place-items:center;background:#eef1f3;color:#9ca3af}
+.world-lead-body{padding:16px}.world-meta{display:flex;gap:8px;align-items:center;color:#9ca3af;font-size:.64rem}.world-meta b{color:#ff5c00;text-transform:uppercase;letter-spacing:.04em}.world-lead h3{font-family:var(--font-display,Georgia,serif);font-size:1.35rem;line-height:1.16;color:#111827;margin:7px 0 11px}.world-open{display:inline-flex;align-items:center;gap:5px;color:#667085;font-size:.68rem;font-weight:800}
+.world-list{display:flex;flex-direction:column}.world-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px;border-bottom:1px solid #f0f1f2}.world-row:last-child{border-bottom:0}.world-row img{width:74px;height:58px;object-fit:cover;border-radius:10px}.world-row h4{font-family:var(--font-display,Georgia,serif);font-size:.9rem;line-height:1.22;color:#1f2937;margin:4px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.world-chevron{color:#c7ccd1}
+
+.football-section{background:#fff;border:1px solid #edf0f2;border-radius:20px;padding:17px;box-shadow:0 4px 14px rgba(17,24,39,.04)}
+.football-list{display:grid;gap:8px}.match-row{display:grid;grid-template-columns:minmax(100px,.72fr) minmax(0,1.8fr) auto;align-items:center;gap:12px;padding:11px 12px;border:1px solid #eef0f2;border-radius:13px;background:#fafbfc}.match-league{display:grid;gap:2px;min-width:0}.match-league span{font-size:.68rem;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.match-league small{font-size:.58rem;color:#98a2b3}.match-teams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px}.match-teams span{display:flex;align-items:center;gap:5px;font-size:.72rem;font-weight:750;min-width:0}.match-teams span:last-child{justify-content:flex-end;text-align:right}.match-teams img{width:20px;height:20px;object-fit:contain;flex:none}.match-teams strong{font-size:.86rem}.match-status{font-size:.65rem;font-weight:850;color:#ef4444;white-space:nowrap}.football-source{margin-top:8px;text-align:right;color:#98a2b3;font-size:.58rem}
+
+.horoscope-section{background:#fff;border:1px solid #edf0f2;border-radius:20px;padding:17px;box-shadow:0 4px 14px rgba(17,24,39,.04)}
+.zodiac-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}.zodiac-grid button{border:1px solid #edf0f2;background:#faf9ff;border-radius:13px;padding:10px 4px;display:grid;place-items:center;gap:4px;color:#4b5563}.zodiac-grid b{font-size:1.25rem;color:#7c3aed}.zodiac-grid span{font-size:.61rem;font-weight:800}.horoscope-overlay{position:fixed;inset:0;z-index:1400;background:rgba(17,24,39,.52);display:grid;place-items:center;padding:16px}.horoscope-modal{position:relative;width:min(420px,100%);background:#fff;border-radius:22px;padding:24px;text-align:center;box-shadow:0 24px 70px rgba(0,0,0,.25)}.horoscope-close{position:absolute;right:13px;top:10px;border:0;background:transparent;font-size:1.6rem;color:#667085}.zodiac-big{font-size:2.5rem;color:#7c3aed}.horoscope-modal h3{margin:4px 0 12px;font-size:1.2rem}.horoscope-modal p{font-size:.88rem;line-height:1.65;color:#475467;text-align:left}.horoscope-modal small{color:#98a2b3;font-size:.6rem}
+
+@media(max-width:640px){
+  .portal-topic-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important;border-radius:16px!important}
+  .portal-topic-grid .w-11{width:34px!important;height:34px!important}.portal-topic-grid p{font-size:9px!important}.portal-topic-grid .py-4{padding-top:10px!important;padding-bottom:10px!important}.portal-topic-grid .gap-2{gap:5px!important}
+  .portal-category-primary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.portal-category-more{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.portal-cat-btn{width:100%;padding:8px 5px;font-size:.68rem;overflow:hidden;text-overflow:ellipsis}
+  .headline-carousel{min-height:315px;border-radius:18px}.headline-slide{min-height:315px}.headline-copy{padding:20px 18px 42px}.headline-copy h1{font-size:1.55rem}.headline-copy p{font-size:.78rem;-webkit-line-clamp:2}.headline-controls{left:18px;right:18px;bottom:13px}
+  .weather-card{padding:17px;border-radius:18px}.weather-main h2{font-size:1.05rem}.weather-now strong{font-size:1.8rem}.weather-icon{font-size:1.6rem}.weather-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.weather-days{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.weather-days>div{padding:8px 3px}.weather-days small{font-size:.62rem}.weather-days em{font-size:.5rem}
+  .world-news-layout{grid-template-columns:1fr}.world-lead>img,.world-image-fallback{height:200px}.world-lead h3{font-size:1.14rem}.world-row img{width:68px;height:54px}.world-row h4{font-size:.84rem}
+  .match-row{grid-template-columns:1fr;gap:7px}.match-league{display:flex;justify-content:space-between;gap:8px}.match-teams{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.match-status{text-align:right;margin-top:-3px}
+  .zodiac-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:380px){.portal-topic-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}.zodiac-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
