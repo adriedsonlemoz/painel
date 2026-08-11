@@ -1,19 +1,11 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.106",
+  "version": "1.0.107",
   "packageFormat": 2,
   "changelog": [
-    "Menu do Admin reorganizado: Dashboard, Atualizações e Erros e logs ficam soltos; Desenvolvimento é removido e o restante passa a ser organizado em Conteúdo, Portal, Publicação e Sistema.",
-    "No celular, Conteúdo, Portal, Publicação e Sistema abrem centrais em cards em vez de despejar listas longas no menu; as rotas antigas continuam preservadas.",
-    "Publicar projeto no GitHub ganha Wizard centralizado e responsivo, com cabeçalho e ações fixos, corpo rolável e layout preparado para celulares menores.",
-    "O seletor nativo de ZIP foi substituído por um cartão de pacote no mesmo padrão visual da Central de Atualizações, com nome, tamanho e quantidade de arquivos detectada.",
-    "O Wizard tenta identificar produto e versão do ZIP e compara com a versão atual detectada no repositório antes da publicação.",
-    "Revisão final usa informações compactadas em colunas: arquivo, versão, repositório, branch, pasta, modo, snapshot R2 e vínculos de produção.",
-    "Depois de confirmar, o formulário deixa a tela e abre um dashboard de publicação com etapas separadas para pacote, validação, snapshot R2 e GitHub, incluindo destino congelado da operação.",
-    "Falhas durante a publicação permanecem dentro do dashboard com mensagem clara, opção de revisar e tentar novamente; sucessos rotineiros não dependem de notificações grandes.",
-    "Tela final da publicação mostra projeto/versão, commit, arquivos, R2 e vínculos Vercel/Render em colunas compactas, além de acesso ao commit e implantação Render quando aplicável.",
-    "Foi criado um componente base de Wizard do AL para padronizar centralização, stepper, rolagem, rodapé fixo e grades compactas em futuras migrações dos demais assistentes.",
-    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.106."
+    "Menu do Admin: os grupos Conteúdo, Portal, Publicação e Sistema agora abrem em um painel sanfona logo abaixo da barra ao clicar, empurrando o conteúdo da página para baixo — substitui o dropdown flutuante centralizado da versão anterior.",
+    "Dashboard, Atualizações e Erros e logs continuam soltos no nível raiz do menu, fora de qualquer grupo/submenu.",
+    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.107."
   ],
   "updatePackages": {
     "full": true,

@@ -256,22 +256,6 @@ export default function AdminLayout() {
           content:''; position:absolute; bottom:0; left:8px; right:8px;
           height:2px; background:var(--adm-accent); border-radius:2px;
         }
-        .adm-top-dropdown {
-          position:absolute; top:calc(100% + 4px); left:50%;
-          transform:translateX(-50%);
-          background:var(--adm-surface); border:1px solid var(--adm-border);
-          border-radius:10px; box-shadow:var(--adm-shadow-md);
-          overflow:hidden; z-index:400; min-width:180px;
-          animation: adm-dd-in .12s ease;
-        }
-        @keyframes adm-dd-in { from{opacity:0;transform:translateX(-50%) translateY(-4px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
-        .adm-top-dd-item {
-          display:flex; align-items:center; gap:9px;
-          padding:9px 14px; font-size:13px; font-weight:500;
-          color:var(--adm-muted); text-decoration:none; transition:all .12s;
-        }
-        .adm-top-dd-item:hover { background:var(--adm-surface2); color:var(--adm-text); }
-        .adm-top-dd-item.active { color:var(--adm-text); background:var(--adm-surface2); }
       `}</style>
 
       {/* ── Modal logout ── */}
@@ -360,7 +344,8 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      {/* ── Top Nav ── */}
+      {/* ── Top Nav + painel sanfona dos grupos ── */}
+      <div ref={topDropdownRef}>
       <nav className="adm-topnav" aria-label="Navegação do painel admin">
         {/* Hamburguer mobile */}
         <button className="adm-hamburger" onClick={() => setDrawerAberto(true)}
@@ -388,11 +373,9 @@ export default function AdminLayout() {
             if (item.group) {
               const grupoAtivo = groupHasActive(pathname, item)
               const aberto = topDropdown === item.label
-              const filhosVisiveis = item.children.filter(c => podeVer(c.perm))
               const errosNoGrupo = item.children.some(c => c.to === '/admin/erros') && naoLidos > 0
               return (
-                <div key={item.label} ref={aberto ? topDropdownRef : null}
-                  style={{ position:'relative', display:'flex', alignItems:'stretch' }}>
+                <div key={item.label} style={{ position:'relative', display:'flex', alignItems:'stretch' }}>
                   <button
                     className={`adm-top-group-btn${grupoAtivo ? ' active' : ''}`}
                     onClick={() => setTopDropdown(v => v === item.label ? null : item.label)}
@@ -409,33 +392,6 @@ export default function AdminLayout() {
                       <polyline points="6 9 12 15 18 9"/>
                     </svg>
                   </button>
-                  {aberto && (
-                    <div className="adm-top-dropdown">
-                      <Link to={item.to} className={`adm-top-dd-item${pathname === item.to ? ' active' : ''}`} onClick={() => setTopDropdown(null)} style={{fontWeight:700,borderBottom:'1px solid var(--adm-border)'}}>
-                        <span style={{ width:14, height:14, display:'flex', alignItems:'center', flexShrink:0 }}><item.icon /></span>
-                        <span style={{ flex:1 }}>Abrir central de {item.label.toLowerCase()}</span>
-                        <span>›</span>
-                      </Link>
-                      {filhosVisiveis.map(child => {
-                        const childActive = isActive(pathname, child.to)
-                        const TopChildLink = child.external ? 'a' : Link
-                        const topChildProps = child.external
-                          ? { href: child.to, target: '_blank', rel: 'noopener noreferrer' }
-                          : { to: child.to }
-                        return (
-                          <TopChildLink key={child.to} {...topChildProps}
-                            className={`adm-top-dd-item${childActive ? ' active' : ''}`}
-                            onClick={() => setTopDropdown(null)}>
-                            <span style={{ width:14, height:14, display:'flex', alignItems:'center', flexShrink:0 }}>
-                              <child.icon />
-                            </span>
-                            <span style={{ flex:1 }}>{child.label}</span>
-                            {child.to === '/admin/erros' && badgeErros()}
-                          </TopChildLink>
-                        )
-                      })}
-                    </div>
-                  )}
                 </div>
               )
             }
@@ -501,6 +457,46 @@ export default function AdminLayout() {
           </div>
         </div>
       </nav>
+
+      {/* Painel sanfona: expande abaixo do topnav, empurrando o conteúdo (não é mais centralizado/flutuante) */}
+      {(() => {
+        const grupoAberto = navVisivel.find(item => item.group && item.label === topDropdown)
+        const filhosVisiveis = grupoAberto ? grupoAberto.children.filter(c => podeVer(c.perm)) : []
+        return (
+          <div className={`adm-accordion-panel adm-only-desktop${grupoAberto ? ' open' : ''}`}>
+            <div>
+              <div className="adm-accordion-inner">
+                {grupoAberto && (
+                  <>
+                    <Link to={grupoAberto.to} className="adm-accordion-title"
+                      onClick={() => setTopDropdown(null)}>
+                      <grupoAberto.icon />
+                      Central de {grupoAberto.label.toLowerCase()}
+                    </Link>
+                    {filhosVisiveis.map(child => {
+                      const childActive = isActive(pathname, child.to)
+                      const ChildLink = child.external ? 'a' : Link
+                      const childProps = child.external
+                        ? { href: child.to, target:'_blank', rel:'noopener noreferrer' }
+                        : { to: child.to }
+                      return (
+                        <ChildLink key={child.to} {...childProps}
+                          className={`adm-accordion-item${childActive ? ' active' : ''}`}
+                          onClick={() => setTopDropdown(null)}>
+                          <child.icon />
+                          {child.label}
+                          {child.to === '/admin/erros' && badgeErros()}
+                        </ChildLink>
+                      )
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+      </div>
 
       {/* ── Conteúdo ── */}
       <main id="admin-content" className="adm-main">

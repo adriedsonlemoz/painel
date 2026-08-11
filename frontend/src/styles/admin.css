@@ -45,7 +45,7 @@
 
 /* ── Top Nav (cor via tema) ── */
 .adm-topnav {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 202;
+  position: sticky; top: 0; z-index: 202;
   height: 48px;
   background: var(--adm-topnav-bg, var(--adm-surface));
   border-bottom: 1px solid var(--adm-border);
@@ -53,6 +53,42 @@
   padding: 0 16px; gap: 0;
   box-shadow: var(--adm-shadow);
 }
+
+/* ── Painel sanfona (grupos do menu: Conteúdo, Portal, Publicação, Sistema) ──
+   Fica "grudado" logo abaixo do topnav e, ao abrir, empurra o conteúdo para
+   baixo (em vez do dropdown flutuante e centralizado de antes). */
+.adm-accordion-panel {
+  position: sticky; top: 48px; z-index: 199;
+  display: grid; grid-template-rows: 0fr;
+  background: var(--adm-surface);
+  border-bottom: 1px solid transparent;
+  transition: grid-template-rows .22s ease, border-color .22s ease;
+}
+.adm-accordion-panel.open {
+  grid-template-rows: 1fr;
+  border-bottom-color: var(--adm-border);
+}
+.adm-accordion-panel > div { overflow: hidden; min-height: 0; }
+.adm-accordion-inner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 12px 16px;
+}
+.adm-accordion-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; color: var(--adm-text);
+  padding: 7px 10px; border-radius: 7px;
+  background: var(--adm-surface2); text-decoration: none;
+  margin-right: 4px; flex-shrink: 0;
+}
+.adm-accordion-item {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 500; color: var(--adm-muted);
+  padding: 7px 12px; border-radius: 7px;
+  text-decoration: none; transition: all .12s; white-space: nowrap;
+}
+.adm-accordion-item:hover { color: var(--adm-text); background: var(--adm-surface2); }
+.adm-accordion-item.active { color: var(--adm-text); background: var(--adm-surface2); }
+.adm-accordion-item svg { width: 14px; height: 14px; flex-shrink: 0; opacity: .8; }
 .adm-topnav-logo {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; font-weight: 600; color: var(--adm-text);
@@ -306,7 +342,7 @@ select.adm-input option { background: var(--adm-surface2); }
 /* ── Container global do conteúdo administrativo ──
    O espaçamento externo pertence ao .adm-main; páginas não devem recriá-lo. */
 .adm-main {
-  margin: 48px auto 0;
+  margin: 0 auto;
   padding: 20px 24px 32px;
   width: 100%;
   max-width: 1180px;

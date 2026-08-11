@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.107 — Menu do Admin em painel sanfona
+
+- Os grupos Conteúdo, Portal, Publicação e Sistema do menu do Admin agora expandem em um painel logo abaixo da barra ao serem clicados, empurrando o conteúdo da página para baixo — substitui o dropdown flutuante centralizado usado até a 1.0.106.
+- Dashboard, Atualizações e Erros e logs seguem soltos no nível principal do menu, fora de qualquer grupo/submenu.
+
 ## 1.0.106 — Navegação administrativa e publicação GitHub mais compactas
 
 - Menu do Admin reorganizado: Dashboard, Atualizações e Erros e logs ficam no nível principal; o antigo grupo Desenvolvimento foi removido.
