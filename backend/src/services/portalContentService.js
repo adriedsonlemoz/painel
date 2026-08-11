@@ -152,6 +152,7 @@ async function maybeTranslateHoroscope(text, metadata = {}) {
     const out = await enviarMensagem({
       systemPrompt: 'Traduza textos de horóscopo para português do Brasil. Preserve o sentido, não acrescente previsões, fatos ou conselhos novos. Responda apenas com a tradução, sem markdown.',
       pergunta: String(text).slice(0, 2500),
+      profile:'translation', task:'portal:horoscopo:traducao', priority:'low', dataClass:'general',
     })
     return String(out.resposta || text).trim() || text
   } catch {

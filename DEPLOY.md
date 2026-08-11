@@ -70,6 +70,21 @@ MONGO_URI=mongodb+srv://<usuario>:<senha>@cluster0.xxxxx.mongodb.net/al-sistemas
 
 Se estiver fazendo o primeiro corte sem ter executado a 1.0.83 no ambiente antigo, `FRONTEND_URL` pode ser usado temporariamente como fallback de CORS.
 
+#### Ajustes opcionais do motor de IA (1.0.100+)
+
+As chaves Gemini/OpenRouter continuam no cofre de **Integrações e APIs**. Somente parâmetros operacionais opcionais precisam de variáveis de ambiente quando você quiser sobrescrever os padrões:
+
+```env
+AI_TIMEOUT_MS=20000
+AI_OPERATION_TIMEOUT_MS=45000
+AI_CONCURRENCY=2
+AI_MAX_QUEUE=100
+AI_CIRCUIT_FAILURES=3
+AI_CIRCUIT_COOLDOWN_MS=60000
+```
+
+Em Render, os padrões são adequados para começar. Aumente concorrência somente se a cota dos provedores suportar; reduzir concorrência costuma ser melhor para contas gratuitas.
+
 ### 3.3 Health check e auto-deploy
 
 - O Render deve monitorar `/api/health/live`, que testa somente se o processo HTTP está vivo e não derruba o serviço por uma oscilação temporária do MongoDB.

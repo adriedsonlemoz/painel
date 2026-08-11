@@ -80,8 +80,24 @@ export const githubService = {
     api(`/github/repos/${owner}/${repo}/workflows/${workflowId}/runs?per_page=15&page=${page}`),
   jobs: (runId, owner, repo) =>
     api(`/github/runs/${runId}/jobs?owner=${owner}&repo=${repo}`),
-  analyzeRun: (runId, owner, repo, modo = 'resumo', workflow = '') =>
-    api(`/github/runs/${runId}/analyze`, { method: 'POST', body: JSON.stringify({ owner, repo, modo, workflow }) }),
+  analyzeRun: async (runId, owner, repo, modo = 'resumo', workflow = '', onProgress) => {
+    const initial = await api(`/github/runs/${runId}/analyze`, { method:'POST', body:JSON.stringify({owner,repo,modo,workflow,async:modo!=='resumo'}), timeoutMs:30000 })
+    if(!initial?.async) return initial
+    const jobId=initial.job?.id
+    if(!jobId) throw new Error('O backend não retornou o job da análise.')
+    const deadline=Date.now()+5*60_000
+    while(Date.now()<deadline){
+      await new Promise(r=>setTimeout(r,900))
+      const d=await api(`/analysis/ai/jobs/${jobId}`,{timeoutMs:12000})
+      const job=d.job||{}
+      onProgress?.(job)
+      if(job.status==='succeeded')return job.result
+      if(job.status==='failed')throw new Error(job.error?.message||'A análise por IA falhou.')
+      if(job.status==='cancelled')throw Object.assign(new Error('Análise cancelada.'),{code:'AI_JOB_CANCELLED'})
+    }
+    throw new Error('A análise demorou mais de 5 minutos e continuará registrada como job.')
+  },
+  cancelAiJob: (jobId) => api(`/analysis/ai/jobs/${jobId}/cancel`, { method:'POST', timeoutMs:12000 }),
 
   /* ── Sprint 4: Logs inline de um job ────────────────── */
   jobLogs: async (jobId, owner, repo) => {

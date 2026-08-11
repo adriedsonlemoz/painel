@@ -62,3 +62,10 @@
 ### Cuidados
 
 O bloqueio automático deve começar em modo observação. Depois de calibrado, ações automáticas podem ser habilitadas por regra, evitando falsos positivos que bloqueiem o próprio administrador.
+## IA — endurecimento 1.0.100
+- Credenciais Gemini não são colocadas em query string; o adapter usa `x-goog-api-key`.
+- Entradas externas passam por redator central antes do envio e README/RSS/logs são marcados como dados não confiáveis para reduzir prompt injection.
+- Privacidade por classe de dados pode bloquear logs/conteúdo e mantém documentos MongoDB detalhados desabilitados por padrão.
+- Telemetria de IA armazena somente metadados operacionais, sem prompt/resposta completos.
+- Circuit breaker reduz repetição de chamadas após 429/401/403/5xx e o salvamento de uma nova credencial limpa o estado temporário do provedor.
+

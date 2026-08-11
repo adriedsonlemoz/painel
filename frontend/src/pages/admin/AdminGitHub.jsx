@@ -1314,6 +1314,7 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   const [analiseModal, setAnaliseModal] = useState(null)
   const [analiseLoad, setAnaliseLoad] = useState(false)
   const [analiseDados, setAnaliseDados] = useState(null)
+  const [analiseCancelando, setAnaliseCancelando] = useState(false)
 
   async function selecionarWorkflow(wf) {
     setWfSel(wf); setRuns(null); setRunAberto(null); setJobs(null); setArtifactsCache(null)
@@ -1353,11 +1354,19 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
     setAnaliseModal({ run, modo, titulo })
     setAnaliseDados(null); setAnaliseLoad(true)
     try {
-      const d = await githubService.analyzeRun(run.id, owner, repo, modo, wfSel?.nome || '')
+      const d = await githubService.analyzeRun(run.id, owner, repo, modo, wfSel?.nome || '', job=>setAnaliseDados({job:true,id:job.id,progress:job.progress||0,message:job.message||'Processando',status:job.status}))
       setAnaliseDados(d)
     } catch (e) {
-      setAnaliseDados({ erro: e.message || 'Falha ao analisar a execução.' })
-    } finally { setAnaliseLoad(false) }
+      setAnaliseDados({ erro: e.code==='AI_JOB_CANCELLED'?'Análise cancelada.':(e.message || 'Falha ao analisar a execução.') })
+    } finally { setAnaliseLoad(false); setAnaliseCancelando(false) }
+  }
+
+  async function cancelarAnalise(){
+    const id=analiseDados?.id
+    if(!id||analiseCancelando)return
+    setAnaliseCancelando(true)
+    try{await githubService.cancelAiJob(id);setAnaliseDados(d=>({...d,job:true,status:'cancelled',message:'Cancelando análise…'}))}
+    catch(e){toastShow('Não foi possível cancelar: '+e.message,'erro');setAnaliseCancelando(false)}
   }
 
   if (!workflows) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
@@ -1526,10 +1535,13 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
         </>
       )}
 
-      <DSModal open={!!analiseModal} onClose={() => !analiseLoad && setAnaliseModal(null)} title={analiseModal?.titulo || 'Execução'} size="lg">
+      <DSModal open={!!analiseModal} onClose={() => setAnaliseModal(null)} title={analiseModal?.titulo || 'Execução'} size="lg">
         {analiseLoad ? (
-          <div style={{ color: C.muted, fontSize: FONT.base, padding: `${SPACE.xl}px 0` }}>
-            {analiseModal?.modo === 'resumo' ? 'Montando resumo da execução...' : 'Lendo apenas os trechos relevantes dos logs e consultando a IA configurada em Integrações e APIs...'}
+          <div style={{ color: C.muted, fontSize: FONT.base, padding: `${SPACE.xl}px 0`, display:'grid', gap:10 }}>
+            <span>{analiseDados?.job ? analiseDados.message : analiseModal?.modo === 'resumo' ? 'Montando resumo da execução...' : 'Criando job persistente e preparando a análise...'}</span>
+            {analiseDados?.job&&<div style={{height:8,borderRadius:999,background:C.surf2,overflow:'hidden'}}><div style={{height:'100%',width:`${analiseDados.progress||0}%`,background:C.accent,transition:'width .25s'}}/></div>}
+            {analiseDados?.job&&<small>{analiseDados.progress||0}% · você pode fechar este popup; o resultado fica persistido no backend.</small>}
+            {analiseDados?.job&&analiseDados?.id&&<div><DSBtn size="sm" variant="danger" onClick={cancelarAnalise} disabled={analiseCancelando}>{analiseCancelando?'Cancelando…':'Cancelar análise'}</DSBtn></div>}
           </div>
         ) : analiseDados?.erro ? (
           <div style={{ color: C.redSolid || '#ef4444', fontSize: FONT.base }}>{analiseDados.erro}</div>

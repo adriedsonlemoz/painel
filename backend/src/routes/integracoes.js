@@ -9,7 +9,8 @@ import { getCredential, setCredential, deleteCredential } from '../utils/credent
 import { readBootstrap, writeBootstrap, deleteBootstrapKeys, vaultPaths } from '../utils/localVault.js'
 import { conectarMongo, configurarCloudinary } from '../config/index.js'
 import AuditLog from '../models/AuditLog.js'
-import { diagnosticarIA } from '../utils/aiClient.js'
+import { diagnosticarIA, testarProvedorIA, listarModelosIA, resetAiRuntime } from '../utils/aiClient.js'
+import { getAiUsageSummary } from '../services/aiTelemetry.js'
 
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
@@ -303,6 +304,16 @@ function normalizeAiMetadata(id, metadata={}){
   out.model=String(out.model||(id==='gemini'?'gemini-2.5-flash':'openrouter/free')).trim()
   if(!out.model)throw new Error('Informe um modelo de IA.')
   out.systemInstructions=String(out.systemInstructions||'').slice(0,8000)
+  out.privacy={
+    githubLogs: out.privacy?.githubLogs!==false,
+    vercelLogs: out.privacy?.vercelLogs!==false,
+    renderLogs: out.privacy?.renderLogs!==false,
+    rssContent: out.privacy?.rssContent!==false,
+    readme: out.privacy?.readme!==false,
+    editorial: out.privacy?.editorial!==false,
+    mongoDocuments: out.privacy?.mongoDocuments===true,
+  }
+  out.profiles=out.profiles&&typeof out.profiles==='object'?out.profiles:{}
   return out
 }
 
@@ -311,18 +322,8 @@ router.post('/:id/models', async(req,res)=>{ const {id}=req.params; try{
   const stored=await getCredential(id,defs[id])
   const value=String(req.body?.secret||'').trim()||stored.value
   if(!value)throw new Error('Digite ou salve a credencial antes de carregar modelos.')
-  let models=[]
-  if(id==='gemini'){
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(value)}`)
-    const body=await r.json().catch(()=>({}))
-    if(!r.ok)throw new Error(body.error?.message||`Gemini respondeu ${r.status}`)
-    models=(body.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>({id:String(m.name||'').replace(/^models\//,''),name:m.displayName||String(m.name||'').replace(/^models\//,'')})).filter(m=>m.id)
-  }else{
-    const r=await fetch('https://openrouter.ai/api/v1/models',{headers:{Authorization:`Bearer ${value}`}})
-    const body=await r.json().catch(()=>({}))
-    if(!r.ok)throw new Error(body.error?.message||`OpenRouter respondeu ${r.status}`)
-    models=(body.data||[]).map(m=>({id:m.id,name:m.name||m.id,free:Number(m.pricing?.prompt||1)===0&&Number(m.pricing?.completion||1)===0})).filter(m=>m.id).sort((a,b)=>Number(Boolean(b.free))-Number(Boolean(a.free))||a.name.localeCompare(b.name))
-  }
+  const metadata=normalizeAiMetadata(id,{...(stored.metadata||{}),...(req.body?.metadata||{})})
+  const models=await listarModelosIA({id,secret:value,metadata})
   res.json({ok:true,models:models.slice(0,300),count:models.length})
 }catch(e){res.status(400).json({ok:false,erro:e.message})} })
 
@@ -345,6 +346,7 @@ router.put('/:id', async(req,res,next)=>{ try {
   }
   if(!value)return res.status(400).json({erro:'Credencial obrigatória.'})
   await setCredential(id, id==='cloudinary'?JSON.stringify({...merged,apiSecret:value}):value, merged)
+  if(['gemini','openrouter'].includes(id)) resetAiRuntime(id)
   if(merged.primary && ['gemini','openrouter'].includes(id)){ for(const other of ['gemini','openrouter']){ if(other===id)continue; const oc=await getCredential(other,defs[other]); if(oc.value&&oc.metadata?.primary) await setCredential(other,oc.value,{...(oc.metadata||{}),primary:false}); } }
   if(id==='cloudinary') await configurarCloudinary()
   const identity=await refreshStoredIdentity(id)
@@ -420,12 +422,7 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
     const u=body.user||body
     result.mensagem=`Vercel conectada${u.username||u.email?` • ${u.username||u.email}`:''}.`
   } else if(id==='gemini'){
-    const model=c.metadata?.model||'gemini-2.5-flash'
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(c.value)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{text:'Responda somente OK'}]}],generationConfig:{maxOutputTokens:8,temperature:0}})})
-    const body=await r.json().catch(()=>({}))
-    if(!r.ok)throw new Error(body.error?.message||`Gemini respondeu ${r.status}`)
-    const reply=body.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('').trim()
-    result.mensagem=`Gemini conectado • modelo ${model} gerou resposta${reply?` (${reply.slice(0,24)})`:''}.`
+    result=await testarProvedorIA({id,secret:c.value,metadata:c.metadata})
   } else if(id==='api_ninjas'){
     const r=await fetch('https://api.api-ninjas.com/v1/horoscope?zodiac=aries',{headers:{'X-Api-Key':c.value}})
     const body=await r.json().catch(()=>({}))
@@ -439,12 +436,7 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
     if(!r.ok||hasErrors)throw new Error(Array.isArray(apiErrors)?apiErrors[0]:Object.values(apiErrors||{})[0]||body.message||`API-Football respondeu ${r.status}`)
     result.mensagem='API-Football conectada • placares e jogos disponíveis.'
   } else if(id==='openrouter'){
-    const model=c.metadata?.model||'openrouter/free'
-    const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${c.value}`,'Content-Type':'application/json','HTTP-Referer':process.env.FRONTEND_URL||'http://localhost','X-Title':'AL Sistemas'},body:JSON.stringify({model,messages:[{role:'user',content:'Responda somente OK'}],max_tokens:8,temperature:0})})
-    const body=await r.json().catch(()=>({}))
-    if(!r.ok)throw new Error(body.error?.message||`OpenRouter respondeu ${r.status}`)
-    const reply=body.choices?.[0]?.message?.content?.trim()
-    result.mensagem=`OpenRouter conectado • modelo ${body.model||model} gerou resposta${reply?` (${reply.slice(0,24)})`:''}.`
+    result=await testarProvedorIA({id,secret:c.value,metadata:c.metadata})
   } else {
     const meta=c.metadata||{}
     const url=meta.apiUrl
@@ -534,7 +526,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.99',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.100',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
@@ -606,6 +598,17 @@ router.post('/import', async(req,res,next)=>{ try {
   await audit(req,'integracoes.importar',{imported,skipped})
   res.json({ok:true,imported,skipped,mensagem:imported.length?`${imported.length} configuração(ões) importada(s) com segurança.`:'Nenhuma credencial válida encontrada para importar.'})
 } catch(e){next(e)} })
+
+router.get('/ai/usage', async(req,res)=>{ try{
+  const days=Math.max(1,Math.min(90,Number(req.query.days||7)))
+  res.json({ok:true,...await getAiUsageSummary(days)})
+}catch(e){res.status(500).json({ok:false,erro:e.message})} })
+
+router.post('/ai/runtime/reset', async(req,res)=>{
+  const provider=['gemini','openrouter'].includes(req.body?.provider)?req.body.provider:null
+  resetAiRuntime(provider)
+  res.json({ok:true,provider,mensagem:provider?`Estado temporário de ${provider} reiniciado.`:'Fila/estado de provedores liberados para nova tentativa.'})
+})
 
 router.post('/password/generate', (_req,res)=>{ const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*+-_=?.'; let out=''; do { out=Array.from(crypto.randomBytes(36),b=>chars[b%chars.length]).join('') } while(!/[A-Z]/.test(out)||!/[a-z]/.test(out)||!/[0-9]/.test(out)||!/[!@#$%&*+\-_=?.]/.test(out)); res.json({password:out}) })
 router.get('/ai/diagnostics', async(_req,res,next)=>{ try {

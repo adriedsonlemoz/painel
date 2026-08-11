@@ -132,7 +132,7 @@ CONFIGURAÇÕES ATUAIS: ${JSON.stringify(allowed)}
 
 Avalie o SEO atual. Regras: título SEO preferencialmente até 60 caracteres; descrição entre 120 e 160 caracteres; palavras-chave devem ser específicas e fiéis ao portal. Se um campo já estiver adequado, pode repetir o valor atual.`
     const schema={type:'object',properties:{pontuacao:{type:'number'},resumo:{type:'string'},alertas:{type:'array',items:{type:'string'}},sugestoes:{type:'object',properties:{site_titulo:{type:'string'},site_descricao:{type:'string'},site_keywords:{type:'string'}},required:['site_titulo','site_descricao','site_keywords'],additionalProperties:false}},required:['pontuacao','resumo','alertas','sugestoes'],additionalProperties:false}
-    const out=await enviarJson({systemPrompt,pergunta,schema,schemaName:'seo_portal'})
+    const out=await enviarJson({systemPrompt,pergunta,schema,schemaName:'seo_portal',profile:'seo',task:`seo:${acao}`,dataClass:'editorial',cacheTtlMs:acao==='auditar'?30*60_000:0})
     res.json({ok:true,...out.data,_meta:{provedor:out.provedor,modelo:out.modelo,fallback:Boolean(out.fallback),falhasAnteriores:out.falhasAnteriores||[],structuredMode:out.structuredMode}})
   }catch(err){next(err)}
 })

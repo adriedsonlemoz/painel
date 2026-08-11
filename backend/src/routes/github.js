@@ -38,6 +38,9 @@ import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
 import { storeProjectSnapshot } from '../services/cloudUpdateStorage.js'
 import { sugerirDescricaoRepositorio, analisarLogsWorkflow } from '../utils/aiClient.js'
+import { redactAiText } from '../services/aiRedactor.js'
+import { selectRelevantLogContext } from '../services/aiContext.js'
+import { createAiJob } from '../services/aiJobs.js'
 
 const router = Router()
 
@@ -1141,21 +1144,11 @@ function resumirJobsWorkflow(jobs=[]) {
 }
 
 function mascararSegredosLog(texto='') {
-  return String(texto||'')
-    .replace(/\x1b\[[0-9;]*m/g,'')
-    .replace(/(authorization\s*[:=]\s*(?:bearer|token)\s+)[^\s]+/ig,'$1[SEGREDO]')
-    .replace(/((?:api[_-]?key|secret(?:[_-]?access)?[_-]?key|access[_-]?token|password|passwd|token)\s*[:=]\s*)[^\s"']+/ig,'$1[SEGREDO]')
-    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-or-[A-Za-z0-9_-]{20,}|cfat_[A-Za-z0-9_-]{20,})\b/g,'[SEGREDO]')
+  return redactAiText(String(texto||'').replace(/\x1b\[[0-9;]*m/g,''))
 }
 
 function extrairTrechosRelevantes(texto='', maxLinhas=150) {
-  const linhas=mascararSegredosLog(texto).split(/\r?\n/)
-  const re=/(error|failed|failure|fatal|exception|typeerror|referenceerror|enoent|npm err|exit code|process completed with exit code|warning|warn|deprecated|handshake|timeout|permission denied)/i
-  const idx=[]
-  for(let i=0;i<linhas.length;i++) if(re.test(linhas[i])) for(let j=Math.max(0,i-2);j<=Math.min(linhas.length-1,i+2);j++) idx.push(j)
-  const uniq=[...new Set(idx)].slice(-maxLinhas)
-  const selected=uniq.length?uniq.map(i=>linhas[i]):linhas.slice(-80)
-  return selected.join('\n').slice(-26000)
+  return selectRelevantLogContext(mascararSegredosLog(texto), Math.max(4000, Math.min(16000, maxLinhas * 80)))
 }
 
 async function baixarJobLogTexto({owner,repo,jobId,token}) {
@@ -1166,37 +1159,56 @@ async function baixarJobLogTexto({owner,repo,jobId,token}) {
   return (await resp.text()).slice(0,220*1024)
 }
 
-/* POST /api/github/runs/:runId/analyze — resumo local ou análise por IA */
+async function executarAnaliseWorkflow({owner,repo,runId,modo,workflow,signal,update=async()=>{}}){
+  await update(12,'Consultando execução e jobs no GitHub')
+  const [runData,jobsData]=await Promise.all([
+    githubFetch(`/repos/${owner}/${repo}/actions/runs/${runId}`),
+    githubFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/jobs?per_page=50`),
+  ])
+  const jobs=jobsData.jobs||[], resumo=resumirJobsWorkflow(jobs)
+  const run={id:runData.id,status:runData.status,conclusao:runData.conclusion,branch:runData.head_branch,sha:runData.head_sha?.slice(0,12)||'',evento:runData.event,criadoEm:runData.created_at,atualizadoEm:runData.updated_at,url:runData.html_url}
+  if(modo==='resumo') return {ok:true,modo,resumo,run}
+  const {value:token}=await getCredential('github','GITHUB_TOKEN')
+  if(!token){const e=new Error('GITHUB_TOKEN não configurado em Integrações e APIs.');e.status=503;throw e}
+  await update(30,'Coletando apenas os logs mais relevantes')
+  const prioritarios=jobs.filter(j=>j.conclusion==='failure').concat(jobs.filter(j=>j.conclusion!=='failure')).slice(0,5)
+  const blocos=[]
+  for(let i=0;i<prioritarios.length;i++){
+    if(signal?.aborted){const e=new Error('Análise cancelada.');e.status=499;e.code='AI_ABORTED';throw e}
+    const job=prioritarios[i]
+    const texto=await baixarJobLogTexto({owner,repo,jobId:job.id,token}).catch(()=> '')
+    if(texto) blocos.push(`=== JOB: ${job.name} (${job.conclusion||job.status}) ===\n${extrairTrechosRelevantes(texto)}`)
+    await update(30+Math.round(((i+1)/Math.max(1,prioritarios.length))*30),`Coletando logs ${i+1}/${prioritarios.length}`)
+  }
+  const trechos=blocos.join('\n\n').slice(0,30000)
+  if(!trechos){const e=new Error('O GitHub não retornou conteúdo de log utilizável para esta execução.');e.status=422;throw e}
+  await update(68,'Analisando com o motor de IA')
+  const analise=await analisarLogsWorkflow({repo:`${owner}/${repo}`,workflow,run,resumo,trechos,modo})
+  await update(94,'Finalizando diagnóstico')
+  return {ok:true,modo,resumo,run,analise}
+}
+
+/* POST /api/github/runs/:runId/analyze — resumo local ou análise por IA persistente */
 router.post('/runs/:runId/analyze', autenticar, async (req,res) => {
   const {runId}=req.params
-  const {owner,repo,modo='resumo',workflow=''}=req.body||{}
+  const {owner,repo,modo='resumo',workflow='',async:asyncMode=false}=req.body||{}
   if(!owner||!repo||!validarNome(owner)||!validarNome(repo)) return res.status(400).json({erro:'owner e repo são obrigatórios.'})
   if(!['resumo','diagnostico','correcao'].includes(modo)) return res.status(400).json({erro:'Modo de análise inválido.'})
   try{
-    const [runData,jobsData]=await Promise.all([
-      githubFetch(`/repos/${owner}/${repo}/actions/runs/${runId}`),
-      githubFetch(`/repos/${owner}/${repo}/actions/runs/${runId}/jobs?per_page=50`),
-    ])
-    const jobs=jobsData.jobs||[]
-    const resumo=resumirJobsWorkflow(jobs)
-    const run={id:runData.id,status:runData.status,conclusao:runData.conclusion,branch:runData.head_branch,sha:runData.head_sha?.slice(0,12)||'',evento:runData.event,criadoEm:runData.created_at,atualizadoEm:runData.updated_at,url:runData.html_url}
-    if(modo==='resumo') return res.json({ok:true,modo,resumo,run})
-
-    const {value:token}=await getCredential('github','GITHUB_TOKEN')
-    if(!token) return res.status(503).json({erro:'GITHUB_TOKEN não configurado em Integrações e APIs.'})
-    const prioritarios=jobs.filter(j=>j.conclusion==='failure').concat(jobs.filter(j=>j.conclusion!=='failure')).slice(0,5)
-    const blocos=[]
-    for(const job of prioritarios){
-      const texto=await baixarJobLogTexto({owner,repo,jobId:job.id,token}).catch(()=> '')
-      if(texto) blocos.push(`=== JOB: ${job.name} (${job.conclusion||job.status}) ===\n${extrairTrechosRelevantes(texto)}`)
+    if(modo!=='resumo'&&asyncMode){
+      const job=await createAiJob({type:`github-workflow-${modo}`,payload:{owner,repo,runId,workflow,modo},createdBy:String(req.usuario?._id||''),runner:async({signal,update})=>{
+        const result=await executarAnaliseWorkflow({owner,repo,runId,modo,workflow,signal,update})
+        await AuditLog.create({admin_id:req.usuario._id,admin_email:req.usuario.email,acao:'analisar',recurso:'github_actions_logs',recurso_id:`${owner}/${repo}:run:${runId}`,payload:{modo,workflow,provedor:result?.analise?._meta?.provedor||null,job:true},ip:req.ip,request_id:req.requestId||null}).catch(()=>{})
+        return result
+      }})
+      return res.status(202).json({ok:true,async:true,job})
     }
-    const trechos=blocos.join('\n\n').slice(0,30000)
-    if(!trechos) return res.status(422).json({erro:'O GitHub não retornou conteúdo de log utilizável para esta execução.',resumo,run})
-    const analise=await analisarLogsWorkflow({repo:`${owner}/${repo}`,workflow,run,resumo,trechos,modo})
-    await AuditLog.create({admin_id:req.usuario._id,admin_email:req.usuario.email,acao:'analisar',recurso:'github_actions_logs',recurso_id:`${owner}/${repo}:run:${runId}`,payload:{modo,workflow,provedor:analise?._meta?.provedor||null},ip:req.ip,request_id:req.requestId||null}).catch(()=>{})
-    res.json({ok:true,modo,resumo,run,analise})
+    const result=await executarAnaliseWorkflow({owner,repo,runId,modo,workflow})
+    if(modo!=='resumo')await AuditLog.create({admin_id:req.usuario._id,admin_email:req.usuario.email,acao:'analisar',recurso:'github_actions_logs',recurso_id:`${owner}/${repo}:run:${runId}`,payload:{modo,workflow,provedor:result?.analise?._meta?.provedor||null},ip:req.ip,request_id:req.requestId||null}).catch(()=>{})
+    res.json(result)
   }catch(err){res.status(err.status||500).json({erro:err.message||'Falha ao analisar execução.'})}
 })
+
 
 /* GET /api/github/jobs/:jobId/logs — logs inline de um job (text/plain) */
 router.get('/jobs/:jobId/logs', autenticar, async (req, res) => {

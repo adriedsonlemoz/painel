@@ -22,7 +22,7 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 - **Gestão de notícias** com editor Markdown, categorias e badges coloridos
 - **Módulo GitHub** — visualização de repositórios e commits em tempo real
 - **Projetos e GitHub** — gerenciamento GitHub-first, publicação por repositório/branch/pasta e vínculo opcional com Vercel/Render; pastas locais ficam como legado para VPS
-- **IA Assistant** — Gemini + OpenRouter com fallback, saída estruturada e diagnóstico central para análise editorial e de produção
+- **Motor central de IA** — Gemini + OpenRouter com fila/prioridades, fallback, JSON estruturado, streaming, cache, telemetria e perfis por tarefa
 - **RSS Importer** — importação automática de feeds com scheduler
 - **Portal público dinâmico** — 3 destaques em carrossel, previsão do tempo, Brasil e Mundo por RSS e blocos opcionais de futebol e horóscopo via backend/cache
 - **Infraestrutura** — monitoramento de MongoDB, Cloudinary e Redis pelo painel
@@ -30,6 +30,12 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 - **Audit Log** — registro de todas as ações dos usuários
 - **Newsletter** — gestão de assinantes
 - **App Android** — build via Capacitor + GitHub Actions
+
+### 🤖 IA na 1.0.100
+
+O backend concentra todas as chamadas de IA em um único motor. As chaves/modelos são configurados em **Integrações e APIs**; nenhum módulo mantém credenciais próprias. O motor aplica fila global, retry/backoff, `Retry-After`, circuit breaker, timeout total, fallback Gemini/OpenRouter, perfis por tarefa, redator de segredos, limites de contexto por tokens, validação de JSON Schema, cache por hash e telemetria sem armazenar prompts/respostas completas.
+
+O Assistente suporta streaming/cancelamento. Análises longas de GitHub Actions usam jobs persistentes. O diagnóstico comum reutiliza o último estado conhecido e o teste profundo dos provedores só é executado sob demanda.
 
 ---
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.100 — Motor central de IA robusto e observável
+
+- Gemini e OpenRouter passam a usar adapters únicos compartilhados por todos os módulos, eliminando testes/chamadas duplicadas com comportamentos diferentes.
+- Fila global de IA com prioridades evita que RSS e tarefas de fundo disputem cota com ações manuais; concorrência e tamanho máximo da fila são configuráveis.
+- Retry com backoff, respeito a `Retry-After`, circuit breaker/cooldown e timeout total da operação tornam o fallback Gemini → OpenRouter previsível em 429, 5xx e lentidão de rede.
+- Gemini deixa de enviar chave na URL e usa somente `x-goog-api-key`.
+- Perfis `Assistente`, `Rápido`, `Editorial`, `SEO`, `Diagnóstico`, `RSS` e `Tradução` controlam prioridade, temperatura, contexto, saída e cache; instruções editoriais personalizadas não contaminam diagnóstico/tradução.
+- Respostas estruturadas são validadas localmente contra JSON Schema mesmo após fallback para JSON simples, rejeitando objetos incompletos antes de chegar aos módulos.
+- Contexto passa a trabalhar com orçamento aproximado de tokens; logs preservam regiões próximas a erro/falha/stack trace em vez de simples cortes por caracteres.
+- Redator central mascara tokens, Bearer/JWT, credenciais R2/AWS, MongoDB e outros padrões antes de qualquer envio à IA; conteúdo de README/RSS/logs é encapsulado como dado não confiável.
+- Controles de privacidade em Integrações definem quais classes de dados podem chegar à IA; documentos MongoDB detalhados permanecem desativados por padrão.
+- `AiUsage` registra somente metadados de uso (provedor, tarefa, latência, tokens, fallback, cache, erro e custo quando conhecido), sem gravar prompt/resposta; painel mostra resumo dos últimos dias.
+- Cache por hash reaproveita diagnósticos/descrições/análises idênticos até expirar; botão/ação nova continua podendo gerar nova operação quando o conteúdo muda.
+- Health superficial deixa de consultar Gemini/OpenRouter externamente em cada atualização do Dashboard; diagnóstico profundo continua disponível sob demanda.
+- Assistente ganha streaming real e cancelamento; análises grandes de GitHub Actions usam jobs persistentes com progresso, consulta posterior e cancelamento.
+- Lista de modelos expõe contexto/suporte a saída estruturada quando os provedores informam a capacidade.
+- Nova suíte de testes cobre schema, redator, circuit breaker, seleção de contexto e headers/adapters de Gemini/OpenRouter.
+- Produção Vercel/Render e modos VPS/Termux legado permanecem compatíveis.
+
 ## 1.0.99 — Home editorial, RSS limpo e núcleo de IA estabilizado
 
 - Home passa a abrir com o carrossel de até 3 destaques; o Plantão urgente fica logo abaixo e os quatro atalhos locais permanecem na mesma linha no mobile.

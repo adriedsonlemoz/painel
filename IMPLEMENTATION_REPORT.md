@@ -5,7 +5,7 @@
 - Cofre criptografado no MongoDB para Cloudinary, GitHub e provedores de IA.
 - Compatibilidade temporária com `.env`, sem obrigatoriedade do painel do Render.
 - Página **Integrações e APIs** com status, cadastro, atualização, teste e remoção.
-- Provedores de IA ativos: Google Gemini e OpenRouter, com fallback automático e saída JSON estruturada quando o recurso exige campos confiáveis.
+- Provedores de IA oficiais do núcleo: Google Gemini e OpenRouter, configurados pelo cofre central de Integrações e APIs.
 - Geração de senhas fortes com 36 caracteres e cópia segura.
 - Diagnóstico centralizado sem exposição de segredos.
 - Reconexão do MongoDB após atualização.
@@ -23,9 +23,15 @@
 
 ## Riscos remanescentes
 - Sem volume persistente, a chave local pode ser perdida em redeploy e tornar o cofre ilegível.
-- O diagnóstico de IA testa conexão, geração de texto e JSON estruturado em Gemini/OpenRouter; cotas e disponibilidade continuam dependentes dos provedores externos.
+- O núcleo de IA usa adapters únicos, fila/prioridades, retry/backoff, circuit breaker, timeout total, JSON Schema, redator de segredos, cache, streaming/jobs e telemetria sem armazenar prompts/respostas completas.
 - A invalidação global de sessões exige uma versão de sessão persistida por usuário; a estrutura atual ainda usa JWT simples.
 - Rotas legadas de Cloudflare ainda consultam variáveis de ambiente e devem ser migradas em uma etapa específica.
+
+## IA — validação estrutural 1.0.100
+- `aiCore.test.js` cobre schema, redator, circuit breaker e seleção de contexto.
+- `aiProviders.test.js` verifica autenticação Gemini em `x-goog-api-key` e parâmetros estruturados do OpenRouter.
+- Integrações e APIs reutiliza o mesmo adapter dos módulos, evitando diferenças entre teste e uso real.
+- Controles de privacidade bloqueiam documentos MongoDB detalhados por padrão.
 
 ## Testes
 - Sintaxe Node validada para os novos módulos e servidor.

@@ -107,7 +107,7 @@ router.get('/detalhado', async (_req, res) => {
       mongodb: { ok:mongoOk, status:mongoStatus }, redis:{ ok:redisOk, status:redisStatus },
       cloudinary:{ ok:cloudinaryStatus.ok, status:cloudinaryStatus.ok ? 'conectado' : cloudinaryStatus.erro },
       github:{ ok:githubStatus.ok, status:githubStatus.status },
-      ia:{ ok:iaStatus.ok, status:iaStatus.status, principal:iaStatus.principal || null, providers:(iaStatus.providers || []).map(p=>({ id:p.id, nome:p.nome, ok:p.ok, status:p.status, modelo:p.model, configurado:p.configured, ativo:p.enabled })) },
+      ia:{ ok:iaStatus.ok, status:iaStatus.status, principal:iaStatus.principal || null, queue:iaStatus.queue||null, circuits:iaStatus.circuits||{}, providers:(iaStatus.providers || []).map(p=>({ id:p.id, nome:p.nome, ok:p.ok, status:p.status, modelo:p.model, configurado:p.configured, ativo:p.enabled })) },
       cloudflare:{ ok:cloudflareStatus.ok, status:cloudflareStatus.status },
     },
   })

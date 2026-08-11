@@ -1,19 +1,20 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.99",
+  "version": "1.0.100",
   "packageFormat": 2,
   "changelog": [
-    "Home pública reorganizada: carrossel de até 3 destaques vem primeiro, Plantão urgente aparece logo abaixo e História/Belezas naturais/Ônibus/Eventos permanecem em uma linha compacta no mobile.",
-    "Últimas Notícias deixa de expandir editorias extras para baixo: o botão Mais abre um popup/bottom-sheet e o espaçamento vertical da Home foi reduzido para uma leitura mais editorial.",
-    "Brasil e Mundo mantém a hierarquia manchete + chamadas compactas, identifica a fonte real de cada RSS e substitui o selo genérico RSS por uma identificação editorial de fontes nacionais.",
-    "Notícias importadas por RSS passam a renderizar o HTML sanitizado corretamente na matéria; cards usam resumo em texto puro e não exibem tags como <p>, <div> ou <h2>.",
-    "Sanitização RSS remove slots comuns de publicidade/rastreamento e blocos editoriais repetitivos como Leia Mais, Veja também e conteúdos relacionados.",
-    "Admin RSS ganha Reprocessar notícias para reaplicar a limpeza às matérias importadas que já estão no MongoDB e recriar seus resumos sem apagar fonte, URL ou datas.",
-    "Núcleo de IA foi estabilizado em Gemini + OpenRouter: timeout por provedor, fallback automático e mensagens de falha mais claras, com registro das indisponibilidades na Central de Erros.",
-    "Recursos que exigem JSON, como SEO, análise editorial e logs, passam a usar saída estruturada/JSON Schema quando suportada, com fallback compatível quando o modelo não oferece schema nativo.",
-    "Health, Login, Dashboard e Infraestrutura deixam de diagnosticar os antigos Groq/Anthropic e passam a exibir o estado real de Gemini/OpenRouter.",
-    "Integrações e APIs ganha Diagnóstico da IA, testando conexão, geração de texto e resposta JSON estruturada por provedor; falhas do núcleo podem ser filtradas como IA na Central de Erros.",
-    "Compatibilidade de produção Vercel/Render e dos modos VPS/Termux legado foi preservada; nenhuma rota pública existente foi removida."
+    "Motor central de IA reestruturado: Gemini e OpenRouter passam a usar adapters únicos, fila global com prioridades e perfis por tarefa para Assistente, Editorial, SEO, Diagnóstico, RSS, Tradução e ações rápidas.",
+    "Chamadas de IA ganham retry com backoff e Retry-After, circuit breaker/cooldown por provedor, timeout por tentativa e limite total da operação; falhas transitórias deixam de disparar chamadas repetidas sem controle.",
+    "Fallback Gemini ↔ OpenRouter passa a respeitar cooldown, prioridade, privacidade e estado real dos provedores; o Dashboard usa saúde em cache e não faz sondagens externas de IA a cada atualização.",
+    "Saídas estruturadas agora são validadas localmente contra JSON Schema mesmo quando o provedor recua para JSON simples, evitando respostas válidas em JSON porém incompletas para SEO, RSS ou diagnóstico.",
+    "Gemini passa a autenticar exclusivamente pelo cabeçalho x-goog-api-key; chamadas diretas duplicadas foram removidas de Integrações e APIs e centralizadas no mesmo adapter usado pelos módulos.",
+    "Contexto passa a ser limitado por orçamento aproximado de tokens e logs priorizam regiões próximas de erro/exception/falha; conteúdo externo é marcado como não confiável e segredos são mascarados por um redator central.",
+    "Integrações e APIs ganha controles de privacidade por classe de dados, diagnóstico unificado, informações de fila/cooldown e telemetria de uso dos últimos dias com sucesso, fallback, cache, latência, tokens e custo conhecido.",
+    "Foi adicionada telemetria AiUsage sem armazenar prompts/respostas completas e cache por hash para análises repetíveis, reduzindo consumo ao reabrir a mesma análise sem mudanças.",
+    "Assistente de IA passa a responder em streaming com status e botão Cancelar; análises longas de GitHub Actions usam jobs persistentes com progresso, resultado armazenado temporariamente e possibilidade de cancelamento.",
+    "Seleção de modelos passa a expor metadados de capacidade como contexto e suporte a JSON estruturado quando o provedor informa esses dados; OpenRouter exige parâmetros compatíveis em saídas estruturadas.",
+    "Falhas definitivas do motor de IA continuam integradas à Central de Erros, agora com mensagens de provedor/código mascaradas; documentos detalhados do MongoDB permanecem bloqueados para IA por padrão.",
+    "Foi adicionada suíte de testes do núcleo para schema, sanitização, circuit breaker, contexto e adapters; compatibilidade com Vercel/Render e os modos VPS/Termux legado foi preservada."
   ],
   "updatePackages": {
     "full": true,

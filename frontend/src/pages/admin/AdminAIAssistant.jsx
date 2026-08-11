@@ -281,7 +281,7 @@ const PERGUNTAS_SUGERIDAS = [
 
 export default function AdminAIAssistant() {
   const { data, loading, erro, recarregar } = useAnalysisOverview()
-  const { mensagens, loading: chatLoading, enviar, limpar } = useAIChat()
+  const { mensagens, loading: chatLoading, status: chatStatus, enviar, cancelar, limpar } = useAIChat()
 
   const [abaAtiva,    setAbaAtiva]    = useState('overview')   // 'overview' | 'alertas' | 'projetos' | 'chat' | 'sync'
   const [pergunta,    setPergunta]    = useState('')
@@ -699,7 +699,8 @@ export default function AdminAIAssistant() {
 
             {chatLoading && (
               <div style={{ display:'flex', alignItems:'center', gap:SPACE.md, color:C.muted, fontSize:FONT.base, padding:'8px 0' }}>
-                <Spin /> IA analisando…
+                <Spin /> {chatStatus || 'IA respondendo em tempo real…'}
+                <button onClick={cancelar} style={{marginLeft:'auto',padding:'5px 9px',fontSize:FONT.xs,border:`1px solid ${C.border}`,borderRadius:RADIUS.sm,background:C.surface,color:C.text,cursor:'pointer'}}>Cancelar</button>
               </div>
             )}
             <div ref={chatEndRef} />
@@ -721,12 +722,12 @@ export default function AdminAIAssistant() {
               }}
             />
             <button
-              onClick={handleEnviar}
-              disabled={!pergunta.trim() || chatLoading}
+              onClick={chatLoading ? cancelar : handleEnviar}
+              disabled={!chatLoading && !pergunta.trim()}
               className="ai-send-btn"
-              style={{ background:C.accent }}
+              style={{ background:chatLoading?C.red:C.accent }}
             >
-              {chatLoading ? <Spin /> : 'Enviar'}
+              {chatLoading ? 'Cancelar' : 'Enviar'}
             </button>
           </div>
         </div>

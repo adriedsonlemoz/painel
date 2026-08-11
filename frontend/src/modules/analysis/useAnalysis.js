@@ -4,7 +4,7 @@
  * Sprint 4 — ADIÇÃO PURA.
  * Gerencia carregamento do overview de análise e do chat com IA.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { analysisService } from '../../services/domains/analysis.js'
 
 export function useAnalysisOverview() {
@@ -54,45 +54,38 @@ export function useSync(projectName) {
 
 export function useAIChat() {
   const [mensagens, setMensagens] = useState([])
-  const [loading,   setLoading]   = useState(false)
-  const [erro,      setErro]      = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState(null)
+  const [status, setStatus] = useState('')
+  const controllerRef = useRef(null)
 
   const enviar = useCallback(async (pergunta, contexto = {}) => {
-    if (!pergunta?.trim()) return
-
-    // Adiciona mensagem do usuário imediatamente
-    const novaMensagem = { role: 'user', conteudo: pergunta, timestamp: new Date().toISOString() }
+    if (!pergunta?.trim() || loading) return
+    const novaMensagem = { role:'user', conteudo:pergunta, timestamp:new Date().toISOString() }
     setMensagens(prev => [...prev, novaMensagem])
-    setLoading(true)
-    setErro(null)
-
+    setLoading(true); setErro(null); setStatus('Preparando…')
+    const controller = new AbortController(); controllerRef.current = controller
+    const assistantId=`ai-${Date.now()}`
+    setMensagens(prev => [...prev,{id:assistantId,role:'assistant',conteudo:'',streaming:true,timestamp:new Date().toISOString()}])
     try {
-      const res = await analysisService.chat(pergunta, contexto)
-      const respostaIA = {
-        role:      'assistant',
-        conteudo:  res.resposta,
-        modelo:    res.modelo,
-        tokens:    res.tokens,
-        aviso:     res.aviso,
-        timestamp: new Date().toISOString(),
-      }
-      setMensagens(prev => [...prev, respostaIA])
+      const historico = mensagens.filter(m=>['user','assistant'].includes(m.role) && m.conteudo).slice(-10).map(m=>({role:m.role,content:m.conteudo}))
+      const meta = await analysisService.chatStream(pergunta, contexto, historico, {
+        signal:controller.signal,
+        onStatus:s=>setStatus(s.mensagem||''),
+        onChunk:chunk=>setMensagens(prev=>prev.map(m=>m.id===assistantId?{...m,conteudo:(m.conteudo||'')+chunk}:m)),
+      })
+      setMensagens(prev=>prev.map(m=>m.id===assistantId?{...m,streaming:false,modelo:meta.modelo,provedor:meta.provedor,tokens:meta.tokens,aviso:meta.aviso}:m))
+      setStatus('')
     } catch (e) {
-      setErro(e.message || 'Erro ao consultar IA')
-      setMensagens(prev => [...prev, {
-        role:      'error',
-        conteudo:  e.message || 'Erro ao consultar IA',
-        timestamp: new Date().toISOString(),
-      }])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      const cancelled=controller.signal.aborted
+      setErro(cancelled?'Geração cancelada.':e.message||'Erro ao consultar IA')
+      setMensagens(prev=>prev.map(m=>m.id===assistantId?{...m,role:cancelled?'assistant':'error',streaming:false,conteudo:m.conteudo||(cancelled?'Geração cancelada.':e.message||'Erro ao consultar IA')}:m))
+      setStatus('')
+    } finally { controllerRef.current=null; setLoading(false) }
+  }, [loading, mensagens])
 
-  const limpar = useCallback(() => {
-    setMensagens([])
-    setErro(null)
-  }, [])
-
-  return { mensagens, loading, erro, enviar, limpar }
+  const cancelar = useCallback(() => { controllerRef.current?.abort(); setStatus('Cancelando…') }, [])
+  const limpar = useCallback(() => { controllerRef.current?.abort(); setMensagens([]); setErro(null); setStatus('') }, [])
+  return { mensagens, loading, erro, status, enviar, cancelar, limpar }
 }
+
