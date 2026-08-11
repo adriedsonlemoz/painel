@@ -76,15 +76,15 @@ function Hero({ cfg, destaqueImg }) {
         <div className="max-w-xl mb-8">
           <h1
             className="font-display font-bold text-gray-900 leading-[1.05] animate-slide-up"
-            style={{ fontSize: 'clamp(2.4rem, 7vw, 3.8rem)', animationDelay: '80ms' }}>
+            style={{ fontSize: 'clamp(1.75rem, 5vw, 2.35rem)', animationDelay: '80ms' }}>
             {titulo1}
           </h1>
           <h1
             className="font-display font-bold italic text-brand-500 leading-[1.05] mb-5 animate-slide-up"
-            style={{ fontSize: 'clamp(2.4rem, 7vw, 3.8rem)', animationDelay: '160ms' }}>
+            style={{ fontSize: 'clamp(1.75rem, 5vw, 2.35rem)', animationDelay: '160ms' }}>
             {titulo2}
           </h1>
-          <p className="font-grotesk text-gray-500 text-base sm:text-lg leading-relaxed max-w-md mb-8
+          <p className="font-grotesk text-gray-500 text-sm sm:text-base leading-relaxed max-w-md mb-8
                         animate-slide-up" style={{ animationDelay: '240ms' }}>
             {subtitulo}
           </p>
@@ -131,9 +131,7 @@ function FaixaTopicos({ topicos, proximoEvento, proximoOnibus, modulos }) {
   return (
     <div className="wrap">
       <div
-        className="bg-white border border-gray-100 rounded-2xl shadow-md overflow-hidden
-                   grid divide-x divide-gray-100"
-        style={{ gridTemplateColumns: `repeat(${topicos.length}, 1fr)` }}>
+        className="portal-topic-grid bg-white border border-gray-100 rounded-2xl shadow-md overflow-hidden grid">
         {topicos.map(t => {
           const Icon      = ICON_MAP[t.icone] || Heart
           const isInterno = t.link?.startsWith('/')
@@ -190,7 +188,7 @@ function AbasCategorias({ catAtual, onMudar }) {
   const { categorias } = useCategorias()
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+    <div className="portal-category-tabs flex gap-2 flex-wrap pb-1">
       <button
         onClick={() => onMudar(null)}
         className={`flex-shrink-0 font-grotesk font-bold text-sm px-4 py-2 rounded-xl
@@ -378,7 +376,7 @@ function CapaJornalistica({ noticias, cfg }) {
               {principal.imagem_url ? <img src={principal.imagem_url} alt={principal.titulo} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"/> : <div className="w-full h-full flex items-center justify-center text-6xl">📰</div>}
             </div>
             {principal.categoria_id?.nome && <span className="text-xs font-grotesk font-black uppercase tracking-wide text-brand-500">{principal.categoria_id.nome}</span>}
-            <h2 className="font-display font-bold text-gray-950 text-3xl sm:text-4xl leading-tight mt-1 group-hover:text-brand-600 transition-colors">{principal.titulo}</h2>
+            <h2 className="font-display font-bold text-gray-950 text-2xl sm:text-3xl leading-tight mt-1 group-hover:text-brand-600 transition-colors">{principal.titulo}</h2>
             {principal.resumo && <p className="font-grotesk text-gray-500 mt-3 text-base sm:text-lg leading-relaxed line-clamp-3">{principal.resumo}</p>}
           </Link>
           <div className="lg:col-span-2 grid sm:grid-cols-2 lg:grid-cols-1 gap-0 border-t lg:border-t-0 lg:border-l border-gray-200 lg:pl-5">

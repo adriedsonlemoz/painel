@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
+import { DSModal } from '../../components/admin/ui/DS'
 import { Calendar, CheckCircle2, Clock, Edit2, Eye, EyeOff, MapPin, Plus, Save, Tag, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ConfirmModal from '../../components/ConfirmModal'
@@ -116,7 +117,8 @@ export default function AdminEventos() {
     <ConfirmModal aberto={confirm.aberto} titulo="Excluir evento?" mensagem="Essa ação é permanente e não pode ser desfeita." labelConfirmar="Excluir" carregando={confirm.carregando} onConfirmar={confirmarExclusao} onCancelar={()=>setConfirm({aberto:false,id:null,carregando:false})}/>
     <div className="adm-page-header"><div><div className="adm-page-title">Agenda de Eventos</div><div className="adm-page-sub">Gerencie a programação exibida no portal</div></div>{!editando&&<div className="adm-page-actions"><button className="adm-btn adm-btn-primary" onClick={()=>{setEditando('novo');setEditEvento(null)}}><Plus size={16} style={{marginRight:6}}/>Novo evento</button></div>}</div>
 
-    {editando ? <EventoForm evento={editEvento} onSave={salvar} onCancel={()=>{setEditando(null);setEditEvento(null)}}/> : <>
+    {editando && <DSModal open onClose={()=>{setEditando(null);setEditEvento(null)}} title={editEvento?'Editar evento':'Novo evento'} size="xl"><EventoForm evento={editEvento} onSave={salvar} onCancel={()=>{setEditando(null);setEditEvento(null)}}/></DSModal>}
+    <>
       <div style={{ display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:16 }}>
         {[['Próximos',stats.proximos,Calendar],['Publicados',stats.publicados,CheckCircle2],['Passados',stats.passados,Clock]].map(([label,value,Icon])=><div key={label} className="adm-card" style={{padding:16,display:'flex',alignItems:'center',gap:12}}><div style={{width:36,height:36,borderRadius:RADIUS.lg,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--adm-surface2)',color:'var(--adm-accent)'}}><Icon size={18}/></div><div><strong style={{display:'block',fontSize:20,color:'var(--adm-text)'}}>{value}</strong><span style={{fontSize:FONT.base,color:'var(--adm-muted)'}}>{label}</span></div></div>)}
       </div>
@@ -125,6 +127,6 @@ export default function AdminEventos() {
         {passados.length>0&&<section><h3 style={{fontSize:FONT.base,fontWeight:800,color:'var(--adm-muted)',textTransform:'uppercase',letterSpacing:1,margin:'0 0 12px'}}>Eventos passados ({passados.length})</h3>{passados.map(ev=><EventoItem key={ev.id||ev._id} evento={ev} passado onEdit={()=>editar(ev)} onDelete={()=>setConfirm({aberto:true,id:ev.id||ev._id,carregando:false})}/>)}</section>}
         {!futuros.length&&!passados.length&&<div className="adm-empty"><Calendar size={34} style={{opacity:.2,marginBottom:14}}/><p style={{color:'var(--adm-muted)'}}>Nenhum evento cadastrado.</p><button className="adm-btn adm-btn-primary adm-btn-sm" style={{marginTop:14}} onClick={()=>{setEditando('novo');setEditEvento(null)}}><Plus size={14} style={{marginRight:5}}/>Criar primeiro evento</button></div>}
       </div>}</div>
-    </>}
+    </>
   </>
 }

@@ -78,7 +78,7 @@ export const wrap = {
   alignItems: 'center',
   justifyContent: 'center',
   padding: `${SPACE.xl}px ${SPACE.md}px`,
-  fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
+  fontFamily: "'Geist','Segoe UI',system-ui,sans-serif",
 }
 
 // card() — usa cardStyle() do tokens como base, sobrepõe fundo escuro

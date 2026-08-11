@@ -75,6 +75,20 @@ const noticiaSchema = new mongoose.Schema(
       default: null,
     },
 
+    imagem_public_id: {
+      type: String,
+      default: null,
+    },
+
+    galeria: {
+      type: [{
+        url: { type:String, required:true },
+        public_id: { type:String, default:null },
+        legenda: { type:String, default:'' },
+      }],
+      default: [],
+    },
+
     imagem_legenda: {
       type:    String,
       default: '',

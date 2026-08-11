@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm ci --omit=dev
+    buildCommand: npm install --omit=dev --no-audit --no-fund
     startCommand: npm start
     healthCheckPath: /api/health/live
     autoDeployTrigger: commit
@@ -14,11 +14,7 @@ services:
         value: production
       - key: MONGO_URI
         sync: false
-      - key: FRONTEND_URL
-        sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: AL_UPDATE_RESTART_STRATEGY
-        value: none
+      - key: MONGO_DB_NAME
+        value: alsistemas
       - key: ALLOW_VERCEL_PREVIEWS
         value: 'false'

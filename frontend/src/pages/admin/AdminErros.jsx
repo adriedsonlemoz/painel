@@ -15,7 +15,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 import toast from 'react-hot-toast'
 import { formatarDataRelativa } from '../../utils/formatters'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSBadge } from '../../components/admin/ui/DS'
+import { DSBadge, DSModal } from '../../components/admin/ui/DS'
 
 // ─── Constantes ──────────────────────────────────────────────
 const TIPO_META = {
@@ -232,7 +232,6 @@ function BulkToolbar({ selected, onBulkStatus, onBulkDelete, onClear }) {
 // ─── Row expandível ───────────────────────────────────────────
 function ErroRow({ erro, onAtualizarStatus, onExcluir, selected, onToggleSelect }) {
   const [expandido, setExpandido] = useState(false)
-  const [uaExpand,  setUaExpand]  = useState(false)
   const ua    = parsearUA(erro.user_agent)
   const frame = extrairFramePrincipal(erro.stack)
   const id    = eid(erro)
@@ -293,9 +292,8 @@ function ErroRow({ erro, onAtualizarStatus, onExcluir, selected, onToggleSelect 
         </td>
       </tr>
       {expandido && (
-        <tr style={{ background: 'rgba(0,0,0,.15)' }}>
-          <td colSpan={6} style={{ padding: `0 ${SPACE.xl}px ${SPACE.xl}px` }}>
-            <div style={{ paddingTop: SPACE.lg, display: 'flex', flexDirection: 'column', gap: SPACE.lg }}>
+        <DSModal open={expandido} onClose={() => setExpandido(false)} title={`Detalhes do erro — ${erro.tipo || 'erro'}`} size="lg">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: SPACE.md }}>
                 <MetaItem label="🕐 Primeira ocorrência" value={new Date(erro.criado_em).toLocaleString('pt-BR')} />
                 <MetaItem label="↻ Última ocorrência" value={new Date(erro.ultima_ocorrencia || erro.criado_em).toLocaleString('pt-BR')} />
@@ -306,10 +304,8 @@ function ErroRow({ erro, onAtualizarStatus, onExcluir, selected, onToggleSelect 
               </div>
               {erro.user_agent && (
                 <div>
-                  <button onClick={() => setUaExpand(v => !v)} style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
-                    {uaExpand ? '▲' : '▶'} User-Agent completo
-                  </button>
-                  {uaExpand && <pre style={{ marginTop: SPACE.sm, fontSize: FONT.xs, color: 'var(--adm-muted)', background: 'var(--adm-surface)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.sm, padding: SPACE.sm, whiteSpace: 'pre-wrap' }}>{erro.user_agent}</pre>}
+                  <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginBottom: SPACE.sm, fontWeight: 600, textTransform: 'uppercase' }}>User-Agent completo</div>
+                  <pre style={{ margin: 0, fontSize: FONT.xs, color: 'var(--adm-muted)', background: 'var(--adm-surface)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.sm, padding: SPACE.sm, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{erro.user_agent}</pre>
                 </div>
               )}
               <div>
@@ -324,9 +320,8 @@ function ErroRow({ erro, onAtualizarStatus, onExcluir, selected, onToggleSelect 
                   </pre>
                 </div>
               )}
-            </div>
-          </td>
-        </tr>
+          </div>
+        </DSModal>
       )}
     </>
   )
@@ -362,10 +357,9 @@ function GrupoRow({ grupo }) {
         </td>
       </tr>
       {expandido && (
-        <tr style={{ background: 'rgba(0,0,0,.1)' }}>
-          <td colSpan={5} style={{ padding: `0 ${SPACE.xl}px ${SPACE.xl}px` }}>
-            <div style={{ paddingTop: SPACE.lg }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <DSModal open={expandido} onClose={() => setExpandido(false)} title={`Ocorrências agrupadas — ${grupo.count}`} size="lg">
+          <div className="adm-table-scroll">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
                     {['Data', 'Navegador', 'Usuário', 'Status'].map(h => (
@@ -383,10 +377,9 @@ function GrupoRow({ grupo }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
-          </td>
-        </tr>
+            </table>
+          </div>
+        </DSModal>
       )}
     </>
   )
@@ -640,15 +633,15 @@ export default function AdminErros() {
               <div style={{ marginTop: 3, color: 'var(--adm-muted)', fontSize: FONT.base, lineHeight: 1.5 }}>{h.acao}</div>
             </div>)}
           </div>}
-          {diagnostico.achados?.length > 0 && <details style={{ marginTop: SPACE.md }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 800, color: 'var(--adm-text)' }}>Ver últimas linhas suspeitas ({diagnostico.achados.length})</summary>
+          {diagnostico.achados?.length > 0 && <div style={{ marginTop: SPACE.md }}>
+            <div style={{ fontWeight: 800, color: 'var(--adm-text)' }}>Últimas linhas suspeitas ({diagnostico.achados.length})</div>
             <div style={{ marginTop: SPACE.sm, maxHeight: 260, overflow: 'auto', display: 'grid', gap: SPACE.xs }}>
               {diagnostico.achados.slice(-12).reverse().map((a,i) => <div key={`${a.arquivo}-${i}`} style={{ padding: SPACE.md, borderRadius: RADIUS.md, background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)' }}>
                 <div style={{ fontSize: FONT.xs, color: C.greenSolid, fontWeight: 700 }}>{a.origem} · {a.arquivo}</div>
                 <code style={{ display: 'block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--adm-text)', fontSize: FONT.sm }}>{a.mensagem}</code>
               </div>)}
             </div>
-          </details>}
+          </div>}
         </div>}
       </div>
 

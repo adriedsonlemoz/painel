@@ -33,12 +33,12 @@ export default function AdminSeguranca() {
       <div style={{...box,background:'linear-gradient(135deg,var(--adm-surface),var(--adm-surface2))'}}>
         <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center',flexWrap:'wrap'}}>
           <div><div style={{fontSize:12,fontWeight:800,letterSpacing:1,color:'var(--adm-accent)'}}>CENTRO DE SEGURANÇA</div><h1 style={{margin:'6px 0',fontSize:28}}>Proteção e detecção de riscos</h1><p style={{margin:0,color:'var(--adm-muted)'}}>Monitora padrões suspeitos sem registrar senhas, tokens ou conteúdo secreto.</p></div>
-          <div style={{fontSize:42,fontWeight:900}}>{data?.score ?? 0}<span style={{fontSize:15,color:'var(--adm-muted)'}}>/100</span></div>
+          <div style={{fontSize:28,fontWeight:900}}>{data?.score ?? 0}<span style={{fontSize:15,color:'var(--adm-muted)'}}>/100</span></div>
         </div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12}}>
-        {[['Alertas abertos',data?.abertos],['Alta prioridade',data?.criticos],['Últimas 24h',data?.ultimas24h],['Alterações auditadas',data?.mutacoes24h]].map(([l,v])=><div key={l} style={box}><div style={{fontSize:12,color:'var(--adm-muted)'}}>{l}</div><div style={{fontSize:28,fontWeight:850,marginTop:5}}>{v ?? 0}</div></div>)}
+        {[['Alertas abertos',data?.abertos],['Alta prioridade',data?.criticos],['Últimas 24h',data?.ultimas24h],['Alterações auditadas',data?.mutacoes24h]].map(([l,v])=><div key={l} style={box}><div style={{fontSize:12,color:'var(--adm-muted)'}}>{l}</div><div style={{fontSize:22,fontWeight:850,marginTop:5}}>{v ?? 0}</div></div>)}
       </div>
 
       <div style={box}>

@@ -1,8 +1,8 @@
 # ─── Stage 1: Dependências ────────────────────────────────────
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund
 
 # ─── Stage 2: Imagem final ────────────────────────────────────
 FROM node:20-alpine AS runner

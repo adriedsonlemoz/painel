@@ -107,7 +107,7 @@ function StatusStrip({ metricas, loading }) {
   ]
 
   return (
-    <div style={{
+    <div className="aba-strip" style={{
       display: 'grid',
       gridTemplateColumns: 'repeat(4, 1fr)',
       gap: SPACE.md,

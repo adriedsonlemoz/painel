@@ -6,7 +6,7 @@ const API=(path,options={})=>fetch(`${INTEGRATIONS_BASE}${path}`,{credentials:'i
 const providers=[['cloudinary','Cloudinary'],['cloudflare','Cloudflare'],['github','GitHub'],['render','Render'],['vercel','Vercel'],['gemini','Google Gemini'],['openrouter','OpenRouter']]
 const AI_PROVIDERS=['gemini','openrouter']
 const API_DEFAULTS={gemini:'https://generativelanguage.googleapis.com/v1beta',openrouter:'https://openrouter.ai/api/v1'}
-const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.'}}
+const blank={secret:'',secrets:{r2AccessKeyId:'',r2SecretAccessKey:''},metadata:{cloudName:'',apiKey:'',accountId:'',teamId:'',r2Bucket:'',r2PublicUrl:'',r2Endpoint:'',user:'',organization:'',repository:'',branch:'main',apiUrl:'',model:'',maxTokens:1200,temperature:.25,enabled:true,primary:false,systemInstructions:'Não invente fatos. Preserve nomes, datas, números e fontes. Escreva em português do Brasil com tom jornalístico claro e neutro.'}}
 
 const integrationHelp={
  mongodb:{
@@ -30,11 +30,11 @@ const integrationHelp={
   expected:'Cloud Name + API Key + API Secret',
  },
  cloudflare:{
-  title:'Cloudflare e armazenamento R2',
-  text:'Esta é a configuração central usada pelo módulo Cloudflare e também pelo armazenamento Cloudflare R2 dentro de Projetos. Depois de salvar aqui, os módulos deixam de depender de CF_* configurado manualmente no servidor, usando o ambiente apenas como fallback.',
-  steps:['No painel Cloudflare, abra My Profile → API Tokens e crie um token com as permissões necessárias para zonas/DNS e R2.','Copie o Account ID da sua conta.','Para Projetos no R2, abra R2 → Manage R2 API Tokens e gere Access Key ID + Secret Access Key.','Informe o nome do bucket usado pelo AL Sistemas.','URL pública do R2 é opcional e só é necessária para links públicos diretos.','Use Testar antes de salvar.'],
-  links:[['Abrir painel Cloudflare','https://dash.cloudflare.com'],['Criar API Token','https://dash.cloudflare.com/profile/api-tokens'],['Documentação R2','https://developers.cloudflare.com/r2/']],
-  expected:'API Token + Account ID • para R2: Access Key ID + Secret Access Key + Bucket',
+  title:'Cloudflare — API + R2 em abas separadas',
+  text:'A configuração fica em duas abas para não misturar credenciais: Cloudflare API mantém o token REST e o Account ID; R2 Storage guarda as credenciais S3 usadas nos objetos. Tudo continua salvo no mesmo cofre seguro do AL Sistemas.',
+  steps:['Na aba Cloudflare API, mantenha o API Token da conta e o Account ID.','Na aba R2 Storage, informe Access Key ID + Secret Access Key criados em Manage R2 API Tokens.','O endpoint S3 é calculado automaticamente a partir do Account ID.','Não é obrigatório digitar bucket: depois de salvar, abra o módulo Cloudflare → R2 e escolha “Usar no AL”.','O backup .env de Integrações inclui as credenciais R2 quando a opção de incluir segredos estiver habilitada.'],
+  links:[['Abrir painel Cloudflare','https://dash.cloudflare.com'],['Gerenciar API Tokens','https://dash.cloudflare.com/profile/api-tokens'],['Documentação de tokens R2','https://developers.cloudflare.com/r2/api/tokens/'],['API Cloudflare','https://developers.cloudflare.com/api/']],
+  expected:'API Token + Account ID • R2 opcional: Access Key ID + Secret Access Key',
  },
  render:{
   title:'Render',
@@ -80,11 +80,12 @@ export default function AdminIntegracoes(){
  const [status,setStatus]=useState(null),[tab,setTab]=useState(null),[form,setForm]=useState(blank),[mongo,setMongo]=useState({uri:'',databaseName:''}),[busy,setBusy]=useState(false),[diag,setDiag]=useState(null),[exportSecrets,setExportSecrets]=useState(false),[exporting,setExporting]=useState(false),[utility,setUtility]=useState(null),[importFile,setImportFile]=useState(null),[importing,setImporting]=useState(false)
  const [github,setGithub]=useState({loading:false,account:null,repositories:[],diagnostics:null,preferences:{repository:'',branch:'main'}})
  const [identityRefreshing,setIdentityRefreshing]=useState(false)
+ const [integrationTest,setIntegrationTest]=useState(null)
  const load=()=>API('/status').then(d=>{setStatus(d);return d}).catch(e=>{toast.error(e.message);throw e})
  const refreshIdentities=async(silent=false)=>{setIdentityRefreshing(true);try{await API('/identities/refresh',{method:'POST'});await load();if(!silent)toast.success('Contas/origens atualizadas')}catch(e){if(!silent)toast.error(e.message)}finally{setIdentityRefreshing(false)}}
  useEffect(() => { load().then(()=>refreshIdentities(true)).catch(()=>{}) }, [])
  const save=async()=>{setBusy(true);try{if(tab==='mongodb')await API('/mongodb',{method:'PUT',body:JSON.stringify(mongo)});else await API(`/${tab}`,{method:'PUT',body:JSON.stringify(form)});toast.success('Configuração salva com segurança');setForm(blank);setMongo(m=>({...m,uri:''}));load()}catch(e){toast.error(e.message)}finally{setBusy(false)}}
- const test=async()=>{setBusy(true);try{const d=tab==='mongodb'?await API('/mongodb/test',{method:'POST',body:JSON.stringify(mongo)}):await API(`/${tab}/test`,{method:'POST',body:JSON.stringify({secret:form.secret,secrets:form.secrets,metadata:form.metadata})});toast.success(d.mensagem||'Conexão validada')}catch(e){toast.error(e.message)}finally{setBusy(false)}}
+ const test=async()=>{setBusy(true);setIntegrationTest(null);try{const d=tab==='mongodb'?await API('/mongodb/test',{method:'POST',body:JSON.stringify(mongo)}):await API(`/${tab}/test`,{method:'POST',body:JSON.stringify({secret:form.secret,secrets:form.secrets,metadata:form.metadata})});setIntegrationTest(d);toast.success(d.mensagem||'Conexão validada')}catch(e){setIntegrationTest({ok:false,erro:e.message});toast.error(e.message)}finally{setBusy(false)}}
  const loadGithub=async()=>{setGithub(g=>({...g,loading:true}));try{const d=await API('/github/repositories');setGithub({loading:false,account:d.account,repositories:d.repositories||[],diagnostics:d.diagnostics||null,preferences:d.preferences||{repository:'',branch:'main'}})}catch(e){setGithub(g=>({...g,loading:false}));if(status?.integrations?.github?.configured)toast.error(e.message)}}
  useEffect(()=>{if(tab==='github'&&status?.integrations?.github?.configured)loadGithub()},[tab,status?.integrations?.github?.configured])
  const connectGithub=async()=>{if(!form.secret.trim())return toast.error('Cole o token do GitHub primeiro.');setBusy(true);try{const d=await API('/github/connect',{method:'POST',body:JSON.stringify({token:form.secret})});setGithub({loading:false,account:d.account,repositories:d.repositories||[],diagnostics:d.diagnostics||null,preferences:d.preferences||{repository:'',branch:'main'}});setForm(blank);toast.success(d.mensagem||'GitHub conectado');await load()}catch(e){toast.error(e.message)}finally{setBusy(false)}}
@@ -93,8 +94,8 @@ export default function AdminIntegracoes(){
  const generate=async()=>{const d=await API('/password/generate',{method:'POST'});await navigator.clipboard.writeText(d.password);toast.success('Senha forte gerada e copiada')}
  const runDiag=async()=>{setBusy(true);try{setDiag(await API('/diagnostics/run'))}catch(e){toast.error(e.message)}finally{setBusy(false)}}
  const exportConfig=async(format='env')=>{setExporting(true);try{const r=await fetch(`${INTEGRATIONS_BASE}/export`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({includeSecrets:exportSecrets,format})});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.erro||'Falha ao exportar configurações')}const blob=await r.blob();const cd=r.headers.get('content-disposition')||'';const match=cd.match(/filename=\"?([^\";]+)\"?/i);const name=match?.[1]||`al-sistemas-integracoes.${format==='json'?'json':'env'}`;const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast.success(exportSecrets?'Backup com segredos baixado. Guarde-o em local privado.':'Arquivo de referência baixado com valores mascarados.')}catch(e){toast.error(e.message)}finally{setExporting(false)}}
- const openIntegration=(id)=>{setTab(id);setForm(blank)}
- const closeIntegration=()=>{setTab(null);setForm(blank);setMongo(m=>({...m,uri:''}))}
+ const openIntegration=(id)=>{setTab(id);setForm(blank);setIntegrationTest(null)}
+ const closeIntegration=()=>{setTab(null);setForm(blank);setMongo(m=>({...m,uri:''}));setIntegrationTest(null)}
  const parseEnv=(text)=>Object.fromEntries(text.replace(/^\uFEFF/,'').split(/\r?\n/).map(x=>x.trim()).filter(x=>x&&!x.startsWith('#')&&x.includes('=')).map(line=>{const i=line.indexOf('=');let v=line.slice(i+1).trim();if((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))v=v.slice(1,-1).replace(/\\n/g,'\n').replace(/\\"/g,'"').replace(/\\\\/g,'\\');return [line.slice(0,i).trim(),v]}))
  const importConfig=async()=>{if(!importFile)return toast.error('Escolha um arquivo .env ou .json.');setImporting(true);try{const text=await importFile.text();let variables={};if(importFile.name.toLowerCase().endsWith('.json')){const data=JSON.parse(text);variables=data.variables||data}else variables=parseEnv(text);const d=await API('/import',{method:'POST',body:JSON.stringify({variables})});toast.success(d.mensagem||'Configurações importadas');setUtility(null);setImportFile(null);await load()}catch(e){toast.error(e.message)}finally{setImporting(false)}}
  const current=tab==='mongodb'?status?.mongodb:(tab?status?.integrations?.[tab]:null)
@@ -108,7 +109,7 @@ export default function AdminIntegracoes(){
   </section>
 
   <section className="integration-hub">
-   <div className="hub-heading"><div><div className="eyebrow">SUAS CONEXÕES</div><h2>Escolha uma integração</h2><p>Dois cards por linha, com uma visão rápida do papel de cada serviço e do estado da conexão.</p></div><button onClick={()=>refreshIdentities(false)} disabled={identityRefreshing}>{identityRefreshing?'Atualizando…':'Atualizar status'}</button></div>
+   <div className="hub-heading"><div><div className="eyebrow">SUAS CONEXÕES</div><h2>Escolha uma integração</h2><p>Grade adaptável: três cards no desktop, dois no tablet e um no celular, sem apertar o conteúdo.</p></div><button onClick={()=>refreshIdentities(false)} disabled={identityRefreshing}>{identityRefreshing?'Atualizando…':'Atualizar status'}</button></div>
    <div className="integration-card-grid">
     <IntegrationCard id="mongodb" name="MongoDB" description="Banco principal do AL Sistemas e origem das configurações persistidas." status={status?.mongodb} onOpen={openIntegration}/>
     <IntegrationCard id="cloudinary" name="Cloudinary" description="Hospedagem de imagens e mídia publicadas no portal." status={status?.integrations?.cloudinary} onOpen={openIntegration}/>
@@ -129,7 +130,7 @@ export default function AdminIntegracoes(){
       <StatusBox label="Estado" value={current?.connected?'Conectado':current?.configured?'Configurado / desconectado':'Não configurado'}/><StatusBox label="Tipo" value={current?.provider==='atlas'?'MongoDB Atlas':current?.provider||'—'}/><StatusBox label="Banco" value={current?.database||'—'}/><StatusBox label="Servidor" value={current?.host||'—'}/>
      </div><SecretField label="URL de conexão" value={mongo.uri} onChange={v=>setMongo({...mongo,uri:v})} placeholder={current?.configured?'Digite somente para substituir':'mongodb+srv://usuario:senha@cluster/...'}/><Field label="Nome do banco" value={mongo.databaseName} onChange={v=>setMongo({...mongo,databaseName:v})} placeholder={current?.database||'alsistemas'}/></>
      :tab==='github'?<GitHubConnector current={current} form={form} setForm={setForm} github={github} setGithub={setGithub} busy={busy} onConnect={connectGithub} onReload={loadGithub} onSavePreferences={saveGithubPreferences}/>
-     :tab==='cloudflare'?<CloudflareConnector current={current} form={form} setForm={setForm}/>
+     :tab==='cloudflare'?<CloudflareConnector current={current} form={form} setForm={setForm} diagnostic={integrationTest}/>
      :tab==='render'?<RenderConnector current={current} form={form} setForm={setForm}/>
      :tab==='vercel'?<VercelConnector current={current} form={form} setForm={setForm}/>
      :AI_PROVIDERS.includes(tab)?<AIWizard provider={tab} form={form} setForm={setForm} current={current}/>
@@ -159,8 +160,9 @@ export default function AdminIntegracoes(){
   <style>{`
     .integrations-titlebar,.hub-heading{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}.integrations-titlebar h1,.hub-heading h2{margin:4px 0 6px}.integrations-titlebar p,.hub-heading p,.modal-copy{margin:0;color:var(--adm-muted);font-size:13px;line-height:1.5}.eyebrow{font-size:10px;font-weight:900;letter-spacing:.11em;color:var(--adm-accent)}
     .utility-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:18px 0;padding:14px 16px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface)}.utility-strip>div:first-child{display:flex;flex-direction:column;gap:3px}.utility-strip span{font-size:12px;color:var(--adm-muted)}.utility-actions{display:flex;gap:8px;flex-wrap:wrap}
-    .integration-hub{padding:18px;border:1px solid var(--adm-border);border-radius:16px;background:var(--adm-surface)}.integration-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px}.big-integration-card{min-width:0;min-height:132px;padding:16px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-bg);text-align:left;display:flex;flex-direction:column;align-items:stretch;transition:.18s ease}.big-integration-card:hover{transform:translateY(-1px);border-color:var(--adm-accent)}.big-integration-card .card-top{display:flex;align-items:center;gap:9px}.big-integration-card .dot{width:10px;height:10px;border-radius:50%;background:var(--adm-border);flex:0 0 auto}.big-integration-card.connected .dot{background:var(--adm-accent)}.big-integration-card.paused .dot{background:var(--adm-muted)}.big-integration-card h3{font-size:15px;margin:0}.big-integration-card .state{margin-left:auto;font-size:10px;font-weight:900;color:var(--adm-muted)}.big-integration-card.connected .state{color:var(--adm-accent)}.big-integration-card p{font-size:12px;line-height:1.5;color:var(--adm-muted);margin:12px 0 0}.big-integration-card .open-label{margin-top:auto;padding-top:12px;font-size:11px;font-weight:800;color:var(--adm-accent)}
+    .integration-hub{padding:18px;border:1px solid var(--adm-border);border-radius:16px;background:var(--adm-surface)}.integration-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.big-integration-card{min-width:0;min-height:132px;padding:16px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-bg);text-align:left;display:flex;flex-direction:column;align-items:stretch;transition:.18s ease}.big-integration-card:hover{transform:translateY(-1px);border-color:var(--adm-accent)}.big-integration-card .card-top{display:flex;align-items:center;gap:9px}.big-integration-card .dot{width:10px;height:10px;border-radius:50%;background:var(--adm-border);flex:0 0 auto}.big-integration-card.connected .dot{background:var(--adm-accent)}.big-integration-card.paused .dot{background:var(--adm-muted)}.big-integration-card h3{font-size:15px;margin:0}.big-integration-card .state{margin-left:auto;font-size:10px;font-weight:900;color:var(--adm-muted)}.big-integration-card.connected .state{color:var(--adm-accent)}.big-integration-card p{font-size:12px;line-height:1.5;color:var(--adm-muted);margin:12px 0 0}.big-integration-card .open-label{margin-top:auto;padding-top:12px;font-size:11px;font-weight:800;color:var(--adm-accent)}
     .modal-backdrop{position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center;padding:16px}.integration-modal{width:min(760px,100%);max-height:calc(100vh - 32px);overflow:auto;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.28)}.modal-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:16px 18px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface)}.modal-head h2{margin:0;font-size:20px}.modal-head span{font-size:11px;color:var(--adm-muted)}.modal-close{padding:7px 10px;font-size:18px;line-height:1}.modal-body{padding:18px}.modal-actions{position:sticky;bottom:-18px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin:20px -18px -18px;padding:14px 18px;border-top:1px solid var(--adm-border);background:var(--adm-surface)}.modal-actions .primary{border-color:var(--adm-accent);color:var(--adm-accent);font-weight:800}.modal-actions .danger{color:#d9534f}.warning-box{padding:12px;border-radius:10px;border:1px solid #f59e0b55;background:#f59e0b12;margin-bottom:14px;font-size:13px}.warning-box div{margin-top:4px;color:var(--adm-muted)}
+    .cloudflare-config-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:5px;margin:0 0 14px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-bg)}.cloudflare-config-tabs button{min-width:0;padding:9px 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--adm-muted);font-size:12px;font-weight:800}.cloudflare-config-tabs button.active{border-color:var(--adm-border);background:var(--adm-surface);color:var(--adm-text);box-shadow:0 1px 4px rgba(0,0,0,.08)}.cloudflare-tab-note{display:flex;gap:6px;align-items:flex-start;flex-direction:column;padding:11px 12px;border:1px dashed var(--adm-border);border-radius:10px;background:var(--adm-bg);font-size:11px;line-height:1.5;color:var(--adm-muted)}.cloudflare-tab-note>b{color:var(--adm-text);font-size:11px}
     .choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.choice-grid button{text-align:left;padding:16px;display:flex;flex-direction:column;gap:5px}.choice-grid span{font-size:11px;color:var(--adm-muted);line-height:1.4}.secret-option{display:flex;gap:10px;align-items:flex-start;padding:13px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-bg)}.secret-option input{width:auto;margin-top:3px}.secret-option span{display:flex;flex-direction:column;gap:4px}.secret-option small{color:var(--adm-muted);line-height:1.4}.file-drop{display:flex;flex-direction:column;gap:5px;margin-top:16px;padding:22px;border:1px dashed var(--adm-border);border-radius:14px;background:var(--adm-bg);text-align:center;cursor:pointer}.file-drop input{display:none}.file-drop span{font-size:12px;color:var(--adm-muted)}
     .integration-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:14px}.ai-steps{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;overflow:visible!important}.ai-steps button{min-width:0!important;overflow:hidden}.github-diagnostic-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     input{width:100%;box-sizing:border-box;padding:11px;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-bg);color:var(--adm-text)}button{padding:10px 14px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);cursor:pointer}
@@ -168,7 +170,8 @@ export default function AdminIntegracoes(){
     .ai-api-readonly,.ai-note,.ai-review-callout{padding:11px 12px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-size:12px;line-height:1.5;margin:10px 0 14px}.ai-api-readonly{display:grid;gap:4px}.ai-api-readonly code{overflow-wrap:anywhere;color:var(--adm-accent)}.ai-api-readonly span,.ai-note,.ai-review-callout span{color:var(--adm-muted)}
     .model-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 8px}.model-picker-head button{font-size:11px}.ai-params-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
     .ai-toggle-row{display:flex;gap:10px;align-items:flex-start;padding:13px;border:1px solid var(--adm-border);border-radius:10px;margin:10px 0}.ai-toggle-row input{width:auto;margin-top:2px}.ai-toggle-row span{display:grid;gap:3px}.ai-toggle-row small{font-size:11px;font-weight:400;color:var(--adm-muted);line-height:1.45}.ai-toggle-row.disabled{opacity:.55}.ai-review-callout{display:grid;gap:4px;margin-top:14px}
-    @media(max-width:620px){.integrations-titlebar>button,.hub-heading>button{width:100%}.utility-strip{align-items:stretch;flex-direction:column}.utility-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.utility-actions button{padding:9px 5px;font-size:11px}.integration-hub{padding:14px}.integration-card-grid{gap:9px}.big-integration-card{min-height:150px;padding:13px}.big-integration-card h3{font-size:13px}.big-integration-card p{font-size:11px}.modal-backdrop{padding:12px;align-items:center;justify-content:center}.integration-modal{border-radius:18px;max-height:calc(100dvh - 24px);width:100%}.modal-body{padding:15px}.modal-actions{margin:18px -15px -15px;padding:12px 15px;display:grid;grid-template-columns:1fr 1fr}.modal-actions button{width:100%}.choice-grid{grid-template-columns:1fr}.integration-status-grid,.github-diagnostic-grid{grid-template-columns:1fr}.integration-help-links{display:grid!important;grid-template-columns:1fr}.integration-help-links a{text-align:center}.ai-steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}.ai-params-grid{grid-template-columns:1fr!important}.model-picker-head{align-items:flex-start;flex-direction:column}.model-picker-head button{width:100%}.ai-steps button{font-size:11px;padding:9px 5px!important}}
+    @media(max-width:900px){.integration-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:620px){.integrations-titlebar>button,.hub-heading>button{width:100%}.utility-strip{align-items:stretch;flex-direction:column}.utility-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.utility-actions button{padding:9px 5px;font-size:11px}.integration-hub{padding:14px}.integration-card-grid{grid-template-columns:1fr;gap:9px}.big-integration-card{min-height:150px;padding:13px}.big-integration-card h3{font-size:13px}.big-integration-card p{font-size:11px}.modal-backdrop{padding:0;align-items:flex-end;justify-content:center}.integration-modal{border-radius:18px 18px 0 0;max-height:92dvh;width:100%}.modal-body{padding:15px}.modal-actions{margin:18px -15px -15px;padding:12px 15px;display:grid;grid-template-columns:1fr 1fr}.modal-actions button{width:100%}.choice-grid{grid-template-columns:1fr}.integration-status-grid,.github-diagnostic-grid{grid-template-columns:1fr}.integration-help-links{display:grid!important;grid-template-columns:1fr}.integration-help-links a{text-align:center}.ai-steps{grid-template-columns:repeat(2,minmax(0,1fr))!important}.ai-params-grid{grid-template-columns:1fr!important}.model-picker-head{align-items:flex-start;flex-direction:column}.model-picker-head button{width:100%}.ai-steps button{font-size:11px;padding:9px 5px!important}}
   `}</style>
  </div>
 }
@@ -246,22 +249,51 @@ function VercelConnector({current,form,setForm}){
  </div>
 }
 
-function CloudflareConnector({current,form,setForm}){
+function CloudflareConnector({current,form,setForm,diagnostic}){
+ const [cloudflareTab,setCloudflareTab]=useState('api')
  const setMeta=(key,value)=>setForm(f=>({...f,metadata:{...f.metadata,[key]:value}}))
  const setSecret=(key,value)=>setForm(f=>({...f,secrets:{...f.secrets,[key]:value}}))
+ const account=String(form.metadata.accountId||current?.metadata?.accountId||'').trim()
+ const endpoint=account?`https://${account}.r2.cloudflarestorage.com`:'Será calculado após informar o Account ID'
  return <div>
-  <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
-   <b>Uma configuração para dois módulos</b>
-   <div style={{color:'var(--adm-muted)',marginTop:5}}>O <b>API Token + Account ID</b> alimenta a página Cloudflare. As credenciais <b>R2</b> alimentam também <b>Projetos → Cloudflare R2</b>. Você configura tudo uma vez aqui.</div>
+  <div className="cloudflare-config-tabs" role="tablist" aria-label="Configuração Cloudflare">
+   <button type="button" role="tab" aria-selected={cloudflareTab==='api'} className={cloudflareTab==='api'?'active':''} onClick={()=>setCloudflareTab('api')}>Cloudflare API</button>
+   <button type="button" role="tab" aria-selected={cloudflareTab==='r2'} className={cloudflareTab==='r2'?'active':''} onClick={()=>setCloudflareTab('r2')}>R2 Storage</button>
   </div>
-  <SecretField label={current?.configured?'Novo API Token (deixe vazio para manter)':'Cloudflare API Token'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole o API Token'}/>
-  <Field label="Account ID" value={form.metadata.accountId||''} onChange={v=>setMeta('accountId',v)} placeholder="ID da conta Cloudflare"/>
-  <h4 style={{margin:'18px 0 8px'}}>Cloudflare R2 para Projetos</h4>
-  <p style={{margin:'0 0 12px',fontSize:12,color:'var(--adm-muted)'}}>Se você não usa R2, estes campos podem ficar vazios. GridFS continua usando somente a conexão MongoDB principal.</p>
-  <SecretField label={current?.configured?'Novo R2 Access Key ID (opcional)':'R2 Access Key ID (opcional)'} value={form.secrets?.r2AccessKeyId||''} onChange={v=>setSecret('r2AccessKeyId',v)} placeholder={current?.configured?'Deixe vazio para manter':'Access Key ID do R2'}/>
-  <SecretField label={current?.configured?'Novo R2 Secret Access Key (opcional)':'R2 Secret Access Key (opcional)'} value={form.secrets?.r2SecretAccessKey||''} onChange={v=>setSecret('r2SecretAccessKey',v)} placeholder={current?.configured?'Deixe vazio para manter':'Secret Access Key do R2'}/>
-  <Field label="Bucket R2" value={form.metadata.r2Bucket||''} onChange={v=>setMeta('r2Bucket',v)} placeholder="ex.: projetos"/>
-  <Field label="URL pública R2 (opcional)" value={form.metadata.r2PublicUrl||''} onChange={v=>setMeta('r2PublicUrl',v)} placeholder="https://arquivos.seudominio.com"/>
+
+  {cloudflareTab==='api'?<>
+   <div style={{padding:13,borderRadius:11,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14}}>
+    <div style={{fontSize:11,fontWeight:900,letterSpacing:'.08em',color:'var(--adm-accent)'}}>CLOUDFLARE REST API</div>
+    <div style={{fontSize:12,color:'var(--adm-muted)',lineHeight:1.55,marginTop:5}}>Administra produtos da conta: zonas/DNS, Workers, Pages, KV, D1, Queues, Vectorize, AI Gateway e R2 conforme as permissões reais do token.</div>
+   </div>
+   <SecretField label={current?.configured?'Novo API Token (deixe vazio para manter)':'Cloudflare API Token'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'cfat_••••••••••••':'cfat_...'}/>
+   <Field label="Account ID" value={form.metadata.accountId||''} onChange={v=>setMeta('accountId',v.trim())} placeholder="32 caracteres"/>
+   <div className="cloudflare-tab-note"><b>R2 separado</b><span>As credenciais S3 ficam na aba <b>R2 Storage</b>. O API Token e o Account ID atuais continuam sendo usados normalmente.</span></div>
+  </>:<>
+   <div style={{padding:13,borderRadius:11,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:12}}>
+    <div style={{fontSize:11,fontWeight:900,letterSpacing:'.08em',color:'var(--adm-accent)'}}>R2 · S3 COMPATÍVEL</div>
+    <div style={{fontSize:12,color:'var(--adm-muted)',lineHeight:1.55,marginTop:5}}>Use as credenciais criadas em <b>R2 → Manage R2 API Tokens</b> com permissão de leitura e escrita. Elas são diferentes do API Token da aba anterior.</div>
+   </div>
+   <SecretField label={current?.configured?'Novo R2 Access Key ID (deixe vazio para manter)':'R2 Access Key ID'} value={form.secrets?.r2AccessKeyId||''} onChange={v=>setSecret('r2AccessKeyId',v)} placeholder={current?.configured?'••••••••••••':'Access Key ID'}/>
+   <SecretField label={current?.configured?'Novo R2 Secret Access Key (deixe vazio para manter)':'R2 Secret Access Key'} value={form.secrets?.r2SecretAccessKey||''} onChange={v=>setSecret('r2SecretAccessKey',v)} placeholder={current?.configured?'••••••••••••':'Secret Access Key'}/>
+   <div style={{padding:11,border:'1px solid var(--adm-border)',borderRadius:9,background:'var(--adm-bg)',margin:'3px 0 17px'}}>
+    <div style={{fontSize:10,fontWeight:800,color:'var(--adm-muted)'}}>ENDPOINT R2 GERADO AUTOMATICAMENTE</div>
+    <code style={{display:'block',fontSize:10,marginTop:5,color:'var(--adm-text)',overflowWrap:'anywhere'}}>{endpoint}</code>
+   </div>
+   <h4 style={{margin:'18px 0 8px'}}>Preferências R2</h4>
+   <p style={{margin:'0 0 12px',fontSize:12,color:'var(--adm-muted)',lineHeight:1.5}}>O bucket não precisa mais ser digitado aqui. Depois de conectar, abra <b>Cloudflare → R2 Storage</b> e escolha um bucket existente com <b>Usar no AL</b>.</p>
+   <Field label="Bucket padrão (opcional / compatibilidade)" value={form.metadata.r2Bucket||''} onChange={v=>setMeta('r2Bucket',v)} placeholder={current?.metadata?.r2Bucket||'pode deixar vazio'}/>
+   <Field label="URL pública do bucket (opcional)" value={form.metadata.r2PublicUrl||''} onChange={v=>setMeta('r2PublicUrl',v)} placeholder="https://arquivos.seudominio.com"/>
+  </>}
+
+  {diagnostic&&<div style={{marginTop:14,padding:12,borderRadius:10,border:`1px solid ${diagnostic.ok===false?'#ef444455':'#16a34a55'}`,background:diagnostic.ok===false?'#ef44440b':'#16a34a0b'}}>
+   <b style={{fontSize:12}}>{diagnostic.ok===false?'⚠ Teste não concluído':'✓ Diagnóstico da conexão'}</b>
+   {diagnostic.erro&&<div style={{fontSize:11,color:'#ef4444',marginTop:5}}>{diagnostic.erro}</div>}
+   {diagnostic.account&&<div style={{fontSize:11,color:'var(--adm-muted)',marginTop:5}}>Conta REST: <b>{diagnostic.account.name||diagnostic.account.id}</b></div>}
+   {diagnostic.endpointS3&&<div style={{fontSize:10,color:'var(--adm-muted)',marginTop:4,overflowWrap:'anywhere'}}>S3: <code>{diagnostic.endpointS3}</code></div>}
+   {diagnostic.s3?.configured&&<div style={{fontSize:11,color:diagnostic.s3.ok?'#16a34a':'#d97706',marginTop:5}}>{diagnostic.s3.ok?`R2 S3 válido · ${diagnostic.s3.buckets?.length||0} bucket(s) acessível(is)`:`R2 S3 não validado: ${diagnostic.s3.error||'revise as credenciais'}`}</div>}
+  </div>}
+  {current?.configured&&<a href="/admin/cloudflare" style={{display:'inline-block',marginTop:13,fontSize:12,fontWeight:800,color:'var(--adm-accent)'}}>Abrir Central Cloudflare →</a>}
  </div>
 }
 
@@ -316,15 +348,15 @@ function GitHubConnector({current,form,setForm,github,setGithub,busy,onConnect,o
    </div>
    <button onClick={onSavePreferences} disabled={busy||github.loading}>Salvar preferências</button>
 
-   {github.repositories.length>0&&<details style={{marginTop:16}}>
-    <summary style={{cursor:'pointer',fontWeight:700}}>Ver repositórios acessíveis ({github.repositories.length})</summary>
+   {github.repositories.length>0&&<div style={{marginTop:16}}>
+    <div style={{fontWeight:700}}>Repositórios acessíveis ({github.repositories.length})</div>
     <div style={{marginTop:8,maxHeight:280,overflow:'auto',borderTop:'1px solid var(--adm-border)'}}>
      {github.repositories.map(r=><div key={r.id} style={{padding:'10px 2px',borderBottom:'1px solid var(--adm-border)',display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
       <span><b>{r.fullName}</b> {r.private?'🔒':''}</span>
       <span style={{fontSize:12,color:r.permissions?.write?'var(--adm-accent)':'var(--adm-muted)'}}>{r.permissions?.write?'conta pode escrever':'somente leitura'}</span>
      </div>)}
     </div>
-   </details>}
+   </div>}
   </div>}
  </div>
 }

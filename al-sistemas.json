@@ -1,14 +1,19 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.82",
+  "version": "1.0.86",
   "packageFormat": 2,
   "changelog": [
-    "Publicação GitHub em Termux/VPS agora prefere Git nativo, enviando o diff compactado em vez de criar um blob HTTP para cada arquivo.",
-    "Se Git nativo não estiver disponível ou falhar, o publicador alterna automaticamente para a API GitHub existente.",
-    "O job registra o motor usado e o diff real: novos, alterados e removidos.",
-    "Publicação sem mudanças termina sem criar commit desnecessário.",
-    "Corrigido workflow Android: capacitor.config.ts agora existe e pode receber a URL da Vercel antes do npx cap sync.",
-    "Confirmado pelo novo log que npm ci está saudável: 418 pacotes instalados em cerca de 5 segundos; o erro atual do APK era exclusivamente a ausência de capacitor.config.ts."
+    "Revisão visual ampla do painel administrativo e do portal público, com tipografia mais compacta, grids responsivos e contenção de largura para telas pequenas.",
+    "Design System administrativo recebe escala tipográfica menor; modais e drawers passam a se adaptar ao celular como bottom-sheet/tela compacta sem alterar as ações existentes.",
+    "GitHub e Integrações usam grade responsiva 3 colunas no desktop, 2 no tablet e 1 no celular; detalhes longos deixam de empurrar as listas para baixo.",
+    "Projetos, Erros, Eventos, Ônibus, Fontes e MongoDB passam a apresentar detalhes/edição/gerenciamento em overlays, preservando os mesmos serviços e regras de negócio.",
+    "MongoDB e Newsletter ganham visualização móvel em cards para evitar tabelas vazando horizontalmente; Cloudflare, Sistema, Monitor, Usuários e Assistente de IA recebem ajustes responsivos.",
+    "Portal público reduz títulos excessivamente grandes, reorganiza tópicos/categorias e diminui dependência de rolagem horizontal nas faixas principais.",
+    "Fontes visuais foram alinhadas às famílias realmente carregadas pelo projeto (Nunito, Geist e Fraunces), reduzindo diferenças causadas por fallback do navegador.",
+    "Inclui os ajustes de Integrações preparados após a 1.0.84: Cloudflare API e R2 Storage ficam em duas abas visuais separadas sem remover os campos REST existentes.",
+    "R2 Storage mantém Access Key ID, Secret Access Key, endpoint, bucket e preferências no mesmo cofre seguro; credenciais sensíveis continuam com controle Mostrar/Ocultar.",
+    "Backup/exportação de Integrações preserva CF_R2_ACCESS_KEY_ID, CF_R2_SECRET_ACCESS_KEY, CF_R2_BUCKET, CF_R2_PUBLIC_URL e CF_R2_ENDPOINT para restauração futura.",
+    "Backup JSON de Integrações passa a identificar a versão de origem como 1.0.86."
   ],
   "updatePackages": {
     "full": true,

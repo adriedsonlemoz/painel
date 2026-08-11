@@ -27,6 +27,7 @@ import { Evento }       from '../models/Evento.js'
 import Fonte            from '../models/Fonte.js'
 import { autenticar }   from '../middleware/auth.js'
 import { readBootstrap, writeBootstrap, bootstrapValue, isBootstrapConfigured, resetBootstrapVault } from '../utils/localVault.js'
+import { installationState, markInstallationCompleted } from '../utils/hostedBootstrap.js'
 import { conectarMongo } from '../config/index.js'
 import { buildMongoUri, mongoPublicConfig, mongoVaultPatch } from '../utils/mongoConnection.js'
 import { getCredential, setCredential } from '../utils/credentialStore.js'
@@ -59,14 +60,17 @@ async function importPortableVariables(vars={}) {
     if(cloudName&&apiKey&&!migrationMasked(apiSecret)){await setCredential('cloudinary',JSON.stringify({cloudName,apiKey,apiSecret}),{cloudName,apiKey});imported.push('Cloudinary')}else skipped.push('Cloudinary')
   }
 
-  const cfToken=has('CF_API_TOKEN'), cfAccount=has('CF_ACCOUNT_ID'), cfAccess=has('CF_R2_ACCESS_KEY_ID'), cfSecret=has('CF_R2_SECRET_ACCESS_KEY'), cfBucket=has('CF_R2_BUCKET'), cfPublic=has('CF_R2_PUBLIC_URL')
-  if(cfToken||cfAccount||cfAccess||cfSecret||cfBucket||cfPublic){
+  const cfToken=has('CF_API_TOKEN'), cfAccount=has('CF_ACCOUNT_ID'), cfAccess=has('CF_R2_ACCESS_KEY_ID'), cfSecret=has('CF_R2_SECRET_ACCESS_KEY'), cfBucket=has('CF_R2_BUCKET'), cfPublic=has('CF_R2_PUBLIC_URL'), cfEndpoint=has('CF_R2_ENDPOINT')
+  if(cfToken||cfAccount||cfAccess||cfSecret||cfBucket||cfPublic||cfEndpoint){
     if(cfToken&&cfAccount&&!migrationMasked(cfToken)){
       const old=await getCredential('cloudflare','CF_API_TOKEN'); let parsed={}; try{parsed=JSON.parse(old.value||'{}')}catch{}
-      await setCredential('cloudflare',JSON.stringify({apiToken:cfToken,r2AccessKeyId:!migrationMasked(cfAccess)?cfAccess:(parsed.r2AccessKeyId||''),r2SecretAccessKey:!migrationMasked(cfSecret)?cfSecret:(parsed.r2SecretAccessKey||'')}),{...(old.metadata||{}),accountId:cfAccount,r2Bucket:cfBucket||old.metadata?.r2Bucket||'',r2PublicUrl:cfPublic||old.metadata?.r2PublicUrl||''})
+      await setCredential('cloudflare',JSON.stringify({apiToken:cfToken,r2AccessKeyId:!migrationMasked(cfAccess)?cfAccess:(parsed.r2AccessKeyId||''),r2SecretAccessKey:!migrationMasked(cfSecret)?cfSecret:(parsed.r2SecretAccessKey||'')}),{...(old.metadata||{}),accountId:cfAccount,r2Bucket:cfBucket||old.metadata?.r2Bucket||'',r2PublicUrl:cfPublic||old.metadata?.r2PublicUrl||'',r2Endpoint:cfEndpoint||old.metadata?.r2Endpoint||`https://${cfAccount}.r2.cloudflarestorage.com`})
       imported.push('Cloudflare')
     }else skipped.push('Cloudflare')
   }
+
+  const render=has('RENDER_API_KEY')
+  if(render){ if(!migrationMasked(render)){const old=await getCredential('render','RENDER_API_KEY');await setCredential('render',render,old.metadata||{});imported.push('Render')}else skipped.push('Render') }
 
   const vercel=has('VERCEL_TOKEN')
   if(vercel){ if(!migrationMasked(vercel)){const old=await getCredential('vercel','VERCEL_TOKEN');await setCredential('vercel',vercel,{...(old.metadata||{}),teamId:val('VERCEL_TEAM_ID')||old.metadata?.teamId||''});imported.push('Vercel')}else skipped.push('Vercel') }
@@ -74,10 +78,16 @@ async function importPortableVariables(vars={}) {
   return { imported:[...new Set(imported)], skipped:[...new Set(skipped)], found:[...new Set(found)] }
 }
 
-function permitirManutencaoSetup(req, res, next) {
-  const localInstalado = Boolean(readBootstrap().INSTALL_COMPLETED)
-  if (!localInstalado) return next()
-  return autenticar(req, res, next)
+async function permitirManutencaoSetup(req, res, next) {
+  try {
+    const estado = await installationState()
+    if (!estado.installed) return next()
+    return autenticar(req, res, next)
+  } catch {
+    const localInstalado = Boolean(readBootstrap().INSTALL_COMPLETED)
+    if (!localInstalado) return next()
+    return autenticar(req, res, next)
+  }
 }
 
 // O status e a configuração inicial permanecem disponíveis até existir um administrador.
@@ -365,26 +375,44 @@ async function executarSeed(
 // ─── GET /api/setup/status ────────────────────────────────────────────────────
 router.get('/status', async (_req, res) => {
   const statusStartedAt = process.hrtime.bigint()
-  // Esta rota participa do boot do login/admin e deve ser instantânea.
-  // O estado de instalação é autoridade local; inspeções do Mongo acontecem
-  // somente dentro do wizard ao testar/conectar um banco.
   const vault = readBootstrap()
-  const instalado = Boolean(vault.INSTALL_COMPLETED)
   const mongoConfigurado = Boolean(vault.MONGO_URI || process.env.MONGO_URI)
-  const mongoConectado = mongoose.connection.readyState === 1
+  let mongoConectado = mongoose.connection.readyState === 1
+  let install = { installed:Boolean(vault.INSTALL_COMPLETED), users:null, source:'local' }
 
+  // Em Render/VPS o HTTP pode responder alguns milissegundos antes do Atlas.
+  // Não mandamos o usuário para o wizard enquanto ainda não sabemos se o
+  // banco conectado já possui administrador.
+  if (mongoConfigurado && !mongoConectado && mongoose.connection.readyState === 2) {
+    await Promise.race([
+      mongoose.connection.asPromise().catch(()=>null),
+      new Promise(resolve=>setTimeout(resolve,1800)),
+    ])
+    mongoConectado = mongoose.connection.readyState === 1
+  }
+
+  if (mongoConectado) {
+    try { install = await installationState() } catch {}
+  }
+
+  const decisaoPendente = Boolean(mongoConfigurado && !mongoConectado && !install.installed)
+  const instalado = Boolean(install.installed)
   return res.json({
-    setup_needed: !instalado,
+    setup_needed: decisaoPendente ? false : !instalado,
+    setup_pending: decisaoPendente,
     instalacao_concluida: instalado,
     mongo_configurado: mongoConfigurado,
     mongo_conectado: mongoConectado,
-    banco_vazio: null,
-    tem_dados: null,
-    banco_nome: mongoose.connection.db?.databaseName || vault.MONGO_DB_NAME || 'alsistemas',
-    contagens: null,
-    estado: instalado
-      ? (mongoConectado ? 'instalado' : 'instalado_banco_indisponivel')
-      : 'aguardando_setup',
+    banco_vazio: install.users === null ? null : install.users === 0,
+    tem_dados: install.users === null ? null : install.users > 0,
+    banco_nome: mongoose.connection.db?.databaseName || vault.MONGO_DB_NAME || process.env.MONGO_DB_NAME || 'alsistemas',
+    contagens: install.users === null ? null : { usuarios:install.users },
+    estado: decisaoPendente
+      ? 'aguardando_banco'
+      : instalado
+        ? (mongoConectado ? 'instalado' : 'instalado_banco_indisponivel')
+        : 'aguardando_setup',
+    origem_instalacao: install.source || 'local',
     diagnostico_boot: {
       servidor_ms: Number(process.hrtime.bigint() - statusStartedAt) / 1e6,
       processo_uptime_s: Math.round(process.uptime()),
@@ -543,14 +571,19 @@ router.post('/', async (req, res, next) => {
     writeBootstrap({
       INSTALL_COMPLETED: true,
       INSTALL_COMPLETED_AT: new Date().toISOString(),
-      INSTALL_VERSION: '1.0.5',
+      INSTALL_VERSION: '1.0.86',
     })
+    await markInstallationCompleted().catch(()=>null)
 
     // ── Auto-login: gera cookie para o admin recém-criado ────────────────────
-    const setupCrossOrigin = !/localhost|127\.0\.0\.1/.test(process.env.FRONTEND_URL || '')
+    const requestOrigin = String(req.headers.origin || '')
+    let setupCrossOrigin = false
+    try {
+      setupCrossOrigin = Boolean(requestOrigin && new URL(requestOrigin).host !== req.get('host'))
+    } catch {}
     const COOKIE_OPTS = {
       httpOnly: true,
-      secure:   setupCrossOrigin,
+      secure:   setupCrossOrigin || String(req.headers['x-forwarded-proto']||'').includes('https'),
       sameSite: setupCrossOrigin ? 'none' : 'lax',
       maxAge:   7 * 24 * 60 * 60 * 1000,
       path:     '/',
@@ -684,6 +717,7 @@ router.post('/adotar-instalacao', permitirManutencaoSetup, async (req, res) => {
         INSTALL_ADOPTED_AT: new Date().toISOString(),
       })
       await conectarMongo(built.uri, built.databaseName)
+      await markInstallationCompleted().catch(()=>null)
       const migracao = req.body?.migration_variables && typeof req.body.migration_variables === 'object'
         ? await importPortableVariables(req.body.migration_variables)
         : null

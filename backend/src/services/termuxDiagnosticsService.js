@@ -38,7 +38,14 @@ async function collectLogFiles(dir){
       if(out.length>=MAX_FILES)break
       const full=path.join(current,ent.name)
       if(ent.isDirectory()) await walk(full,depth+1)
-      else if(/\.(?:log|txt|out|err)$/i.test(ent.name) || /log|error|backend|frontend|npm/i.test(ent.name)) out.push(full)
+      else {
+        const name=ent.name.toLowerCase()
+        const logExt=/\.(?:log|txt|out|err|jsonl)$/i.test(name)
+        const diagnosticName=/(?:^|[-_.])(error|errors|backend|frontend|npm|manager|update|worker)(?:[-_.]|$)/i.test(name)
+        const textLike=/\.(?:log|txt|out|err|jsonl)$/i.test(name)
+        // Nunca interpreta documentação/changelog como log operacional.
+        if(logExt || (diagnosticName && textLike)) out.push(full)
+      }
     }
   }
   await walk(dir)

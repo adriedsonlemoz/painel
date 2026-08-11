@@ -73,8 +73,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.WORKING_DIR }}/package-lock.json
 
       - name: 📦 Cache Gradle
         uses: actions/cache@v4
@@ -86,30 +84,31 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: 📦 Instalar dependências npm
-        run: npm ci
+        run: npm install --no-audit --no-fund
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
         run: npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
-          VITE_API_URL: https://alsistemas.onrender.com/api
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
           VITE_APP_NAME: AL Sistemas
           VITE_APP_TAGLINE: Painel de Gerenciamento
           VITE_APP_VERSION: ${{ github.ref_name || 'dev' }}
 
-      - name: 🔗 Habilitar URL Vercel no Capacitor
-        run: |
-          sed -i "s|[[:space:]]*//[[:space:]]*url:[[:space:]]*'https://alsistemas.vercel.app'.*|    url: 'https://alsistemas.vercel.app',|g" capacitor.config.ts
-          echo "capacitor.config.ts atualizado:"
-          grep -A5 "server:" capacitor.config.ts
+      - name: 🔗 Configurar portal hospedado no Capacitor
+        run: echo "WebView → $CAPACITOR_WEB_URL"
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
 
       - name: 📱 Adicionar plataforma Android e sincronizar
         run: |
           npx cap add android
           npx cap sync android
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
 
       - name: 🔑 Permissão gradlew
         run: chmod +x gradlew
@@ -137,8 +136,8 @@ jobs:
           echo "| **Build** | Debug (não assinado) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${GITHUB_SHA::7}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **API** | https://alsistemas.onrender.com/api |" >> $GITHUB_STEP_SUMMARY
-          echo "| **WebView** | https://alsistemas.vercel.app |" >> $GITHUB_STEP_SUMMARY
+          echo "| **API** | ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **WebView** | ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> ℹ️ O APK debug só pode ser instalado com _USB debugging_ ou via ADB." >> $GITHUB_STEP_SUMMARY
           echo "> Para distribuição, use o workflow Release com keystore configurado." >> $GITHUB_STEP_SUMMARY
@@ -168,8 +167,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.WORKING_DIR }}/package-lock.json
 
       - name: 📦 Cache Gradle
         uses: actions/cache@v4
@@ -181,29 +178,31 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: 📦 Instalar dependências npm
-        run: npm ci
+        run: npm install --no-audit --no-fund
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
         run: npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
-          VITE_API_URL: https://alsistemas.onrender.com/api
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
           VITE_APP_NAME: AL Sistemas
           VITE_APP_TAGLINE: Painel de Gerenciamento
           VITE_APP_VERSION: ${{ github.ref_name || 'release' }}
 
-      - name: 🔗 Habilitar URL Vercel no Capacitor
-        run: |
-          sed -i "s|[[:space:]]*//[[:space:]]*url:[[:space:]]*'https://alsistemas.vercel.app'.*|    url: 'https://alsistemas.vercel.app',|g" capacitor.config.ts
-          grep -A5 "server:" capacitor.config.ts
+      - name: 🔗 Configurar portal hospedado no Capacitor
+        run: echo "WebView → $CAPACITOR_WEB_URL"
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
 
       - name: 📱 Adicionar plataforma Android e sincronizar
         run: |
           npx cap add android
           npx cap sync android
         working-directory: ${{ env.WORKING_DIR }}
+        env:
+          CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
 
       - name: 🔑 Permissão gradlew
         run: chmod +x gradlew
@@ -255,7 +254,7 @@ jobs:
           echo "| **Build** | Release (assinado com keystore) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${GITHUB_SHA::7}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **API** | https://alsistemas.onrender.com/api |" >> $GITHUB_STEP_SUMMARY
-          echo "| **WebView** | https://alsistemas.vercel.app |" >> $GITHUB_STEP_SUMMARY
+          echo "| **API** | ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **WebView** | ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> ✅ APK pronto para distribuição ou envio à Play Store." >> $GITHUB_STEP_SUMMARY

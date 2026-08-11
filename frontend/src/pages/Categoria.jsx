@@ -53,7 +53,7 @@ export default function Categoria() {
             <span className="w-2 self-stretch rounded-full" style={{ backgroundColor: categoria.cor || '#ff5c00' }} />
             <div>
               <p className="uppercase tracking-[.18em] text-xs font-black text-brand-500 mb-1">Editoria</p>
-              <h1 className="font-display text-4xl sm:text-5xl font-bold text-gray-900">{categoria.nome}</h1>
+              <h1 className="font-display text-2xl sm:text-3xl font-bold text-gray-900">{categoria.nome}</h1>
               {categoria.descricao && <p className="mt-3 max-w-2xl text-gray-600 text-base leading-relaxed">{categoria.descricao}</p>}
               <p className="mt-3 text-xs font-bold text-gray-400">{total} matéria{total === 1 ? '' : 's'} publicada{total === 1 ? '' : 's'}</p>
             </div>

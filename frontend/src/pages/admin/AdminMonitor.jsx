@@ -337,7 +337,7 @@ export default function AdminMonitor() {
       {/* ── Cards de status ao vivo ────────────────────────── */}
       {snapshots.length > 0 && (
         <>
-          <div style={{
+          <div className="monitor-stats-grid" style={{
             display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
             gap: SPACE.md, marginBottom: SPACE.xl2,
           }}>

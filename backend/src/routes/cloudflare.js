@@ -22,8 +22,9 @@ import multer                  from 'multer'
 import { autenticar }          from '../middleware/auth.js'
 import { verificarPermissao }  from '../middleware/verificarPermissao.js'
 import { logger }              from '../utils/logger.js'
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
-import { hydrateCloudflareEnv } from '../utils/cloudflareConfig.js'
+import { S3Client, PutObjectCommand, ListBucketsCommand } from '@aws-sdk/client-s3'
+import { hydrateCloudflareEnv, getCloudflareConfig } from '../utils/cloudflareConfig.js'
+import { getCredential, setCredential } from '../utils/credentialStore.js'
 
 const router = Router()
 router.use(autenticar)
@@ -39,7 +40,7 @@ const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 function r2S3Client() {
   return new S3Client({
     region:   'auto',
-    endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint: process.env.CF_R2_ENDPOINT || `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
     credentials: {
       accessKeyId:     process.env.CF_R2_ACCESS_KEY_ID     || '',
       secretAccessKey: process.env.CF_R2_SECRET_ACCESS_KEY || '',
@@ -77,30 +78,124 @@ function accountId() {
   return id
 }
 
+async function verifyCloudflareToken() {
+  try { return await cfFetch(`/accounts/${accountId()}/tokens/verify`) }
+  catch { return cfFetch('/user/tokens/verify') }
+}
+
+
+function cfErrorKind(err) {
+  const msg=String(err?.message||err||'')
+  if(/not authorized|permission|forbidden|authentication|10000|9109|403/i.test(msg))return 'sem-permissao'
+  if(/not entitled|not found|10007|404|route for the uri/i.test(msg))return 'indisponivel'
+  return 'erro'
+}
+
+async function capabilityProbe({id,label,path,manager='',description=''}) {
+  const started=Date.now()
+  try {
+    const data=await cfFetch(path)
+    const result=data?.result
+    const count=Number(
+      data?.result_info?.total_count ??
+      data?.result_info?.count ??
+      (Array.isArray(result) ? result.length :
+        Array.isArray(result?.buckets) ? result.buckets.length :
+        Array.isArray(result?.result) ? result.result.length : 0)
+    )
+    return {id,label,ok:true,state:'acessivel',count:Number.isFinite(count)?count:0,manager,description,latencyMs:Date.now()-started}
+  } catch(err) {
+    return {id,label,ok:false,state:cfErrorKind(err),count:null,manager,description,error:String(err.message||err),latencyMs:Date.now()-started}
+  }
+}
+
+const CF_CAPABILITY_CATALOG = [
+  {id:'zones',label:'Zonas e DNS',manager:'zones',description:'Domínios, DNS, SSL, cache e segurança.',path:()=>`/zones?account.id=${accountId()}&per_page=1`},
+  {id:'r2',label:'R2 Storage',manager:'r2',description:'Buckets e objetos persistentes.',path:()=>`/accounts/${accountId()}/r2/buckets?per_page=1`},
+  {id:'workers',label:'Workers',manager:'workers',description:'Scripts executados na borda.',path:()=>`/accounts/${accountId()}/workers/scripts`},
+  {id:'pages',label:'Pages',manager:'resources',description:'Projetos web e deployments.',path:()=>`/accounts/${accountId()}/pages/projects?per_page=1`},
+  {id:'kv',label:'Workers KV',manager:'resources',description:'Namespaces chave/valor.',path:()=>`/accounts/${accountId()}/storage/kv/namespaces?per_page=1`},
+  {id:'d1',label:'D1',manager:'resources',description:'Bancos SQL serverless.',path:()=>`/accounts/${accountId()}/d1/database?per_page=10`},
+  {id:'queues',label:'Queues',manager:'resources',description:'Filas de mensagens.',path:()=>`/accounts/${accountId()}/queues`},
+  {id:'vectorize',label:'Vectorize',manager:'resources',description:'Índices vetoriais para IA e busca.',path:()=>`/accounts/${accountId()}/vectorize/v2/indexes`},
+  {id:'ai-gateway',label:'AI Gateway',manager:'resources',description:'Gateways de observabilidade e controle de IA.',path:()=>`/accounts/${accountId()}/ai-gateway/gateways?per_page=1`},
+]
+
+async function capabilitySnapshot() {
+  return Promise.all(CF_CAPABILITY_CATALOG.map(item=>capabilityProbe({...item,path:item.path()})))
+}
+
+function resultList(data) {
+  if(Array.isArray(data?.result))return data.result
+  if(Array.isArray(data?.result?.buckets))return data.result.buckets
+  return []
+}
+
 // ── GET /status ─────────────────────────────────────────────────
 router.get('/status', async (_req, res, next) => {
   try {
-    const [verify, account] = await Promise.all([
-      cfFetch('/user/tokens/verify'),
+    const cfg=await getCloudflareConfig()
+    const [verify, account, capabilities, s3] = await Promise.all([
+      verifyCloudflareToken(),
       cfFetch(`/accounts/${accountId()}`).catch(() => null),
+      capabilitySnapshot(),
+      (async()=>{
+        if(!cfg.r2AccessKeyId || !cfg.r2SecretAccessKey)return {configured:false,ok:false,buckets:[],reason:'Credenciais S3 não configuradas'}
+        try{
+          const out=await r2S3Client().send(new ListBucketsCommand({}))
+          return {configured:true,ok:true,buckets:(out.Buckets||[]).map(x=>({name:x.Name,creationDate:x.CreationDate||null}))}
+        }catch(err){return {configured:true,ok:false,buckets:[],reason:String(err.message||err)}}
+      })(),
     ])
     res.json({
-      ok:      true,
-      token:   verify.result,
-      conta:   account?.result ?? null,
-      account_id: accountId(),
-      s3Credentials: {
-        configurado: !!(process.env.CF_R2_ACCESS_KEY_ID && process.env.CF_R2_SECRET_ACCESS_KEY),
-        bucket:      process.env.CF_R2_BUCKET || null,
+      ok:true,
+      token:verify.result,
+      conta:account?.result ?? null,
+      account_id:accountId(),
+      endpoint_s3:cfg.r2Endpoint,
+      capabilities,
+      s3Credentials:{
+        configurado:Boolean(cfg.r2AccessKeyId && cfg.r2SecretAccessKey),
+        valido:Boolean(s3.ok),
+        bucket:cfg.r2Bucket||null,
+        buckets:s3.buckets||[],
+        erro:s3.ok?null:s3.reason||null,
+        endpoint:cfg.r2Endpoint,
+        accessKeyMasked:cfg.r2AccessKeyId?`••••••••${cfg.r2AccessKeyId.slice(-4)}`:null,
+        secretMasked:cfg.r2SecretAccessKey?'••••••••••••':null,
       },
     })
   } catch (err) {
-    // Se CF_API_TOKEN não está configurado, retornamos status controlado
-    if (err.message.includes('não configurado')) {
-      return res.json({ ok: false, erro: err.message })
-    }
+    if (err.message.includes('não configurado')) return res.json({ok:false,erro:err.message})
     next(err)
   }
+})
+
+// ── GET /capabilities — autodetecção real das superfícies acessíveis ─────────
+router.get('/capabilities', async (_req,res,next)=>{
+  try{
+    const cfg=await getCloudflareConfig()
+    const capabilities=await capabilitySnapshot()
+    let s3={configured:Boolean(cfg.r2AccessKeyId&&cfg.r2SecretAccessKey),ok:false,buckets:[]}
+    if(s3.configured){
+      try{
+        const r=await r2S3Client().send(new ListBucketsCommand({}))
+        s3={...s3,ok:true,buckets:(r.Buckets||[]).map(b=>({name:b.Name,creationDate:b.CreationDate||null}))}
+      }catch(e){s3.error=String(e.message||e)}
+    }
+    res.json({
+      accountId:accountId(),
+      endpointS3:cfg.r2Endpoint,
+      capabilities,
+      summary:{
+        accessible:capabilities.filter(x=>x.ok).length,
+        restricted:capabilities.filter(x=>x.state==='sem-permissao').length,
+        unavailable:capabilities.filter(x=>x.state==='indisponivel').length,
+        errors:capabilities.filter(x=>x.state==='erro').length,
+      },
+      s3,
+    })
+  }catch(err){next(err)}
 })
 
 // ── GET /zonas ──────────────────────────────────────────────────
@@ -311,6 +406,210 @@ router.post('/r2/buckets/:bucket/upload', uploadMem.single('file'), async (req, 
     logger.info({ bucket, key, size: req.file.size }, 'R2 objeto enviado via CF module')
     res.json({ ok: true, key, size: req.file.size })
   } catch (err) { next(err) }
+})
+
+
+// ═══════════════════════════════════════════════════════════════
+// HUB DE RECURSOS CLOUDFLARE
+// Apenas operações oficiais e tipadas entram aqui. Acesso é determinado
+// pela resposta real da API; o painel não presume que um token tenha escrita.
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/resources', async (_req,res,next)=>{
+  try{
+    const specs=[
+      ['pages','Pages',`/accounts/${accountId()}/pages/projects?per_page=100`],
+      ['kv','Workers KV',`/accounts/${accountId()}/storage/kv/namespaces?per_page=100`],
+      ['d1','D1',`/accounts/${accountId()}/d1/database?per_page=100`],
+      ['queues','Queues',`/accounts/${accountId()}/queues`],
+      ['vectorize','Vectorize',`/accounts/${accountId()}/vectorize/v2/indexes`],
+      ['ai-gateway','AI Gateway',`/accounts/${accountId()}/ai-gateway/gateways?per_page=100`],
+    ]
+    const resources={}
+    await Promise.all(specs.map(async([id,label,pathName])=>{
+      try{
+        const d=await cfFetch(pathName)
+        resources[id]={ok:true,label,items:resultList(d),count:Number(d?.result_info?.total_count ?? resultList(d).length)}
+      }catch(e){
+        resources[id]={ok:false,label,items:[],count:0,state:cfErrorKind(e),error:String(e.message||e)}
+      }
+    }))
+    res.json({resources})
+  }catch(err){next(err)}
+})
+
+router.get('/pages/:project/deployments', async(req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/pages/projects/${encodeURIComponent(req.params.project)}/deployments?per_page=20`)
+    res.json({deployments:resultList(d),total:d?.result_info?.total_count??resultList(d).length})
+  }catch(err){next(err)}
+})
+
+router.post('/pages', async(req,res,next)=>{
+  try{
+    const name=String(req.body?.name||'').trim()
+    const production_branch=String(req.body?.production_branch||'main').trim()||'main'
+    if(!name)return res.status(400).json({erro:'Informe o nome do projeto Pages.'})
+    const d=await cfFetch(`/accounts/${accountId()}/pages/projects`,{
+      method:'POST',body:JSON.stringify({name,production_branch}),
+    })
+    logger.info({name,production_branch},'Cloudflare Pages project criado')
+    res.status(201).json({ok:true,project:d.result})
+  }catch(err){next(err)}
+})
+
+router.get('/kv/namespaces', async(_req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/storage/kv/namespaces?per_page=100`)
+    res.json({namespaces:resultList(d),total:d?.result_info?.total_count??resultList(d).length})
+  }catch(err){next(err)}
+})
+router.post('/kv/namespaces', async(req,res,next)=>{
+  try{
+    const title=String(req.body?.title||'').trim()
+    if(!title)return res.status(400).json({erro:'Informe o nome do namespace.'})
+    const d=await cfFetch(`/accounts/${accountId()}/storage/kv/namespaces`,{method:'POST',body:JSON.stringify({title})})
+    res.status(201).json({ok:true,namespace:d.result})
+  }catch(err){next(err)}
+})
+router.put('/kv/namespaces/:id', async(req,res,next)=>{
+  try{
+    const title=String(req.body?.title||'').trim()
+    if(!title)return res.status(400).json({erro:'Informe o novo nome.'})
+    const d=await cfFetch(`/accounts/${accountId()}/storage/kv/namespaces/${encodeURIComponent(req.params.id)}`,{method:'PUT',body:JSON.stringify({title})})
+    res.json({ok:true,namespace:d.result})
+  }catch(err){next(err)}
+})
+router.delete('/kv/namespaces/:id', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/storage/kv/namespaces/${encodeURIComponent(req.params.id)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.get('/d1/databases', async(_req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/d1/database?per_page=100`)
+    res.json({databases:resultList(d),total:d?.result_info?.total_count??resultList(d).length})
+  }catch(err){next(err)}
+})
+router.post('/d1/databases', async(req,res,next)=>{
+  try{
+    const name=String(req.body?.name||'').trim()
+    if(!name)return res.status(400).json({erro:'Informe o nome do banco D1.'})
+    const d=await cfFetch(`/accounts/${accountId()}/d1/database`,{method:'POST',body:JSON.stringify({name})})
+    res.status(201).json({ok:true,database:d.result})
+  }catch(err){next(err)}
+})
+router.delete('/d1/databases/:id', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/d1/database/${encodeURIComponent(req.params.id)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.get('/queues', async(_req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/queues`)
+    res.json({queues:resultList(d),total:d?.result_info?.total_count??resultList(d).length})
+  }catch(err){next(err)}
+})
+router.post('/queues', async(req,res,next)=>{
+  try{
+    const queue_name=String(req.body?.queue_name||'').trim()
+    if(!queue_name)return res.status(400).json({erro:'Informe o nome da fila.'})
+    const d=await cfFetch(`/accounts/${accountId()}/queues`,{method:'POST',body:JSON.stringify({queue_name})})
+    res.status(201).json({ok:true,queue:d.result})
+  }catch(err){next(err)}
+})
+router.delete('/queues/:id', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/queues/${encodeURIComponent(req.params.id)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.get('/vectorize', async(_req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/vectorize/v2/indexes`)
+    res.json({indexes:resultList(d),total:resultList(d).length})
+  }catch(err){next(err)}
+})
+
+router.get('/ai-gateway', async(_req,res,next)=>{
+  try{
+    const d=await cfFetch(`/accounts/${accountId()}/ai-gateway/gateways?per_page=100`)
+    res.json({gateways:resultList(d),total:d?.result_info?.total_count??resultList(d).length})
+  }catch(err){next(err)}
+})
+
+router.delete('/pages/:project', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/pages/projects/${encodeURIComponent(req.params.project)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.post('/vectorize', async(req,res,next)=>{
+  try{
+    const name=String(req.body?.name||'').trim()
+    const dimensions=Math.max(1,Math.min(1536,Number(req.body?.dimensions||768)))
+    const metric=['cosine','euclidean','dot-product'].includes(req.body?.metric)?req.body.metric:'cosine'
+    if(!name)return res.status(400).json({erro:'Informe o nome do índice Vectorize.'})
+    const d=await cfFetch(`/accounts/${accountId()}/vectorize/v2/indexes`,{
+      method:'POST',
+      body:JSON.stringify({name,description:String(req.body?.description||'').trim(),config:{dimensions,metric}}),
+    })
+    res.status(201).json({ok:true,index:d.result})
+  }catch(err){next(err)}
+})
+router.delete('/vectorize/:name', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/vectorize/v2/indexes/${encodeURIComponent(req.params.name)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.post('/ai-gateway', async(req,res,next)=>{
+  try{
+    const id=String(req.body?.id||'').trim()
+    if(!id)return res.status(400).json({erro:'Informe o ID do AI Gateway.'})
+    const d=await cfFetch(`/accounts/${accountId()}/ai-gateway/gateways`,{
+      method:'POST',
+      body:JSON.stringify({
+        id,
+        cache_invalidate_on_update:true,
+        cache_ttl:0,
+        collect_logs:req.body?.collect_logs!==false,
+        rate_limiting_interval:0,
+        rate_limiting_limit:0,
+      }),
+    })
+    res.status(201).json({ok:true,gateway:d.result})
+  }catch(err){next(err)}
+})
+router.delete('/ai-gateway/:id', async(req,res,next)=>{
+  try{
+    await cfFetch(`/accounts/${accountId()}/ai-gateway/gateways/${encodeURIComponent(req.params.id)}`,{method:'DELETE'})
+    res.json({ok:true})
+  }catch(err){next(err)}
+})
+
+router.post('/r2/default-bucket', async(req,res,next)=>{
+  try{
+    const bucket=String(req.body?.bucket||'').trim()
+    if(!bucket)return res.status(400).json({erro:'Selecione um bucket.'})
+    const current=await getCredential('cloudflare','CF_API_TOKEN')
+    if(!current.value)return res.status(409).json({erro:'Cloudflare ainda não está configurada em Integrações e APIs.'})
+    let secrets={}
+    try{secrets=JSON.parse(current.value)}catch{secrets={apiToken:current.value}}
+    const list=await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
+    const buckets=resultList(list)
+    if(!buckets.some(b=>b.name===bucket))return res.status(404).json({erro:'Bucket não encontrado ou não acessível pelo token.'})
+    await setCredential('cloudflare',JSON.stringify(secrets),{...(current.metadata||{}),r2Bucket:bucket,r2Endpoint:`https://${accountId()}.r2.cloudflarestorage.com`})
+    await hydrateCloudflareEnv()
+    res.json({ok:true,bucket,mensagem:`${bucket} definido como bucket padrão do AL Sistemas.`})
+  }catch(err){next(err)}
 })
 
 export default router

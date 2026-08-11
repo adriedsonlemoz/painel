@@ -103,10 +103,8 @@ function AbaGeral({ status, carregando, recarregar }) {
         <div style={{ fontSize: 32, marginBottom: 12 }}>☁️</div>
         <p style={{ color: CF.err, fontWeight: 600, marginBottom: 8 }}>Token não configurado</p>
         <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>{status?.erro}</p>
-        <p style={{ color: C.muted, fontSize: 12 }}>
-          Adicione <code style={{ background: C.border, padding: '1px 6px', borderRadius: 4 }}>CF_API_TOKEN</code> e{' '}
-          <code style={{ background: C.border, padding: '1px 6px', borderRadius: 4 }}>CF_ACCOUNT_ID</code>{' '}
-          nas variáveis de ambiente do backend.
+        <p style={{ color: C.muted, fontSize: 12, lineHeight:1.5 }}>
+          Configure a Cloudflare em <b>Admin → Integrações e APIs</b>. O módulo usa o cofre central; variáveis CF_* são apenas fallback de migração.
         </p>
       </div>
     </PageCard>
@@ -134,9 +132,9 @@ function AbaGeral({ status, carregando, recarregar }) {
         </div>
         <Row label="Nome"         value={token?.name} />
         <Row label="Account ID"   value={status.account_id} mono />
-        <Row label="Expiração"    value={token?.not_before ? new Date(token.not_before).toLocaleString('pt-BR') : 'Sem expiração'} />
-        <Row label="Criado em"    value={token?.issued_on  ? new Date(token.issued_on).toLocaleString('pt-BR') : '—'} />
-        <Row label="Última mod."  value={token?.modified_on ? new Date(token.modified_on).toLocaleString('pt-BR') : '—'} />
+        <Row label="Token ID" value={token?.id || '—'} mono />
+        <Row label="Válido desde" value={token?.not_before ? new Date(token.not_before).toLocaleString('pt-BR') : 'imediatamente'} />
+        <Row label="Expiração" value={token?.expires_on ? new Date(token.expires_on).toLocaleString('pt-BR') : 'Sem expiração'} />
       </PageCard>
 
       {/* Account info */}
@@ -169,14 +167,14 @@ function AbaGeral({ status, carregando, recarregar }) {
                 {status.s3Credentials.configurado ? 'Configuradas' : 'Não configuradas'}
               </span>
             </div>
-            <Row label="Bucket"           value={status.s3Credentials.bucket || '—'} mono />
-            <Row label="CF_R2_ACCESS_KEY_ID"     value={status.s3Credentials.configurado ? '••••••••' : '⚠ ausente'} mono />
-            <Row label="CF_R2_SECRET_ACCESS_KEY" value={status.s3Credentials.configurado ? '••••••••' : '⚠ ausente'} mono />
+            <Row label="Bucket padrão" value={status.s3Credentials.bucket || 'nenhum selecionado'} mono />
+            <Row label="Endpoint S3" value={status.s3Credentials.endpoint || status.endpoint_s3 || '—'} mono />
+            <Row label="Access Key ID" value={status.s3Credentials.accessKeyMasked || (status.s3Credentials.configurado ? '••••••••' : '⚠ ausente')} mono />
+            <Row label="Secret Access Key" value={status.s3Credentials.secretMasked || (status.s3Credentials.configurado ? '••••••••' : '⚠ ausente')} mono />
+            <Row label="Teste S3" value={status.s3Credentials.configurado ? (status.s3Credentials.valido ? `✅ válido · ${(status.s3Credentials.buckets||[]).length} bucket(s)` : '⚠ credenciais não validadas') : '—'} />
             {!status.s3Credentials.configurado && (
               <p style={{ fontSize: 12, color: CF.err, marginTop: 10 }}>
-                Sem as credenciais S3, uploads para R2 não funcionarão. Adicione{' '}
-                <code style={{ background: C.border, padding: '1px 6px', borderRadius: 4 }}>CF_R2_ACCESS_KEY_ID</code> e{' '}
-                <code style={{ background: C.border, padding: '1px 6px', borderRadius: 4 }}>CF_R2_SECRET_ACCESS_KEY</code> no backend.
+                Sem as credenciais S3, o navegador de objetos e uploads R2 ficam limitados. Cadastre Access Key ID e Secret Access Key em <b>Integrações e APIs → Cloudflare</b>.
               </p>
             )}
           </>
@@ -185,6 +183,21 @@ function AbaGeral({ status, carregando, recarregar }) {
         )}
       </PageCard>
 
+      {Array.isArray(status?.capabilities) && (
+        <PageCard>
+          <SectionTitle icon={<span style={{fontSize:16}}>🧭</span>}>Capacidades detectadas</SectionTitle>
+          <p style={{fontSize:12,color:C.muted,lineHeight:1.5,margin:'0 0 12px'}}>O AL Sistemas testa cada superfície com uma chamada real. “Acessível” confirma leitura; operações de escrita são confirmadas somente quando você executa a ação.</p>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8}}>
+            {status.capabilities.map(c=><div key={c.id} style={{padding:10,borderRadius:RADIUS.md,border:`1px solid ${C.border}`,background:C.surface2}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center'}}>
+                <b style={{fontSize:11,color:C.text}}>{c.label}</b>
+                <Badge color={c.ok?CF.active:c.state==='sem-permissao'?CF.warn:CF.err}>{c.ok?'acessível':c.state}</Badge>
+              </div>
+              <div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.4}}>{c.ok?`${c.count||0} recurso(s) detectado(s)`:c.error||c.description}</div>
+            </div>)}
+          </div>
+        </PageCard>
+      )}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Btn onClick={recarregar} variant="secondary" style={{ width: 'auto', padding: '6px 16px', fontSize: 12 }}>
           {Ico.refresh} Verificar novamente
@@ -192,6 +205,129 @@ function AbaGeral({ status, carregando, recarregar }) {
       </div>
     </div>
   )
+}
+
+// ─── ABA: Recursos / produtos da conta ────────────────────────
+function AbaRecursos() {
+  const [data,setData]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [modal,setModal]=useState(null)
+  const [form,setForm]=useState({name:'',branch:'main',dimensions:768,metric:'cosine'})
+  const [busy,setBusy]=useState(false)
+  const [deploys,setDeploys]=useState(null)
+
+  const load=useCallback(async()=>{
+    setLoading(true)
+    try{setData(await cloudflareService.resources())}
+    catch(e){toast.error(e.message)}
+    finally{setLoading(false)}
+  },[])
+  useEffect(()=>{load()},[load])
+
+  const defs={
+    pages:{label:'Pages',icon:'▣',desc:'Projetos web e deployments',name:x=>x.name||x.id||'projeto'},
+    kv:{label:'Workers KV',icon:'KV',desc:'Namespaces chave/valor',name:x=>x.title||x.id||'namespace'},
+    d1:{label:'D1',icon:'D1',desc:'Bancos SQL serverless',name:x=>x.name||x.uuid||'database'},
+    queues:{label:'Queues',icon:'Q',desc:'Filas de mensagens',name:x=>x.queue_name||x.queue_id||'queue'},
+    vectorize:{label:'Vectorize',icon:'V',desc:'Índices vetoriais',name:x=>x.name||'index'},
+    'ai-gateway':{label:'AI Gateway',icon:'AI',desc:'Gateways de IA',name:x=>x.id||'gateway'},
+  }
+
+  async function createResource(){
+    if(!modal?.type||!form.name.trim())return
+    setBusy(true)
+    try{
+      if(modal.type==='pages')await cloudflareService.criarPagesProject(form.name.trim(),form.branch||'main')
+      if(modal.type==='kv')await cloudflareService.criarKvNamespace(form.name.trim())
+      if(modal.type==='d1')await cloudflareService.criarD1(form.name.trim())
+      if(modal.type==='queues')await cloudflareService.criarQueue(form.name.trim())
+      if(modal.type==='vectorize')await cloudflareService.criarVectorize(form.name.trim(),Number(form.dimensions)||768,form.metric||'cosine')
+      if(modal.type==='ai-gateway')await cloudflareService.criarAiGateway(form.name.trim(),true)
+      toast.success(`${defs[modal.type]?.label||'Recurso'} criado.`)
+      setModal(null);setForm({name:'',branch:'main',dimensions:768,metric:'cosine'});await load()
+    }catch(e){toast.error(e.message)}
+    finally{setBusy(false)}
+  }
+
+  async function removeResource(type,item){
+    const label=defs[type]?.name(item)||'recurso'
+    if(!confirm(`Excluir "${label}" da Cloudflare? Esta ação pode remover dados/configuração.`))return
+    setBusy(true)
+    try{
+      if(type==='pages')await cloudflareService.deletarPagesProject(item.name)
+      if(type==='kv')await cloudflareService.deletarKvNamespace(item.id)
+      if(type==='d1')await cloudflareService.deletarD1(item.uuid)
+      if(type==='queues')await cloudflareService.deletarQueue(item.queue_id)
+      if(type==='vectorize')await cloudflareService.deletarVectorize(item.name)
+      if(type==='ai-gateway')await cloudflareService.deletarAiGateway(item.id)
+      toast.success(`${label} removido.`);await load()
+    }catch(e){toast.error(e.message)}
+    finally{setBusy(false)}
+  }
+
+  async function openDeploys(project){
+    setDeploys({project,loading:true,items:[]})
+    try{
+      const r=await cloudflareService.pagesDeployments(project.name)
+      setDeploys({project,loading:false,items:r.deployments||[]})
+    }catch(e){setDeploys({project,loading:false,items:[],error:e.message})}
+  }
+
+  if(loading)return <PageCard><div style={{display:'flex',justifyContent:'center',padding:50}}><Spin size={22}/></div></PageCard>
+  const resources=data?.resources||{}
+
+  return <div style={{display:'flex',flexDirection:'column',gap:14}}>
+    <PageCard>
+      <SectionTitle icon={<span>🧭</span>}>Recursos da conta</SectionTitle>
+      <p style={{margin:'0 0 14px',fontSize:12,color:C.muted,lineHeight:1.55}}>Esta central só habilita o que a API realmente consegue consultar. Se o token tiver apenas leitura, você continua vendo o recurso; uma tentativa de criação/remoção retornará a restrição real da Cloudflare.</p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
+        {Object.entries(defs).map(([id,def])=>{
+          const r=resources[id]||{ok:false,items:[],state:'indisponivel'}
+          return <article key={id} style={{border:`1px solid ${C.border}`,borderRadius:RADIUS.lg,padding:13,background:C.surface2,minWidth:0}}>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'flex-start'}}>
+              <div style={{display:'flex',gap:9,alignItems:'center',minWidth:0}}><span style={{width:31,height:31,borderRadius:9,display:'grid',placeItems:'center',background:CF.orangeL,color:CF.orange,fontWeight:900,fontSize:11}}>{def.icon}</span><div><b style={{fontSize:13,color:C.text}}>{def.label}</b><div style={{fontSize:10,color:C.muted,marginTop:2}}>{def.desc}</div></div></div>
+              <Badge color={r.ok?CF.active:r.state==='sem-permissao'?CF.warn:CF.err}>{r.ok?`${r.count||r.items?.length||0}`:r.state}</Badge>
+            </div>
+            {r.ok?<div style={{marginTop:11}}>
+              {(r.items||[]).slice(0,4).map((item,i)=><div key={item.id||item.uuid||item.name||item.title||item.queue_id||i} style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center',padding:'7px 0',borderTop:`1px solid ${C.border}`}}>
+                <div style={{minWidth:0}}><b style={{display:'block',fontSize:11,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{def.name(item)}</b><small style={{fontSize:9,color:C.muted}}>{id==='pages'?(item.production_branch||'main'):id==='d1'?`${bytes(item.file_size||0)}${item.num_tables!=null?` · ${item.num_tables} tabela(s)`:''}`:id==='vectorize'?`${item.config?.dimensions||'—'} dim · ${item.config?.metric||'—'}`:id==='queues'?`${item.producers_total_count||0} produtor(es) · ${item.consumers_total_count||0} consumidor(es)`:id==='ai-gateway'?(item.collect_logs?'logs ativos':'logs desativados'):(item.id||item.uuid||'')}</small></div>
+                <div style={{display:'flex',gap:4,flexShrink:0}}>
+                  {id==='pages'&&<button onClick={()=>openDeploys(item)} style={{fontSize:9,padding:'4px 6px'}}>Deploys</button>}
+                  <button disabled={busy} onClick={()=>removeResource(id,item)} style={{fontSize:9,padding:'4px 6px',color:CF.err}}>Excluir</button>
+                </div>
+              </div>)}
+              {(r.items||[]).length>4&&<div style={{fontSize:9,color:C.muted,marginTop:7}}>+ {(r.items||[]).length-4} outro(s)</div>}
+              <button onClick={()=>{setForm({name:'',branch:'main',dimensions:768,metric:'cosine'});setModal({type:id})}} style={{marginTop:10,width:'100%',fontSize:10,padding:7}}>+ Criar {def.label}</button>
+            </div>:<div style={{marginTop:11,fontSize:10,color:C.muted,lineHeight:1.45}}>{r.error||'O token não expõe este produto para a conta atual.'}</div>}
+          </article>
+        })}
+      </div>
+    </PageCard>
+
+    {modal&&<div style={{position:'fixed',inset:0,zIndex:1200,background:'#0008',display:'flex',alignItems:'center',justifyContent:'center',padding:14}} onClick={e=>e.target===e.currentTarget&&!busy&&setModal(null)}>
+      <div style={{width:'min(100%,440px)',background:C.surface,border:`1px solid ${C.border}`,borderRadius:RADIUS.lg,padding:20,boxShadow:'0 24px 70px #0005'}}>
+        <h3 style={{margin:'0 0 5px',color:C.text}}>Criar {defs[modal.type]?.label}</h3>
+        <p style={{margin:'0 0 15px',fontSize:11,color:C.muted}}>O AL envia a criação diretamente à API Cloudflare. Se o token não tiver escrita, nada é alterado.</p>
+        <label style={{display:'block',fontSize:11,fontWeight:700,color:C.muted}}>Nome / ID<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={{width:'100%',boxSizing:'border-box',marginTop:5,padding:9,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface2,color:C.text}}/></label>
+        {modal.type==='pages'&&<label style={{display:'block',fontSize:11,fontWeight:700,color:C.muted,marginTop:10}}>Branch de produção<input value={form.branch} onChange={e=>setForm({...form,branch:e.target.value})} style={{width:'100%',boxSizing:'border-box',marginTop:5,padding:9,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface2,color:C.text}}/></label>}
+        {modal.type==='vectorize'&&<div className="cloudflare-two-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:10}}>
+          <label style={{fontSize:11,fontWeight:700,color:C.muted}}>Dimensões<input type="number" min="1" max="1536" value={form.dimensions} onChange={e=>setForm({...form,dimensions:e.target.value})} style={{width:'100%',boxSizing:'border-box',marginTop:5,padding:9,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface2,color:C.text}}/></label>
+          <label style={{fontSize:11,fontWeight:700,color:C.muted}}>Métrica<select value={form.metric} onChange={e=>setForm({...form,metric:e.target.value})} style={{width:'100%',boxSizing:'border-box',marginTop:5,padding:9,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface2,color:C.text}}><option value="cosine">cosine</option><option value="euclidean">euclidean</option><option value="dot-product">dot-product</option></select></label>
+        </div>}
+        <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:17}}><button disabled={busy} onClick={()=>setModal(null)}>Cancelar</button><button disabled={busy||!form.name.trim()} onClick={createResource} style={{background:CF.orange,color:'#fff',borderColor:CF.orange}}>{busy?'Criando…':'Criar'}</button></div>
+      </div>
+    </div>}
+
+    {deploys&&<div style={{position:'fixed',inset:0,zIndex:1200,background:'#0008',display:'flex',alignItems:'center',justifyContent:'center',padding:14}} onClick={e=>e.target===e.currentTarget&&setDeploys(null)}>
+      <div style={{width:'min(100%,680px)',maxHeight:'calc(100dvh - 28px)',overflow:'auto',background:C.surface,border:`1px solid ${C.border}`,borderRadius:RADIUS.lg,padding:20}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:10}}><div><small style={{color:C.muted}}>CLOUDFLARE PAGES</small><h3 style={{margin:'4px 0 13px',color:C.text}}>{deploys.project?.name} · Deployments</h3></div><button onClick={()=>setDeploys(null)}>×</button></div>
+        {deploys.loading?<div style={{padding:35,textAlign:'center'}}><Spin size={20}/></div>:deploys.error?<p style={{color:CF.err}}>{deploys.error}</p>:(deploys.items||[]).map(d=><div key={d.id} style={{padding:'10px 0',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',gap:12}}>
+          <div><b style={{fontSize:11,color:C.text}}>{d.environment||'deployment'} · {d.latest_stage?.status||d.stages?.at?.(-1)?.status||'—'}</b><div style={{fontSize:9,color:C.muted,marginTop:3}}>{d.deployment_trigger?.metadata?.commit_message||d.id}</div></div>
+          {d.url&&<a href={d.url.startsWith('http')?d.url:`https://${d.url}`} target="_blank" rel="noreferrer" style={{fontSize:10,color:CF.orange}}>Abrir ↗</a>}
+        </div>)}
+      </div>
+    </div>}
+  </div>
 }
 
 // ─── ABA: Zonas ────────────────────────────────────────────────
@@ -794,7 +930,7 @@ function AbaWorkers() {
 // ═══════════════════════════════════════════════════════════════
 
 // ─── ABA: R2 Storage ──────────────────────────────────────────
-function AbaR2() {
+function AbaR2({ status, onRefreshStatus }) {
   const [view,      setView]      = useState('overview')   // 'overview' | 'browser'
   const [buckets,   setBuckets]   = useState([])
   const [usage,     setUsage]     = useState(null)
@@ -878,6 +1014,15 @@ function AbaR2() {
   }
 
   // ── Criar bucket ────────────────────────────────────────────
+  async function definirPadrao(bucket, ev) {
+    ev?.stopPropagation?.()
+    try {
+      const r=await cloudflareService.definirBucketPadrao(bucket)
+      toast.success(r.mensagem || `${bucket} definido como padrão`)
+      await onRefreshStatus?.()
+    } catch (err) { toast.error(err.message) }
+  }
+
   async function criarBucket() {
     if (!nomeBucket.trim()) return
     setCriando(true); setErroCreate('')
@@ -1069,13 +1214,16 @@ function AbaR2() {
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {u.bytes != null && (
-                      <div style={{ textAlign: 'right' }}>
+                      <div style={{ textAlign: 'right', marginRight:4 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{bytes(u.bytes)}</div>
                         <div style={{ fontSize: 10, color: C.muted }}>{(u.objetos||0).toLocaleString('pt-BR')} obj</div>
                       </div>
                     )}
+                    {(b.nome||b.name)===status?.s3Credentials?.bucket
+                      ? <Badge color={CF.active}>padrão do AL</Badge>
+                      : <button onClick={e=>definirPadrao(b.nome||b.name,e)} style={{fontSize:9,padding:'4px 7px'}}>Usar no AL</button>}
                     <span style={{ color: CF.orange, fontSize: 14 }}>→</span>
                   </div>
                 </div>
@@ -1534,6 +1682,7 @@ export default function AbaCloudflare() {
 
   const ABAS = [
     { id: 'geral',      label: '🔑 Visão Geral' },
+    { id: 'recursos',   label: '🧭 Recursos',      req: tokenAtivo },
     { id: 'zonas',      label: '🌐 Zonas',        req: tokenAtivo },
     { id: 'dns',        label: '📋 DNS',          req: tokenAtivo, sub: zonaSelecionada?.name },
     { id: 'ssl',        label: '🔒 SSL',          req: tokenAtivo, sub: zonaSelecionada?.name },
@@ -1612,6 +1761,7 @@ export default function AbaCloudflare() {
 
       {/* Conteúdo */}
       {abaAtiva === 'geral'      && <AbaGeral     status={statusCF} carregando={loadingStatus} recarregar={carregarStatus} />}
+      {abaAtiva === 'recursos'   && <AbaRecursos />}
       {abaAtiva === 'zonas'      && <AbaZonas     onSelecionarZona={selecionarZona} zonaSelecionada={zonaSelecionada} />}
       {abaAtiva === 'dns'        && <AbaDns       zona={zonaSelecionada} />}
       {abaAtiva === 'ssl'        && <AbaSsl       zona={zonaSelecionada} />}
@@ -1619,7 +1769,7 @@ export default function AbaCloudflare() {
       {abaAtiva === 'pagerules'  && <AbaPageRules zona={zonaSelecionada} />}
       {abaAtiva === 'analytics'  && <AbaAnalytics zona={zonaSelecionada} />}
       {abaAtiva === 'workers'    && <AbaWorkers />}
-      {abaAtiva === 'r2'         && <AbaR2 />}
+      {abaAtiva === 'r2'         && <AbaR2 status={statusCF} onRefreshStatus={carregarStatus} />}
     </div>
   )
 }

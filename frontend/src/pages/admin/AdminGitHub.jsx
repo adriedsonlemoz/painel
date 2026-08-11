@@ -364,7 +364,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
       display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
     }} onClick={e => e.target === e.currentTarget && onFechar()}>
       <div style={{
-        width: 'min(640px, 100vw)', height: '100vh',
+        width: 'min(640px, 100vw)', height: '100dvh',
         background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
       }}>
@@ -675,7 +675,7 @@ function AbaArquivos({ owner, repo, branch, toastShow }) {
             <div style={{padding:12,border:`1px solid ${C.border}`,borderRadius:RADIUS.md,background:C.surface}}><small style={{color:C.muted}}>Commit</small><div style={{fontWeight:900,fontSize:14,color:C.greenSolid}}>Único</div></div>
           </div>
           <div style={{marginTop:SPACE.lg}}>{(cleanup.categorias||[]).map(c=><div key={c.id} style={{display:'flex',justifyContent:'space-between',gap:10,padding:'9px 0',borderBottom:`1px solid ${C.border}`}}><span style={{color:C.text}}>{c.label}</span><span style={{color:C.muted,fontSize:FONT.sm}}>{c.arquivos} · {fmtBytes(c.bytes)}</span></div>)}</div>
-          <details style={{marginTop:SPACE.lg}}><summary style={{cursor:'pointer',fontWeight:700,color:C.accent}}>Ver caminhos detectados ({cleanup.itens.length})</summary><div style={{maxHeight:190,overflow:'auto',marginTop:8,padding:10,borderRadius:RADIUS.md,background:C.surface2,fontFamily:'monospace',fontSize:11,color:C.muted}}>{cleanup.itens.map(i=><div key={i.path} style={{padding:'3px 0',wordBreak:'break-all'}}>{i.path}</div>)}</div></details>
+          <div style={{marginTop:SPACE.lg}}><div style={{fontWeight:700,color:C.accent}}>Caminhos detectados ({cleanup.itens.length})</div><div style={{maxHeight:190,overflow:'auto',marginTop:8,padding:10,borderRadius:RADIUS.md,background:C.surface2,fontFamily:'monospace',fontSize:11,color:C.muted}}>{cleanup.itens.map(i=><div key={i.path} style={{padding:'3px 0',wordBreak:'break-all'}}>{i.path}</div>)}</div></div>
           <label style={{display:'block',marginTop:SPACE.xl,fontSize:FONT.sm,color:C.muted}}>Para autorizar a limpeza, digite <b style={{color:C.text}}>LIMPAR</b><input value={cleanupConfirm} onChange={e=>setCleanupConfirm(e.target.value.toUpperCase())} style={{...inp(),marginTop:SPACE.sm}} placeholder="LIMPAR" /></label>
         </>}
       </div>}
@@ -691,7 +691,7 @@ function AbaVisao({ repo, readme }) {
   return (
     <div>
       <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Informações do Repositório</DSSectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: SPACE.md + 2, marginBottom: SPACE.xl2 }}>
+      <div className="gh-detail-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: SPACE.md + 2, marginBottom: SPACE.xl2 }}>
         {[
           { label: 'Linguagem',  val: repo.linguagem || '—' },
           { label: 'Branch',     val: repo.branch    || '—' },
@@ -1009,7 +1009,7 @@ function AbaAnalysis({ analysis: an }) {
         : <span style={{ fontSize: FONT.base, color: C.muted }}>Stack não identificada</span>}
 
       <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Indicadores</DSSectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: SPACE.md + 2, marginBottom: SPACE.xl3 }}>
+      <div className="gh-detail-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: SPACE.md + 2, marginBottom: SPACE.xl3 }}>
         {[
           { label: 'Maturidade',       content: <>{badge(an.maturidade, MATURIDADE_COR[an.maturidade] || C.muted)}<div style={{ fontSize: FONT.xs, color: C.muted, marginTop: SPACE.xs }}>{an.diasSemAtividade}d sem atividade</div></> },
           { label: 'Commits recentes', content: badge(an.frequenciaCommits, FREQ_COR[an.frequenciaCommits] || C.muted) },
@@ -1832,7 +1832,7 @@ export default function AdminGitHub() {
   }
 
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div style={{ maxWidth: 1180, margin: '0 auto' }}>
       <Toast toast={toast} />
       <style>{`
         .gh-account-hero{background:linear-gradient(135deg,var(--adm-surface,#fff),var(--adm-surface2,#f7f5f2));border:1px solid var(--adm-border,#e8e3dc);border-radius:14px;padding:18px;margin-bottom:18px;position:relative;overflow:hidden}
@@ -1841,7 +1841,7 @@ export default function AdminGitHub() {
         .gh-account-stat{background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:10px;padding:10px 12px;min-width:0}
         .gh-account-stat span,.gh-repo-facts span{display:block;font-size:9px;letter-spacing:.10em;color:var(--adm-muted);font-weight:800}
         .gh-account-stat b{display:block;margin-top:4px;font-size:15px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis}
-        .gh-repo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+        .gh-repo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
         .gh-repo-card{position:relative;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;overflow:hidden;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
         .gh-repo-card:hover{border-color:var(--adm-accent);transform:translateY(-1px);box-shadow:0 10px 30px rgba(20,30,24,.06)}
         .gh-card-topline{position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--adm-accent),transparent 72%);opacity:.75}
@@ -1851,6 +1851,7 @@ export default function AdminGitHub() {
         .gh-repo-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}
         .gh-repo-counters{display:flex;align-items:center;gap:12px}.gh-repo-counters b{color:var(--adm-text)}
         .gh-filter-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:8px}
+        @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-account-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-90px;top:-80px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}}
         @media(max-width:420px){.gh-repo-facts{grid-template-columns:1fr 1fr}.gh-repo-facts>div:last-child{grid-column:1/-1}.gh-repo-footer{align-items:flex-start;flex-direction:column}.gh-account-stat b{font-size:13px}}
       `}</style>

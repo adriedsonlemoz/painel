@@ -3,6 +3,7 @@ import { fontesService } from '../../services/api'
 import ConfirmModal from '../../components/ConfirmModal'
 import toast from 'react-hot-toast'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
+import { DSModal } from '../../components/admin/ui/DS'
 
 function FormInline({ inicial, onSalvar, onCancelar, salvando }) {
   const [nome, setNome] = useState(inicial?.nome||'')
@@ -58,6 +59,8 @@ export default function AdminFontes() {
     try { setSalvando(true); await fontesService.editar(id,d); toast.success('Fonte atualizada!'); setEditandoId(null); carregar() }
     catch (e) { toast.error(e.message) } finally { setSalvando(false) }
   }
+  const fonteEditando = fontes.find(f => f.id === editandoId) || null
+
   async function confirmarExclusao() {
     const fonte = confirm.fonte
     setConfirm(c => ({...c, carregando: true}))
@@ -75,6 +78,13 @@ export default function AdminFontes() {
         labelConfirmar="Excluir" carregando={confirm.carregando}
         onConfirmar={confirmarExclusao} onCancelar={() => setConfirm({aberto:false,fonte:null,carregando:false})}/>
 
+      <DSModal open={adicionando} onClose={() => setAdicionando(false)} title="Nova fonte" size="sm">
+        <FormInline onSalvar={handleCriar} onCancelar={() => setAdicionando(false)} salvando={salvando}/>
+      </DSModal>
+      <DSModal open={!!fonteEditando} onClose={() => setEditandoId(null)} title={`Editar fonte${fonteEditando ? ` — ${fonteEditando.nome}` : ''}`} size="sm">
+        {fonteEditando && <FormInline inicial={fonteEditando} onSalvar={d => handleEditar(fonteEditando.id,d)} onCancelar={() => setEditandoId(null)} salvando={salvando}/>} 
+      </DSModal>
+
       <div className="adm-page-header">
         <div>
           <div className="adm-page-title">Fontes</div>
@@ -90,13 +100,6 @@ export default function AdminFontes() {
         </div>
       </div>
 
-      {adicionando && (
-        <div className="adm-card" style={{ marginBottom: SPACE.xl, padding: '16px 20px' }}>
-          <div className="adm-section-label" style={{ marginBottom: 14 }}>Nova fonte</div>
-          <FormInline onSalvar={handleCriar} onCancelar={() => setAdicionando(false)} salvando={salvando}/>
-        </div>
-      )}
-
       <div className="adm-card">
         <div className="adm-table-header">
           <div className="adm-table-title">Todas as fontes</div>
@@ -110,33 +113,25 @@ export default function AdminFontes() {
             <tbody>
               {fontes.map(fonte => (
                 <tr key={fonte.id}>
-                  <td colSpan={editandoId===fonte.id ? 3 : 1}>
-                    {editandoId === fonte.id
-                      ? <FormInline inicial={fonte} onSalvar={d => handleEditar(fonte.id,d)} onCancelar={() => setEditandoId(null)} salvando={salvando}/>
-                      : <span style={{ fontWeight: 500 }}>{fonte.nome}</span>}
+                  <td><span style={{ fontWeight: 500 }}>{fonte.nome}</span></td>
+                  <td>
+                    {fonte.url
+                      ? <a href={fonte.url} target="_blank" rel="noopener noreferrer" style={{ color:'var(--adm-accent)', fontSize: FONT.base }}>{fonte.url}</a>
+                      : <span style={{ color:'var(--adm-muted)', fontSize: FONT.base }}>—</span>}
                   </td>
-                  {editandoId !== fonte.id && (
-                    <>
-                      <td>
-                        {fonte.url
-                          ? <a href={fonte.url} target="_blank" rel="noopener noreferrer" style={{ color:'var(--adm-accent)', fontSize: FONT.base }}>{fonte.url}</a>
-                          : <span style={{ color:'var(--adm-muted)', fontSize: FONT.base }}>—</span>}
-                      </td>
-                      <td>
-                        <div className="adm-td-actions">
-                          <button onClick={() => { setEditandoId(fonte.id); setAdicionando(false) }}
-                            aria-label={`Editar ${fonte.nome}`} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                          </button>
-                          <button onClick={() => setConfirm({aberto:true,fonte,carregando:false})}
-                            disabled={deletandoId===fonte.id} aria-label={`Excluir ${fonte.nome}`}
-                            className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  )}
+                  <td>
+                    <div className="adm-td-actions">
+                      <button onClick={() => { setEditandoId(fonte.id); setAdicionando(false) }}
+                        aria-label={`Editar ${fonte.nome}`} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </button>
+                      <button onClick={() => setConfirm({aberto:true,fonte,carregando:false})}
+                        disabled={deletandoId===fonte.id} aria-label={`Excluir ${fonte.nome}`}
+                        className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

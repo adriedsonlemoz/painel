@@ -5,11 +5,11 @@ import os from 'os'
 import { fileURLToPath } from 'url'
 import unzipper from 'unzipper'
 import mongoose from 'mongoose'
+import { IS_VERCEL, IS_RENDER, IS_TERMUX, IS_MANAGED_PLATFORM } from '../utils/runtimeEnvironment.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT_DIR = path.resolve(__dirname, '../../..')
-export const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION)
-export const IS_TERMUX = Boolean(process.env.TERMUX_VERSION || String(process.env.PREFIX || '').includes('com.termux'))
+export { IS_VERCEL, IS_RENDER, IS_TERMUX, IS_MANAGED_PLATFORM }
 // Em Vercel o filesystem da Function é somente leitura; /tmp é scratch temporário.
 // Nunca tratamos este diretório como armazenamento persistente entre requisições.
 export const STATE_DIR = IS_VERCEL

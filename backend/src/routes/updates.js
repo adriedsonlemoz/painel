@@ -13,7 +13,7 @@ import { statusRssJob } from '../jobs/rssJob.js'
 import { runGithubPublish } from '../update/githubPublishWorker.js'
 import { runUpdateSelfTest } from '../update/updateSelfTest.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
-import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, deleteStaged, deleteSnapshot, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL, IS_TERMUX } from '../services/systemUpdateService.js'
+import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, deleteStaged, deleteSnapshot, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL, IS_RENDER, IS_MANAGED_PLATFORM, IS_TERMUX } from '../services/systemUpdateService.js'
 
 const router=Router(); router.use(autenticar); router.use(verificarPermissao('atualizacoes.gerenciar'))
 const upload=multer({dest:path.join(os.tmpdir(),'alsistemas-uploads'),limits:{fileSize:250*1024*1024},fileFilter(_r,f,cb){cb(null,/\.zip$/i.test(f.originalname))}})
@@ -117,41 +117,42 @@ async function runGithubPublishInline(job,token){
 }
 router.get('/',async(_req,res,next)=>{try{
   const isTermux=IS_TERMUX
-  const processManager=IS_VERCEL?'Vercel Functions':process.env.pm_id!==undefined?'PM2':process.env.INVOCATION_ID?'systemd':isTermux?'Termux/manual':'manual'
-  const activeOperation=IS_VERCEL?null:await readUpdateLock()
+  const processManager=IS_VERCEL?'Vercel Functions':IS_RENDER?'Render Service':process.env.pm_id!==undefined?'PM2':process.env.INVOCATION_ID?'systemd':isTermux?'Termux/manual':'manual'
+  const activeOperation=IS_MANAGED_PLATFORM?null:await readUpdateLock()
   const stack=await runtimeStack()
   res.json({
-    installed:await installedVersion(),staged:IS_VERCEL?[]:await listStaged(),history:IS_VERCEL?[]:await readHistory(),snapshots:IS_VERCEL?[]:await listSnapshots(),activeOperation,
+    installed:await installedVersion(),staged:IS_MANAGED_PLATFORM?[]:await listStaged(),history:IS_MANAGED_PLATFORM?[]:await readHistory(),snapshots:IS_MANAGED_PLATFORM?[]:await listSnapshots(),activeOperation,
     runtime:{
-      environment:IS_VERCEL?'Vercel':isTermux?'Termux':process.platform==='linux'?'Linux/VPS':process.platform,
+      environment:IS_VERCEL?'Vercel':IS_RENDER?'Render':isTermux?'Termux':process.platform==='linux'?'Linux/VPS':process.platform,
       node:process.version,npm:npmRuntimeVersion(),arch:process.arch,platform:process.platform,processManager,
       termuxVersion:process.env.TERMUX_VERSION||null,
       stack,
     },
     restart:{strategy:process.env.AL_UPDATE_RESTART_STRATEGY||(isTermux?'termux':'none'),pm2Name:process.env.AL_UPDATE_PM2_NAME||'al-sistemas',systemdService:process.env.AL_UPDATE_SYSTEMD_SERVICE||'al-sistemas.service'},
     updateCapabilities:{
-      environment:IS_VERCEL?'vercel':'persistent-server',
-      persistentStaging:!IS_VERCEL,
-      localInstall:!IS_VERCEL,
+      environment:IS_VERCEL?'vercel':IS_RENDER?'render':'persistent-server',
+      persistentStaging:!IS_MANAGED_PLATFORM,
+      localInstall:!IS_MANAGED_PLATFORM,
       githubPublish:true,
-      incrementalPackages:true,
+      incrementalPackages:!IS_MANAGED_PLATFORM,
       fullPackages:true,
-      packageStorage:IS_VERCEL?'request-tmp':'external-staging',
-      detachedMonitor:!IS_VERCEL,
-      stateStorage:IS_VERCEL?'temporary':'outside-project',
-      preflight:!IS_VERCEL,
-      maintenanceMode:!IS_VERCEL,
-      snapshotRetention:Number(process.env.AL_UPDATE_SNAPSHOT_KEEP||3),
+      packageStorage:IS_MANAGED_PLATFORM?'request-tmp':'external-staging',
+      detachedMonitor:!IS_MANAGED_PLATFORM,
+      stateStorage:IS_MANAGED_PLATFORM?'temporary':'outside-project',
+      preflight:!IS_MANAGED_PLATFORM,
+      maintenanceMode:!IS_MANAGED_PLATFORM,
+      snapshotRetention:IS_MANAGED_PLATFORM?0:Number(process.env.AL_UPDATE_SNAPSHOT_KEEP||3),
       finalReport:true,
       stageIntegrity:true,
-      exclusiveLock:true,
-      transactionalApply:true,
-      automaticRecovery:true,
-      externalWatchdog:!IS_VERCEL,
+      exclusiveLock:!IS_MANAGED_PLATFORM,
+      transactionalApply:!IS_MANAGED_PLATFORM,
+      automaticRecovery:!IS_MANAGED_PLATFORM,
+      externalWatchdog:!IS_MANAGED_PLATFORM,
       zipHardening:true,
-      engineSelfTest:!IS_VERCEL,
+      engineSelfTest:!IS_MANAGED_PLATFORM,
       stageRetention:Number(process.env.AL_UPDATE_STAGE_KEEP||5),
-      emergencyRecoveryCommand:IS_VERCEL?null:`node "${path.join(STATE_DIR,'runtime','recoverPending.cjs')}" "${STATE_DIR}"`,
+      emergencyRecoveryCommand:IS_MANAGED_PLATFORM?null:`node "${path.join(STATE_DIR,'runtime','recoverPending.cjs')}" "${STATE_DIR}"`,
+      productionFlow:IS_MANAGED_PLATFORM?'github-deploy':'local-install',
     }
   })
 }catch(e){next(e)}})
@@ -324,7 +325,7 @@ router.post('/post-install-self-test',async(req,res,next)=>{try{
     ok:failures.length===0,
     score,
     version:installed.version,
-    environment:IS_VERCEL?'Vercel':isTermux?'Termux':process.platform,
+    environment:IS_VERCEL?'Vercel':IS_RENDER?'Render':isTermux?'Termux':process.platform,
     startedAt,
     finishedAt:new Date().toISOString(),
     checks,
@@ -335,17 +336,19 @@ router.post('/post-install-self-test',async(req,res,next)=>{try{
 
 router.post('/prepare',upload.single('package'),async(req,res,next)=>{try{
   if(!req.file)return res.status(400).json({erro:'Envie o pacote no campo package.'})
-  const meta=await validateAndStage(req.file.path,req.file.originalname,{persist:!IS_VERCEL})
+  const meta=await validateAndStage(req.file.path,req.file.originalname,{persist:!IS_MANAGED_PLATFORM})
   if(meta._packageRoot) await fs.rm(meta._packageRoot,{recursive:true,force:true}).catch(()=>{})
   const clean={...meta}; delete clean._packageRoot
   res.status(201).json({
-    message:IS_VERCEL?'Pacote validado. Na Vercel ele não foi armazenado; o navegador manterá o arquivo até a publicação.':'Pacote validado e preparado.',
+    message:IS_MANAGED_PLATFORM
+      ? 'Pacote validado. Em produção gerenciada ele não fica no disco do servidor; o navegador mantém o ZIP até a publicação.'
+      : 'Pacote validado e preparado.',
     update:clean,
-    ephemeral:IS_VERCEL,
+    ephemeral:IS_MANAGED_PLATFORM,
   })
 }catch(e){next(e)}finally{if(req.file)await fs.rm(req.file.path,{force:true}).catch(()=>{})}})
 router.delete('/staged/:stageId',async(req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Staging persistente não é usado na Vercel.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Staging persistente não é usado em Render/Vercel.'})
   const active=await readUpdateLock()
   if(active)return res.status(409).json({erro:'Não é possível excluir pacotes enquanto existe uma atualização/rollback em andamento.'})
   const removed=await deleteStaged(req.params.stageId)
@@ -353,7 +356,7 @@ router.delete('/staged/:stageId',async(req,res,next)=>{try{
 }catch(e){next(e)}})
 
 router.delete('/snapshots/:snapshotId',async(req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Snapshots locais não são usados na Vercel.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Snapshots locais não são usados em Render/Vercel.'})
   const active=await readUpdateLock()
   if(active)return res.status(409).json({erro:'Não é possível excluir snapshots enquanto existe uma atualização/rollback em andamento.'})
   const removed=await deleteSnapshot(req.params.snapshotId)
@@ -361,13 +364,13 @@ router.delete('/snapshots/:snapshotId',async(req,res,next)=>{try{
 }catch(e){next(e)}})
 
 router.get('/:stageId/preflight',async(req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Pré-check de instalação local não se aplica à Vercel. Use GitHub/Vercel.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Instalação local não se aplica a Render/Vercel. Publique pelo GitHub para gerar um novo deploy.'})
   const report=await getUpdatePreflight(req.params.stageId)
   res.json({preflight:report})
 }catch(e){next(e)}})
 
 router.post('/:stageId/install',async(req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Instalação local desativada na Vercel. Publique esta versão pelo GitHub/Vercel.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Instalação local desativada em plataforma gerenciada. Publique pelo GitHub; Render/Vercel farão o deploy da nova release.'})
   const alreadyActive=await readUpdateLock()
   if(alreadyActive)return res.status(409).json({erro:`Já existe uma operação de atualização em andamento (${alreadyActive.jobId}).`,codigo:'UPDATE_BUSY',active:alreadyActive})
   const preflight=await getUpdatePreflight(req.params.stageId)
@@ -394,7 +397,7 @@ async function terminateTree(pid,signal='SIGTERM'){
   try{process.kill(Number(pid),signal)}catch{}
 }
 router.post('/recover-active',async(_req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Recuperação de processo local não se aplica à Vercel.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Recuperação de processo local não se aplica a Render/Vercel.'})
   const active=await readUpdateLock()
   if(!active?.jobId)return res.status(404).json({erro:'Nenhuma operação ativa encontrada.'})
   const jobFile=path.join(JOB_DIR,`${active.jobId}.json`)
@@ -418,6 +421,7 @@ router.post('/recover-active',async(_req,res,next)=>{try{
 }catch(e){next(e)}})
 
 router.post('/rollback/:snapshotId',async(req,res,next)=>{try{
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Rollback local não é usado em Render/Vercel. Faça rollback/deploy pela plataforma ou GitHub.'})
   const alreadyActive=await readUpdateLock()
   if(alreadyActive)return res.status(409).json({erro:`Já existe uma operação de atualização em andamento (${alreadyActive.jobId}).`,codigo:'UPDATE_BUSY',active:alreadyActive})
   const job=await createRollbackJob(req.params.snapshotId,req.body||{})
@@ -431,7 +435,7 @@ router.post('/rollback/:snapshotId',async(req,res,next)=>{try{
 }})
 
 router.post('/publish-github-direct',upload.single('package'),async(req,res,next)=>{let packageRoot=null;try{
-  if(!IS_VERCEL)return res.status(409).json({erro:'Esta rota direta é exclusiva do ambiente Vercel.'})
+  if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Esta rota direta é exclusiva de Render/Vercel.'})
   if(!req.file)return res.status(400).json({erro:'Envie o pacote no campo package.'})
   const meta=await validateAndStage(req.file.path,req.file.originalname,{persist:false})
   packageRoot=meta._packageRoot
@@ -460,7 +464,7 @@ router.post('/publish-github-direct',upload.single('package'),async(req,res,next
 
 
 router.post('/publish-current-github',async(req,res,next)=>{try{
-  if(IS_VERCEL)return res.status(409).json({erro:'Na Vercel não existe uma instalação local persistente para publicar. Use o repositório GitHub como origem do deployment.'})
+  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Em Render/Vercel a instalação em disco não é a origem da release. Envie o pacote completo e publique no GitHub.'})
   const alreadyActive=await readUpdateLock()
   if(alreadyActive)return res.status(409).json({erro:`Já existe uma operação protegida em andamento (${alreadyActive.jobId}).`,codigo:'UPDATE_BUSY',active:alreadyActive})
   const repository=String(req.body?.repository||'').trim()

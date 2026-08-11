@@ -20,18 +20,21 @@ const loginLimiter = rateLimit({
   message: { erro: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
 })
 
-// Cross-origin = frontend e backend em domínios diferentes (produção real).
-// Detectamos pela FRONTEND_URL: se não for localhost/127.0.0.1, usamos
-// SameSite=None + Secure — independente do NODE_ENV.
-// Isso evita a desconexão imediata causada por SameSite=Lax em fetch cross-origin.
-const crossOrigin = !/localhost|127\.0\.0\.1/.test(process.env.FRONTEND_URL || '')
-
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure: crossOrigin,
-  sameSite: crossOrigin ? 'none' : 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 dias (ms)
-  path: '/',
+// Cookie calculado por requisição. Em Render + Vercel o frontend e backend
+// ficam em hosts diferentes, então não dependemos mais de FRONTEND_URL para
+// decidir SameSite/Secure.
+function cookieOpts(req) {
+  const origin=String(req.headers.origin||'')
+  let crossOrigin=false
+  try { crossOrigin=Boolean(origin && new URL(origin).host!==req.get('host')) } catch {}
+  const secure=crossOrigin || req.secure || String(req.headers['x-forwarded-proto']||'').includes('https')
+  return {
+    httpOnly:true,
+    secure,
+    sameSite:crossOrigin?'none':'lax',
+    maxAge:7*24*60*60*1000,
+    path:'/',
+  }
 }
 
 const MAX_TENTATIVAS   = 5
@@ -99,7 +102,7 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
     const token = gerarToken(usuario)
 
     // #1 — Envia token via cookie HttpOnly
-    res.cookie('alsistemas_token', token, COOKIE_OPTS)
+    res.cookie('alsistemas_token', token, cookieOpts(req))
     res.json({ usuario })
   } catch (err) { next(err) }
 })
@@ -134,8 +137,8 @@ router.put('/me', autenticar, async (req, res, next) => {
 })
 
 // ── POST /api/auth/logout ─────────────────────────────────────────────────────
-router.post('/logout', (_req, res) => {
-  res.clearCookie('alsistemas_token', { ...COOKIE_OPTS, maxAge: undefined })
+router.post('/logout', (req, res) => {
+  res.clearCookie('alsistemas_token', { ...cookieOpts(req), maxAge: undefined })
   res.json({ mensagem: 'Logout realizado' })
 })
 

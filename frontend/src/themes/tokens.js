@@ -170,14 +170,14 @@ export const FONT = {
   base:  12,
   /** 13px — texto de interface, conteúdo de tabela */
   md:    13,
-  /** 15px — headings de seção */
-  lg:    15,
-  /** 18px — títulos de card */
-  xl:    18,
-  /** 20px — títulos de página */
-  page:  20,
-  /** 28px — valores de stat-card */
-  stat:  28,
+  /** 14px — headings de seção */
+  lg:    14,
+  /** 16px — títulos de card */
+  xl:    16,
+  /** 18px — títulos de página */
+  page:  18,
+  /** 24px — valores de stat-card */
+  stat:  24,
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -16,6 +16,24 @@ const DEFAULT_DATA_DIR = IS_VERCEL
 const DATA_DIR = path.resolve(process.env.AL_CONFIG_DIR || DEFAULT_DATA_DIR)
 const KEY_FILE = path.join(DATA_DIR, 'master.key')
 const VAULT_FILE = path.join(DATA_DIR, 'bootstrap.vault.json')
+const runtimeSecrets = {
+  JWT_SECRET: '',
+  CREDENTIALS_MASTER_KEY: '',
+  INSTALL_COMPLETED: null,
+}
+
+export function setRuntimeBootstrapSecrets({ jwtSecret='', credentialMasterKey='', installCompleted=null } = {}) {
+  if (jwtSecret) {
+    runtimeSecrets.JWT_SECRET = String(jwtSecret)
+    process.env.JWT_SECRET = String(jwtSecret)
+  }
+  if (credentialMasterKey) runtimeSecrets.CREDENTIALS_MASTER_KEY = String(credentialMasterKey)
+  if (installCompleted !== null && installCompleted !== undefined) runtimeSecrets.INSTALL_COMPLETED = Boolean(installCompleted)
+  return { ...runtimeSecrets }
+}
+
+export function getRuntimeBootstrapSecrets() { return { ...runtimeSecrets } }
+
 const LEGACY_DIRS = [
   path.join(BACKEND_ROOT, '.al-sistemas'),
   path.resolve('.al-sistemas'),
@@ -86,26 +104,35 @@ export function resetBootstrapVault() {
 }
 
 export function credentialEncryptionMaterial() {
+  if (runtimeSecrets.CREDENTIALS_MASTER_KEY) return runtimeSecrets.CREDENTIALS_MASTER_KEY
   if (process.env.CREDENTIALS_MASTER_KEY) return String(process.env.CREDENTIALS_MASTER_KEY)
   migrateLegacyVaultIfNeeded()
   ensureDir()
   if (!fs.existsSync(KEY_FILE)) fs.writeFileSync(KEY_FILE, crypto.randomBytes(32).toString('base64url'), { mode: 0o600 })
   return fs.readFileSync(KEY_FILE, 'utf8').trim()
 }
-export function bootstrapValue(key, envName = key) { return readBootstrap()[key] || process.env[envName] || '' }
+export function bootstrapValue(key, envName = key) {
+  if (runtimeSecrets[key]) return runtimeSecrets[key]
+  return readBootstrap()[key] || process.env[envName] || ''
+}
 export function ensureBootstrapSecrets() {
   const current = readBootstrap()
   const patch = {}
-  if (!current.JWT_SECRET) patch.JWT_SECRET = crypto.randomBytes(48).toString('base64url')
-  if (!current.SETUP_TOKEN) patch.SETUP_TOKEN = crypto.randomBytes(32).toString('base64url')
+  const jwtExisting = current.JWT_SECRET || process.env.JWT_SECRET || runtimeSecrets.JWT_SECRET
+  if (!jwtExisting) patch.JWT_SECRET = crypto.randomBytes(48).toString('base64url')
+  if (!current.SETUP_TOKEN && !process.env.SETUP_TOKEN) patch.SETUP_TOKEN = crypto.randomBytes(32).toString('base64url')
   const next = Object.keys(patch).length ? writeBootstrap(patch) : current
-  process.env.JWT_SECRET = next.JWT_SECRET
-  return next
+  const jwt = runtimeSecrets.JWT_SECRET || current.JWT_SECRET || process.env.JWT_SECRET || next.JWT_SECRET
+  if (jwt) process.env.JWT_SECRET = jwt
+  return { ...next, JWT_SECRET: jwt || '' }
 }
 export function isBootstrapConfigured() {
   const cfg = readBootstrap()
-  return Boolean(cfg.INSTALL_COMPLETED || (cfg.MONGO_URI && cfg.JWT_SECRET))
+  return Boolean(runtimeSecrets.INSTALL_COMPLETED || cfg.INSTALL_COMPLETED || ((cfg.MONGO_URI || process.env.MONGO_URI) && (cfg.JWT_SECRET || process.env.JWT_SECRET || runtimeSecrets.JWT_SECRET)))
 }
-export function isInstallCompleted() { return Boolean(readBootstrap().INSTALL_COMPLETED) }
+export function isInstallCompleted() {
+  if (runtimeSecrets.INSTALL_COMPLETED !== null) return Boolean(runtimeSecrets.INSTALL_COMPLETED)
+  return Boolean(readBootstrap().INSTALL_COMPLETED)
+}
 
 export function vaultPaths() { return { dataDir: DATA_DIR, keyFile: KEY_FILE, vaultFile: VAULT_FILE } }

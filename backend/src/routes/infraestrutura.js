@@ -21,6 +21,10 @@
 import { Router }   from 'express'
 import mongoose      from 'mongoose'
 import PlataformaCredencial from '../models/PlataformaCredencial.js'
+import ErroLog from '../models/ErroLog.js'
+import ConfiguracaoHome from '../models/ConfiguracaoHome.js'
+import { registerPlatformOrigin, isPlatformOriginAllowed, hydratePlatformOrigins, platformOrigins } from '../utils/platformOrigins.js'
+import { ensurePersistentBootstrap } from '../utils/hostedBootstrap.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { autenticar }        from '../middleware/auth.js'
@@ -847,6 +851,408 @@ router.get('/plataformas/vercel/projetos/:projetoId/deploys', async (req, res, n
     }))
     res.json({ deploys })
   } catch (err) { next(err) }
+})
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Central inteligente de Plataformas — produção Render + Vercel
+// ═══════════════════════════════════════════════════════════════
+function maskCredential(value='', locked=false) {
+  if(locked)return 'protegida por outra chave'
+  const v=String(value||'')
+  if(!v)return ''
+  return `••••••••${v.slice(-4)}`
+}
+function normalizeOrigin(value='') {
+  try { const u=new URL(String(value)); return `${u.protocol}//${u.host}` } catch { return '' }
+}
+function escapeRegex(value='') { return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&') }
+
+async function smartRenderServices(apiKey) {
+  if(!apiKey)return []
+  const r=await fetch('https://api.render.com/v1/services?limit=30',{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'}})
+  if(!r.ok)throw new Error(`Render API retornou ${r.status}`)
+  const data=await r.json()
+  return (Array.isArray(data)?data:[]).map(row=>{
+    const s=row?.service||row||{}
+    return ({
+    id:s.id,nome:s.name,tipo:s.type,estado:s.state,
+    ownerId:s.ownerId||s.owner_id||s.owner?.id||null,
+    slug:s.slug||null,
+    autoDeploy:s.autoDeploy,
+    url:s.url||s.serviceDetails?.url||null,
+    regiao:s.region||s.serviceDetails?.region||null,
+    atualizado:s.updatedAt,branch:s.branch||null,repo:s.repo||null,
+  })}).filter(x=>x.id)
+}
+async function smartRenderDeploys(apiKey,serviceId) {
+  if(!apiKey||!serviceId)return []
+  const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys?limit=8`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'}})
+  if(!r.ok)throw new Error(`Render API retornou ${r.status}`)
+  const data=await r.json()
+  return (Array.isArray(data)?data:[]).map(row=>{
+    const d=row?.deploy||row||{}
+    return ({
+    id:d.id,status:d.status,criado:d.createdAt,finalizado:d.finishedAt||null,
+    duracao:d.finishedAt&&d.createdAt?Math.round((new Date(d.finishedAt)-new Date(d.createdAt))/1000):null,
+    commit:d.commit?{hash:d.commit.id?.slice(0,7),mensagem:d.commit.message}:null,
+  })}).filter(x=>x.id)
+}
+async function smartVercelProjects(token,teamId='') {
+  if(!token)return []
+  const r=await fetch(vercelUrl('/v9/projects?limit=30',teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  if(!r.ok)throw new Error(`Vercel API retornou ${r.status}`)
+  const data=await r.json()
+  return (data.projects||[]).map(p=>({
+    id:p.id,nome:p.name,framework:p.framework||'—',
+    dominios:(Array.isArray(p.alias)?p.alias:[]).map(a=>String(a)),
+    dominio:(Array.isArray(p.alias)?p.alias[0]:null)||null,
+    atualizado:p.updatedAt,
+    git:p.link?{tipo:p.link.type,repositorio:p.link.repo,repoId:p.link.repoId||null}:null,
+  }))
+}
+async function smartVercelDeploys(token,teamId,projectId) {
+  if(!token||!projectId)return []
+  const r=await fetch(vercelUrl(`/v6/deployments?projectId=${encodeURIComponent(projectId)}&limit=8`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  if(!r.ok)throw new Error(`Vercel API retornou ${r.status}`)
+  const data=await r.json()
+  return (data.deployments||[]).map(d=>({
+    id:d.uid,url:d.url?`https://${d.url}`:null,estado:d.state,
+    ambiente:d.target||'preview',criado:d.createdAt,pronto:d.ready||null,
+    duracao:d.ready&&d.createdAt?Math.round((d.ready-d.createdAt)/1000):null,
+    branch:d.meta?.githubCommitRef||null,commit:d.meta?.githubCommitMessage||null,
+    hash:d.meta?.githubCommitSha?.slice(0,7)||null,
+  }))
+}
+
+
+async function renderApi(apiKey,pathName,{method='GET',body=null}={}) {
+  const r=await fetch(`https://api.render.com${pathName}`,{
+    method,
+    headers:{
+      Authorization:`Bearer ${apiKey}`,
+      Accept:'application/json',
+      ...(body?{'Content-Type':'application/json'}:{}),
+    },
+    ...(body?{body:JSON.stringify(body)}:{}),
+  })
+  const payload=await r.json().catch(()=>null)
+  if(!r.ok) {
+    const detail=payload?.message||payload?.error||payload?.errors?.[0]?.message||`HTTP ${r.status}`
+    throw new Error(`Render: ${detail}`)
+  }
+  return payload
+}
+
+async function vercelApi(token,pathName,teamId='') {
+  const url=vercelUrl(pathName,teamId)
+  const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const payload=await r.json().catch(()=>null)
+  if(!r.ok) {
+    const detail=payload?.error?.message||payload?.message||`HTTP ${r.status}`
+    throw new Error(`Vercel: ${detail}`)
+  }
+  return payload
+}
+
+function maskSecretValue(value='') {
+  const v=String(value??'')
+  if(!v)return '••••••••'
+  if(v.length<=4)return '••••'
+  return `••••••••${v.slice(-4)}`
+}
+
+async function smartRenderEnv(apiKey,serviceId) {
+  const data=await renderApi(apiKey,`/v1/services/${encodeURIComponent(serviceId)}/env-vars?limit=100`)
+  const list=Array.isArray(data)?data:(data?.envVars||[])
+  return list.map(row=>{
+    const item=row?.envVar||row||{}
+    return {
+      key:item.key||item.name||'',
+      valueMasked:maskSecretValue(item.value),
+      configured:item.value!==undefined&&item.value!==null,
+    }
+  }).filter(x=>x.key)
+}
+
+async function smartVercelEnv(token,teamId,projectId) {
+  const data=await vercelApi(token,`/v9/projects/${encodeURIComponent(projectId)}/env`,teamId)
+  return (data?.envs||data?.env||[]).map(item=>({
+    id:item.id||null,
+    key:item.key||'',
+    target:Array.isArray(item.target)?item.target:[item.target].filter(Boolean),
+    type:item.type||'encrypted',
+    gitBranch:item.gitBranch||null,
+    valueMasked:item.value?maskSecretValue(item.value):'protegida',
+  })).filter(x=>x.key)
+}
+
+async function smartVercelLogs(token,teamId,deploymentId) {
+  const data=await vercelApi(token,`/v3/deployments/${encodeURIComponent(deploymentId)}/events?direction=backward&limit=100`,teamId)
+  return (Array.isArray(data)?data:[]).map((event,index)=>({
+    id:event?.payload?.id||`${deploymentId}-${index}`,
+    tipo:event.type||'event',
+    criado:event.created||event?.payload?.created||null,
+    texto:event?.payload?.text||event?.payload?.info?.name||event?.payload?.info?.step||'',
+    statusCode:event?.payload?.statusCode||null,
+  })).filter(x=>x.texto||x.tipo)
+}
+
+async function smartRenderLogs(apiKey,ownerId,serviceId) {
+  if(!ownerId||!serviceId)return []
+  const p=new URLSearchParams({ownerId,direction:'backward',limit:'80'})
+  p.append('resource',serviceId)
+  const data=await renderApi(apiKey,`/v1/logs?${p.toString()}`)
+  const rows=data?.logs||data?.items||[]
+  return rows.map((row,index)=>({
+    id:row.id||`${serviceId}-${index}`,
+    criado:row.timestamp||row.createdAt||row.time||null,
+    nivel:row.level||row.severity||'',
+    tipo:row.type||'app',
+    texto:row.message||row.text||row.body||'',
+  })).filter(x=>x.texto)
+}
+
+router.get('/plataformas/central', async (_req,res,next)=>{
+  try {
+    const [renderCred,vercelCred]=await Promise.all([
+      getCredential('render','RENDER_API_KEY'),
+      getCredential('vercel','VERCEL_TOKEN'),
+    ])
+    const bootstrap=await ensurePersistentBootstrap().catch(()=>({installed:false,persistedSecrets:false,source:'indisponivel'}))
+    const result={
+      sincronizadoEm:new Date().toISOString(),
+      bootstrap,
+      credenciais:{
+        render:{configurado:Boolean(renderCred.value)||Boolean(renderCred.locked),utilizavel:Boolean(renderCred.value),bloqueada:Boolean(renderCred.locked),origem:renderCred.source||null,mascarada:maskCredential(renderCred.value,renderCred.locked),atualizadoEm:renderCred.updatedAt||null},
+        vercel:{configurado:Boolean(vercelCred.value)||Boolean(vercelCred.locked),utilizavel:Boolean(vercelCred.value),bloqueada:Boolean(vercelCred.locked),origem:vercelCred.source||null,mascarada:maskCredential(vercelCred.value,vercelCred.locked),teamId:vercelCred.metadata?.teamId||'',atualizadoEm:vercelCred.updatedAt||null},
+      },
+      render:{servicos:[],selecionado:null,deploys:[],erro:null},
+      vercel:{projetos:[],selecionado:null,deploys:[],erro:null},
+      producao:{frontendOrigin:'',backendUrl:'',corsOk:false,ligada:false},
+      problemas:[],
+      acoes:{
+        publicar:'/admin/atualizacoes?acao=publicar',
+        integracoes:'/admin/integracoes',
+        erros:'/admin/erros',
+        criarRender:'https://dashboard.render.com/new',
+        criarVercel:'https://vercel.com/new',
+        docsRender:'https://api-docs.render.com/reference/authentication',
+        docsVercel:'https://vercel.com/docs/rest-api',
+      },
+    }
+
+    try { result.render.servicos=await smartRenderServices(renderCred.value) } catch(err){ result.render.erro=err.message }
+    try { result.vercel.projetos=await smartVercelProjects(vercelCred.value,vercelCred.metadata?.teamId||'') } catch(err){ result.vercel.erro=err.message }
+
+    let renderId=renderCred.metadata?.primaryServiceId||''
+    let vercelId=vercelCred.metadata?.primaryProjectId||''
+    if(!renderId&&result.render.servicos.length===1)renderId=result.render.servicos[0].id
+    if(!vercelId&&result.vercel.projetos.length===1)vercelId=result.vercel.projetos[0].id
+
+    result.render.selecionado=result.render.servicos.find(x=>x.id===renderId)||null
+    result.vercel.selecionado=result.vercel.projetos.find(x=>x.id===vercelId)||null
+
+    if(result.render.selecionado) {
+      try { result.render.deploys=await smartRenderDeploys(renderCred.value,result.render.selecionado.id) } catch(err){ result.render.deployError=err.message }
+    }
+    if(result.vercel.selecionado) {
+      try { result.vercel.deploys=await smartVercelDeploys(vercelCred.value,vercelCred.metadata?.teamId||'',result.vercel.selecionado.id) } catch(err){ result.vercel.deployError=err.message }
+    }
+
+    let frontendOrigin=normalizeOrigin(vercelCred.metadata?.productionOrigin||'')
+    if(!frontendOrigin&&result.vercel.selecionado?.dominio)frontendOrigin=normalizeOrigin(`https://${result.vercel.selecionado.dominio}`)
+    if(!frontendOrigin) {
+      const prod=result.vercel.deploys.find(d=>d.ambiente==='production'&&d.url)||result.vercel.deploys.find(d=>d.url)
+      frontendOrigin=normalizeOrigin(prod?.url||'')
+    }
+    const backendUrl=normalizeOrigin(result.render.selecionado?.url||renderCred.metadata?.backendUrl||'')
+    if(frontendOrigin)registerPlatformOrigin(frontendOrigin)
+
+    result.producao={
+      frontendOrigin,backendUrl,
+      corsOk:Boolean(frontendOrigin&&isPlatformOriginAllowed(frontendOrigin)),
+      ligada:Boolean(frontendOrigin&&backendUrl),
+      renderServiceId:result.render.selecionado?.id||'',
+      vercelProjectId:result.vercel.selecionado?.id||'',
+      origins:platformOrigins(),
+    }
+
+    if(!bootstrap.persistedSecrets)result.problemas.push({id:'bootstrap',nivel:'warning',titulo:'Bootstrap da nuvem ainda não confirmado',descricao:'A instalação ainda não confirmou no Mongo a chave estável usada por login e Integrações. Faça a migração antes de abandonar o ambiente antigo.',acao:'integracoes'})
+    if(!renderCred.value)result.problemas.push({id:'render-credential',nivel:'warning',titulo:'Render não conectado',descricao:'Cadastre a API Key na Central de Integrações para ler serviços e deploys.',acao:'integracoes'})
+    if(!vercelCred.value)result.problemas.push({id:'vercel-credential',nivel:'warning',titulo:'Vercel não conectada',descricao:'Cadastre o Access Token na Central de Integrações para ler projetos e deploys.',acao:'integracoes'})
+    if(renderCred.locked||vercelCred.locked)result.problemas.push({id:'credential-key',nivel:'critical',titulo:'Credencial protegida por outra instalação',descricao:'A chave de criptografia precisa ser sincronizada ou a credencial deve ser substituída.',acao:'integracoes'})
+    if(result.render.erro)result.problemas.push({id:'render-api',nivel:'error',titulo:'Render não respondeu como esperado',descricao:result.render.erro,acao:'docs-render'})
+    if(result.vercel.erro)result.problemas.push({id:'vercel-api',nivel:'error',titulo:'Vercel não respondeu como esperado',descricao:result.vercel.erro,acao:'docs-vercel'})
+    if(/fail|error/i.test(String(result.render.deploys[0]?.status||'')))result.problemas.push({id:'render-deploy',nivel:'error',titulo:'Último deploy do backend falhou',descricao:'O serviço selecionado na Render está com o deploy mais recente em erro.',acao:'render'})
+    if(/fail|error/i.test(String(result.vercel.deploys[0]?.estado||'')))result.problemas.push({id:'vercel-deploy',nivel:'error',titulo:'Último deploy do frontend falhou',descricao:'O projeto selecionado na Vercel está com o deploy mais recente em erro.',acao:'vercel',url:result.vercel.deploys[0]?.url})
+    if(frontendOrigin&&!result.producao.corsOk)result.problemas.push({id:'cors',nivel:'critical',titulo:'Frontend ainda não autorizado pelo backend',descricao:`A origem ${frontendOrigin} precisa entrar na conexão de produção.`,acao:'conectar-producao'})
+
+    if(frontendOrigin) {
+      const since=new Date(Date.now()-24*60*60*1000)
+      const corsCount=await ErroLog.countDocuments({
+        mensagem:{$regex:`CORS: origem não permitida.*${escapeRegex(frontendOrigin)}`,$options:'i'},
+        criado_em:{$gte:since},
+      }).catch(()=>0)
+      if(corsCount>0)result.problemas.push({id:'cors-history',nivel:'warning',titulo:`${corsCount} bloqueio(s) CORS nas últimas 24h`,descricao:'O Monitor de Erros registrou requisições do frontend recusadas pelo backend.',acao:'erros'})
+    }
+
+    res.json(result)
+  } catch(err){next(err)}
+})
+
+router.put('/plataformas/producao', async (req,res,next)=>{
+  try {
+    const renderServiceId=String(req.body?.renderServiceId||'').trim()
+    const vercelProjectId=String(req.body?.vercelProjectId||'').trim()
+    const originInformada=normalizeOrigin(req.body?.frontendOrigin||'')
+    if(!renderServiceId||!vercelProjectId)return res.status(400).json({erro:'Selecione o serviço Render e o projeto Vercel da produção.'})
+
+    const [renderCred,vercelCred]=await Promise.all([
+      getCredential('render','RENDER_API_KEY'),
+      getCredential('vercel','VERCEL_TOKEN'),
+    ])
+    if(!renderCred.value||!vercelCred.value)return res.status(409).json({erro:'Render e Vercel precisam estar conectadas em Integrações e APIs.'})
+
+    const [servicos,projetos]=await Promise.all([
+      smartRenderServices(renderCred.value),
+      smartVercelProjects(vercelCred.value,vercelCred.metadata?.teamId||''),
+    ])
+    const service=servicos.find(x=>x.id===renderServiceId)
+    const project=projetos.find(x=>x.id===vercelProjectId)
+    if(!service||!project)return res.status(404).json({erro:'Serviço ou projeto não encontrado na conta conectada.'})
+
+    const frontendOrigin=originInformada||normalizeOrigin(project.dominio?`https://${project.dominio}`:'')
+    if(!frontendOrigin)return res.status(400).json({erro:'Não foi possível determinar a URL pública do frontend. Informe a origem manualmente.'})
+    const backendUrl=normalizeOrigin(service.url||'')
+
+    await Promise.all([
+      setCredential('render',renderCred.value,{...(renderCred.metadata||{}),primaryServiceId:service.id,backendUrl}),
+      setCredential('vercel',vercelCred.value,{...(vercelCred.metadata||{}),primaryProjectId:project.id,productionOrigin:frontendOrigin,domains:project.dominios||[]}),
+      ConfiguracaoHome.findOneAndUpdate({chave:'site_url'},{$set:{valor:frontendOrigin,descricao:'URL pública do portal em produção'}},{upsert:true}),
+    ])
+    registerPlatformOrigin(frontendOrigin)
+    await hydratePlatformOrigins({remote:false,force:true}).catch(()=>null)
+
+    res.json({
+      ok:true,
+      mensagem:'Produção conectada: Vercel → Render → MongoDB.',
+      producao:{frontendOrigin,backendUrl,renderServiceId:service.id,vercelProjectId:project.id,corsOk:isPlatformOriginAllowed(frontendOrigin)},
+    })
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/recarregar-origens', async (_req,res,next)=>{
+  try {
+    const origins=await hydratePlatformOrigins({remote:true,force:true})
+    res.json({ok:true,origins,total:origins.length})
+  } catch(err){next(err)}
+})
+
+
+// ── Operações inteligentes Render ─────────────────────────────
+router.get('/plataformas/render/servicos/:serviceId/env', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const env=await smartRenderEnv(cred.value,req.params.serviceId)
+    res.json({env,total:env.length,segredosMascarados:true})
+  } catch(err){next(err)}
+})
+
+router.put('/plataformas/render/servicos/:serviceId/env/:key', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const key=String(req.params.key||'').trim()
+    const value=String(req.body?.value??'')
+    if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))return res.status(400).json({erro:'Nome de variável inválido.'})
+    if(!value)return res.status(400).json({erro:'Informe o novo valor.'})
+    await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/env-vars/${encodeURIComponent(key)}`,{
+      method:'PUT',body:{value},
+    })
+    res.json({
+      ok:true,key,valueMasked:maskSecretValue(value),
+      mensagem:`${key} atualizada na Render. Faça um novo deploy para aplicar a mudança.`,
+      requerDeploy:true,
+    })
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/render/servicos/:serviceId/deploy', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const clearCache=req.body?.clearCache===true?'clear':'do_not_clear'
+    const commitId=String(req.body?.commitId||'').trim()
+    const deploy=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/deploys`,{
+      method:'POST',
+      body:{clearCache,...(commitId?{commitId}:{})},
+    })
+    res.status(201).json({ok:true,deploy,mensagem:clearCache==='clear'?'Deploy iniciado com limpeza do cache.':'Deploy iniciado na Render.'})
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/render/servicos/:serviceId/restart', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/restart`,{method:'POST'})
+    res.json({ok:true,mensagem:'Serviço reiniciado na Render.'})
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/render/servicos/:serviceId/rollback', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const deployId=String(req.body?.deployId||'').trim()
+    if(!deployId)return res.status(400).json({erro:'Selecione o deploy de destino.'})
+    const deploy=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/rollback`,{
+      method:'POST',body:{deployId},
+    })
+    res.status(201).json({ok:true,deploy,mensagem:'Rollback solicitado na Render.'})
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/render/servicos/:serviceId/deploys/:deployId/cancelar', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const result=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/deploys/${encodeURIComponent(req.params.deployId)}/cancel`,{method:'POST'})
+    res.json({ok:true,result,mensagem:'Cancelamento solicitado na Render.'})
+  } catch(err){next(err)}
+})
+
+router.get('/plataformas/render/servicos/:serviceId/logs', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('render','RENDER_API_KEY')
+    if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
+    const services=await smartRenderServices(cred.value)
+    const service=services.find(x=>x.id===req.params.serviceId)
+    if(!service)return res.status(404).json({erro:'Serviço Render não encontrado.'})
+    const logs=await smartRenderLogs(cred.value,service.ownerId,service.id)
+    res.json({logs,total:logs.length,service:{id:service.id,nome:service.nome}})
+  } catch(err){next(err)}
+})
+
+// ── Inspeção segura Vercel ────────────────────────────────────
+router.get('/plataformas/vercel/projetos/:projectId/env', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('vercel','VERCEL_TOKEN')
+    if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
+    const env=await smartVercelEnv(cred.value,cred.metadata?.teamId||'',req.params.projectId)
+    res.json({env,total:env.length,segredosMascarados:true})
+  } catch(err){next(err)}
+})
+
+router.get('/plataformas/vercel/deploys/:deploymentId/logs', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('vercel','VERCEL_TOKEN')
+    if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
+    const logs=await smartVercelLogs(cred.value,cred.metadata?.teamId||'',req.params.deploymentId)
+    res.json({logs,total:logs.length,deploymentId:req.params.deploymentId})
+  } catch(err){next(err)}
 })
 
 export default router

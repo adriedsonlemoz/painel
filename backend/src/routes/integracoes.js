@@ -2,6 +2,7 @@ import { Router } from 'express'
 import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 import { v2 as cloudinary } from 'cloudinary'
+import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
@@ -338,6 +339,7 @@ router.put('/:id', async(req,res,next)=>{ try {
     const r2SecretAccessKey=String(secrets.r2SecretAccessKey||'').trim()||old.r2SecretAccessKey||''
     if(!apiToken)return res.status(400).json({erro:'API Token da Cloudflare é obrigatório.'})
     if(!merged.accountId)return res.status(400).json({erro:'Account ID da Cloudflare é obrigatório.'})
+    merged.r2Endpoint=String(merged.r2Endpoint||`https://${merged.accountId}.r2.cloudflarestorage.com`).trim()
     value=JSON.stringify({apiToken,r2AccessKeyId,r2SecretAccessKey})
   }
   if(!value)return res.status(400).json({erro:'Credencial obrigatória.'})
@@ -378,15 +380,35 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
   } else if(id==='cloudflare'){
     const accountId=String(c.metadata?.accountId||'').trim()
     if(!accountId)throw new Error('Informe o Account ID da Cloudflare.')
-    const r=await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify',{headers:{Authorization:`Bearer ${c.value}`}})
-    const body=await r.json().catch(()=>({}))
-    if(!r.ok || body.success===false)throw new Error(body.errors?.[0]?.message||`Cloudflare respondeu ${r.status}`)
-    if(c.metadata?.r2Bucket){
-      const br=await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(c.metadata.r2Bucket)}`,{headers:{Authorization:`Bearer ${c.value}`}})
-      const bb=await br.json().catch(()=>({}))
-      if(!br.ok || bb.success===false)throw new Error(bb.errors?.[0]?.message||`Bucket R2 respondeu ${br.status}`)
+    const headers={Authorization:`Bearer ${c.value}`,Accept:'application/json'}
+    let verifyResponse=await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/tokens/verify`,{headers})
+    if(!verifyResponse.ok) verifyResponse=await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify',{headers})
+    const accountResponse=await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}`,{headers})
+    const verify=await verifyResponse.json().catch(()=>({}))
+    const account=await accountResponse.json().catch(()=>({}))
+    if(!verifyResponse.ok || verify.success===false)throw new Error(verify.errors?.[0]?.message||`Cloudflare respondeu ${verifyResponse.status}`)
+    if(!accountResponse.ok || account.success===false)throw new Error(account.errors?.[0]?.message||'O token não conseguiu acessar o Account ID informado.')
+
+    const r2AccessKeyId=c.secrets?.r2AccessKeyId||''
+    const r2SecretAccessKey=c.secrets?.r2SecretAccessKey||''
+    let s3={configured:Boolean(r2AccessKeyId&&r2SecretAccessKey),ok:false,buckets:[]}
+    if(s3.configured){
+      try{
+        const client=new S3Client({
+          region:'auto',
+          endpoint:`https://${accountId}.r2.cloudflarestorage.com`,
+          credentials:{accessKeyId:r2AccessKeyId,secretAccessKey:r2SecretAccessKey},
+        })
+        const listed=await client.send(new ListBucketsCommand({}))
+        s3={configured:true,ok:true,buckets:(listed.Buckets||[]).map(x=>x.Name).filter(Boolean)}
+      }catch(e){s3={configured:true,ok:false,buckets:[],error:String(e.message||e)}}
     }
-    result.mensagem=`Cloudflare conectada${c.metadata?.r2Bucket?` • bucket R2 ${c.metadata.r2Bucket} acessível`:''}.`
+
+    result.token={status:verify.result?.status||'active',id:verify.result?.id||null}
+    result.account={id:account.result?.id||accountId,name:account.result?.name||null}
+    result.s3=s3
+    result.endpointS3=`https://${accountId}.r2.cloudflarestorage.com`
+    result.mensagem=`Cloudflare conectada • conta ${account.result?.name||accountId}${s3.configured?(s3.ok?` • R2 S3 válido (${s3.buckets.length} bucket(s))`:' • API REST válida, mas credenciais S3 precisam de revisão'):''}.`
   } else if(id==='render'){
     const r=await fetch('https://api.render.com/v1/users',{headers:{Authorization:`Bearer ${c.value}`,Accept:'application/json'}})
     const body=await r.json().catch(()=>null)
@@ -463,6 +485,7 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
       add('CF_R2_SECRET_ACCESS_KEY',parsed.r2SecretAccessKey||'',c.source)
       add('CF_R2_BUCKET',c.metadata?.r2Bucket||'',c.source)
       add('CF_R2_PUBLIC_URL',c.metadata?.r2PublicUrl||'',c.source)
+      add('CF_R2_ENDPOINT',c.metadata?.r2Endpoint||'',c.source)
     }else if(id==='vercel'){
       add('VERCEL_TOKEN',c.value,c.source)
       add('VERCEL_TEAM_ID',c.metadata?.teamId||process.env.VERCEL_TEAM_ID||'',c.source)
@@ -494,7 +517,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.67',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.86',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
@@ -542,11 +565,11 @@ router.post('/import', async(req,res,next)=>{ try {
     if(!isMasked(apiSecret) && cloudName && apiKey){await setCredential('cloudinary',JSON.stringify({cloudName,apiKey,apiSecret}),{cloudName,apiKey});imported.push('Cloudinary')}else skipped.push('Cloudinary')
   }
 
-  const cfToken=val('CF_API_TOKEN'), cfAccount=val('CF_ACCOUNT_ID'), cfAccess=val('CF_R2_ACCESS_KEY_ID'), cfSecret=val('CF_R2_SECRET_ACCESS_KEY'), cfBucket=val('CF_R2_BUCKET'), cfPublic=val('CF_R2_PUBLIC_URL')
-  if(cfToken||cfAccount||cfAccess||cfSecret||cfBucket||cfPublic){
+  const cfToken=val('CF_API_TOKEN'), cfAccount=val('CF_ACCOUNT_ID'), cfAccess=val('CF_R2_ACCESS_KEY_ID'), cfSecret=val('CF_R2_SECRET_ACCESS_KEY'), cfBucket=val('CF_R2_BUCKET'), cfPublic=val('CF_R2_PUBLIC_URL'), cfEndpoint=val('CF_R2_ENDPOINT')
+  if(cfToken||cfAccount||cfAccess||cfSecret||cfBucket||cfPublic||cfEndpoint){
     if(!isMasked(cfToken) && cfToken && cfAccount){
       const old=await getCredential('cloudflare',defs.cloudflare); let parsed={}; try{parsed=JSON.parse(old.value||'{}')}catch{}
-      await setCredential('cloudflare',JSON.stringify({apiToken:cfToken,r2AccessKeyId:!isMasked(cfAccess)&&cfAccess?cfAccess:parsed.r2AccessKeyId||'',r2SecretAccessKey:!isMasked(cfSecret)&&cfSecret?cfSecret:parsed.r2SecretAccessKey||''}),{...(old.metadata||{}),accountId:cfAccount,r2Bucket:cfBucket||old.metadata?.r2Bucket||'',r2PublicUrl:cfPublic||old.metadata?.r2PublicUrl||''})
+      await setCredential('cloudflare',JSON.stringify({apiToken:cfToken,r2AccessKeyId:!isMasked(cfAccess)&&cfAccess?cfAccess:parsed.r2AccessKeyId||'',r2SecretAccessKey:!isMasked(cfSecret)&&cfSecret?cfSecret:parsed.r2SecretAccessKey||''}),{...(old.metadata||{}),accountId:cfAccount,r2Bucket:cfBucket||old.metadata?.r2Bucket||'',r2PublicUrl:cfPublic||old.metadata?.r2PublicUrl||'',r2Endpoint:cfEndpoint||old.metadata?.r2Endpoint||`https://${cfAccount}.r2.cloudflarestorage.com`})
       imported.push('Cloudflare')
     }else skipped.push('Cloudflare')
   }

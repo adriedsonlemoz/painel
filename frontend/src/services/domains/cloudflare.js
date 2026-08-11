@@ -9,6 +9,78 @@ export const cloudflareService = {
     return api('/admin/cloudflare/status')
   },
 
+
+  /** Descobre quais superfícies da conta o token realmente consegue ler */
+  async capabilities() {
+    return api('/admin/cloudflare/capabilities')
+  },
+
+  /** Hub de recursos detectados: Pages, KV, D1, Queues, Vectorize e AI Gateway */
+  async resources() {
+    return api('/admin/cloudflare/resources')
+  },
+
+  async pagesDeployments(project) {
+    return api(`/admin/cloudflare/pages/${encodeURIComponent(project)}/deployments`)
+  },
+  async criarPagesProject(name, productionBranch = 'main') {
+    return api('/admin/cloudflare/pages', {
+      method: 'POST',
+      body: JSON.stringify({ name, production_branch: productionBranch }),
+    })
+  },
+  async deletarPagesProject(project) {
+    return api(`/admin/cloudflare/pages/${encodeURIComponent(project)}`, { method:'DELETE' })
+  },
+
+  async listarKvNamespaces() { return api('/admin/cloudflare/kv/namespaces') },
+  async criarKvNamespace(title) {
+    return api('/admin/cloudflare/kv/namespaces', { method:'POST', body:JSON.stringify({title}) })
+  },
+  async renomearKvNamespace(id, title) {
+    return api(`/admin/cloudflare/kv/namespaces/${encodeURIComponent(id)}`, { method:'PUT', body:JSON.stringify({title}) })
+  },
+  async deletarKvNamespace(id) {
+    return api(`/admin/cloudflare/kv/namespaces/${encodeURIComponent(id)}`, { method:'DELETE' })
+  },
+
+  async listarD1() { return api('/admin/cloudflare/d1/databases') },
+  async criarD1(name) {
+    return api('/admin/cloudflare/d1/databases', { method:'POST', body:JSON.stringify({name}) })
+  },
+  async deletarD1(id) {
+    return api(`/admin/cloudflare/d1/databases/${encodeURIComponent(id)}`, { method:'DELETE' })
+  },
+
+  async listarQueues() { return api('/admin/cloudflare/queues') },
+  async criarQueue(queue_name) {
+    return api('/admin/cloudflare/queues', { method:'POST', body:JSON.stringify({queue_name}) })
+  },
+  async deletarQueue(id) {
+    return api(`/admin/cloudflare/queues/${encodeURIComponent(id)}`, { method:'DELETE' })
+  },
+
+  async vectorize() { return api('/admin/cloudflare/vectorize') },
+  async criarVectorize(name, dimensions = 768, metric = 'cosine', description = '') {
+    return api('/admin/cloudflare/vectorize', { method:'POST', body:JSON.stringify({name,dimensions,metric,description}) })
+  },
+  async deletarVectorize(name) {
+    return api(`/admin/cloudflare/vectorize/${encodeURIComponent(name)}`, { method:'DELETE' })
+  },
+  async aiGateway() { return api('/admin/cloudflare/ai-gateway') },
+  async criarAiGateway(id, collect_logs = true) {
+    return api('/admin/cloudflare/ai-gateway', { method:'POST', body:JSON.stringify({id,collect_logs}) })
+  },
+  async deletarAiGateway(id) {
+    return api(`/admin/cloudflare/ai-gateway/${encodeURIComponent(id)}`, { method:'DELETE' })
+  },
+
+  async definirBucketPadrao(bucket) {
+    return api('/admin/cloudflare/r2/default-bucket', {
+      method:'POST', body:JSON.stringify({bucket}),
+    })
+  },
+
   /** Lista todas as zonas da conta */
   async listarZonas(page = 1, limit = 20, q = '') {
     const p = new URLSearchParams({ page: String(page), limit: String(limit) })

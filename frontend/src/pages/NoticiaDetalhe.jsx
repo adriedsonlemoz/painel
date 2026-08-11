@@ -145,7 +145,7 @@ function renderConteudo(texto) {
   }
 
   return (
-    <div className="text-gray-700 leading-relaxed space-y-4 text-base sm:text-lg font-normal">
+    <div className="text-gray-700 leading-relaxed space-y-4 text-sm sm:text-base font-normal">
       {texto.split('\n').map((p, i) =>
         p.trim() ? <p key={i}>{p}</p> : <br key={i}/>
       )}
@@ -211,12 +211,12 @@ export default function NoticiaDetalhe() {
       )}
 
       {/* Título — menor e mais denso */}
-      <h1 className="font-display font-bold text-3xl sm:text-5xl text-gray-950 leading-[1.08] tracking-tight mb-4">
+      <h1 className="font-display font-bold text-2xl sm:text-3xl text-gray-950 leading-[1.08] tracking-tight mb-4">
         {noticia.titulo}
       </h1>
 
       {noticia.resumo && (
-        <p className="font-grotesk text-lg sm:text-xl text-gray-500 leading-relaxed mb-5">{noticia.resumo}</p>
+        <p className="font-grotesk text-base sm:text-lg text-gray-500 leading-relaxed mb-5">{noticia.resumo}</p>
       )}
 
       {/* ── Barra de meta compacta — uma linha só ── */}

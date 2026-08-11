@@ -29,6 +29,7 @@ export default function AbaMongoDB() {
   const [novoIndice, setNovoIndice] = useState({ campo: '', valor: 1, unique: false })
   const [criandoIndice,   setCriandoIndice]   = useState(false)
   const [removendoIndice, setRemovendoIndice] = useState(null)
+  const [indicesAberto, setIndicesAberto] = useState(false)
 
   useEffect(() => {
     Promise.all([infraestruturaService.mongoStatus(), infraestruturaService.mongoColecoes()])
@@ -128,7 +129,7 @@ export default function AbaMongoDB() {
         </PageCard>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 14, alignItems: 'start' }}>
+      <div className="mongo-explorer-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,220px) minmax(0,1fr)', gap: 14, alignItems: 'start' }}>
         {/* Lista de coleções */}
         <PageCard style={{ padding: '14px 10px' }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '.05em', margin: '0 0 10px 6px' }}>
@@ -182,12 +183,12 @@ export default function AbaMongoDB() {
                   </div>
                 )}
 
-              {/* Gerenciar índices */}
-              <details style={{ marginBottom: 16 }}>
-                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: C.text, padding: '6px 0', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {Ico.index} Gerenciar índices
-                </summary>
-                <div style={{ marginTop: 12, background: C.surf2, borderRadius: 8, padding: '10px 12px' }}>
+              {/* Gerenciar índices — modal para não empurrar a coleção para baixo */}
+              <div style={{ marginBottom: 16 }}>
+                <DSBtn variant="secondary" onClick={() => setIndicesAberto(true)}>{Ico.index} Gerenciar índices</DSBtn>
+              </div>
+              <DSModal open={indicesAberto} onClose={() => setIndicesAberto(false)} title={`Índices — ${colSel}`} size="lg">
+                <div style={{ background: C.surf2, borderRadius: 8, padding: '10px 12px' }}>
                   {carregandoIndices ? <Spin size={16} /> : indices.length === 0 ? (
                     <p style={{ fontSize: 12, color: C.muted }}>Nenhum índice além do _id_</p>
                   ) : (
@@ -239,7 +240,7 @@ export default function AbaMongoDB() {
                     </div>
                   </div>
                 </div>
-              </details>
+              </DSModal>
 
               {/* Tabela de documentos */}
               {loadDocs ? (
@@ -247,7 +248,7 @@ export default function AbaMongoDB() {
               ) : docs ? (
                 <>
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <table className="mongo-doc-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr style={{ borderBottom: `1px solid ${C.border}` }}>
                           <th style={{ padding: '7px 10px', textAlign: 'left', color: C.muted, fontWeight: 600 }}>_id</th>

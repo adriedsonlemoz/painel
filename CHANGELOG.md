@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.0.86
+- Revisão visual ampla do painel e do portal público, sem alterar as regras de negócio: tipografia compactada, grids responsivos e contenção de largura para telas pequenas.
+- Design System administrativo passa a usar uma escala tipográfica menor e o modal padrão se adapta ao celular como bottom-sheet/tela compacta, preservando os temas existentes.
+- GitHub e Integrações usam grade 3 colunas no desktop, 2 no tablet e 1 no celular; detalhes longos deixam de aumentar a lista verticalmente.
+- Projetos, Erros, Eventos, Ônibus, Fontes e MongoDB movem detalhes/edição/gerenciamento para modais ou drawers, mantendo as mesmas ações e serviços.
+- MongoDB e Newsletter ganham apresentação em cards no celular para evitar tabelas vazando horizontalmente.
+- Cloudflare, Sistema/Infraestrutura, Monitor, Usuários, Segurança e Assistente de IA recebem ajustes de tamanho e responsividade.
+- Portal público reduz títulos exagerados, reorganiza tópicos/categorias e remove dependência de rolagem horizontal nas faixas principais.
+- Fontes visuais foram alinhadas às famílias realmente carregadas pelo projeto: Nunito, Geist e Fraunces.
+- Esta versão completa também inclui integralmente os ajustes da 1.0.85.
+
+## 1.0.85
+- Integrações → Cloudflare passa a apresentar duas abas visuais: `Cloudflare API` e `R2 Storage`, sem remover ou substituir os campos REST existentes.
+- A aba `R2 Storage` concentra Access Key ID, Secret Access Key, endpoint, bucket e preferências R2 usando o mesmo cofre seguro já existente.
+- Credenciais R2 permanecem separadas do Cloudflare API Token REST e campos sensíveis mantêm controle Mostrar/Ocultar.
+- Exportação/backup `.env` preserva `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`, `CF_R2_BUCKET`, `CF_R2_PUBLIC_URL` e `CF_R2_ENDPOINT`.
+- Backup JSON de Integrações registra a versão de origem do pacote para facilitar restauração e diagnóstico.
+
+## 1.0.84
+- Cloudflare em Integrações e APIs foi redesenhada separando corretamente API Token REST de Access Key ID + Secret Access Key do R2/S3.
+- Endpoint R2 S3 é calculado automaticamente pelo Account ID e passa a ser incluído em exportação/importação de configurações.
+- Teste Cloudflare valida token/conta pela REST API e, separadamente, testa de verdade as credenciais R2 usando ListBuckets via S3.
+- Suporte a Account API Token: verificação tenta primeiro /accounts/{account_id}/tokens/verify e mantém fallback para token de usuário.
+- Central Cloudflare ganhou autodetecção de capacidades reais para Zonas/DNS, R2, Workers, Pages, Workers KV, D1, Queues, Vectorize e AI Gateway.
+- Nova aba Recursos permite listar e criar Pages, KV, D1, Queues, Vectorize e AI Gateway conforme a permissão real do token.
+- Pages mostra deployments; KV, D1, Queues, Vectorize, AI Gateway e Pages possuem ações tipadas de exclusão com confirmação.
+- R2 permite escolher um bucket existente como bucket padrão do AL Sistemas diretamente na lista, sem digitar o nome em Integrações.
+- Visão Geral Cloudflare mostra endpoint S3, chaves mascaradas, validação S3 e quantidade de buckets acessíveis.
+- O painel não tenta administrar API Tokens/identidade da conta, evitando revogar a própria credencial administrativa por engano.
+
+# Changelog
+
+## 1.0.83
+- Render/Docker/GitHub Actions deixam de usar npm ci porque o pacote distribuído não contém package-lock; passam a usar npm install sem audit/fund.
+- Workflow Android passa a usar VITE_API_URL e CAPACITOR_WEB_URL configuráveis por GitHub Variables, sem editar capacitor.config.ts com sed.
+- Central de Plataformas redesenhada como central de produção Vercel → Render → MongoDB.
+- Render: leitura mascarada de variáveis, atualização de variável, deploy, deploy sem cache, restart, rollback, cancelamento e logs pelo painel.
+- Vercel: leitura mascarada de variáveis e logs de build dos deployments pelo painel.
+- Produção conectável: projeto Vercel e serviço Render passam a definir URLs, diagnóstico e CORS.
+- CORS aprende as origens da Vercel conectada e corrige o bloqueio observado em paineliguanews.vercel.app.
+- Setup usa o MongoDB como autoridade: banco com usuários existentes não reabre o wizard em uma nova instância Render.
+- JWT e chave-mestra do cofre ganham bootstrap persistente selado no MongoDB; MONGO_URI pode ser a única configuração obrigatória do backend após migração.
+- Uploads de mídia usam GridFS por padrão em plataforma gerenciada; Cloudinary permanece opcional.
+- Atualizações em Render/Vercel usam ZIP temporário no navegador → GitHub → deploy, sem staging ou instalação local persistente.
+- Diagnóstico Termux deixa de registrar CHANGELOG/documentação como se fossem logs de erro.
+
+# Changelog
+
 ## 1.0.82
 - Publicação GitHub em Termux/VPS agora prefere Git nativo, enviando o diff compactado em vez de criar um blob HTTP para cada arquivo.
 - Se Git nativo não estiver disponível ou falhar, o publicador alterna automaticamente para a API GitHub existente.

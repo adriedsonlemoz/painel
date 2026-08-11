@@ -37,9 +37,9 @@ export default {
       fontFamily: {
         heading:  ['"Nunito"',         'sans-serif'],
         body:     ['"Nunito"',         'sans-serif'],
-        script:   ['"Lora"',           'Georgia', 'serif'],
+        script:   ['"Fraunces"',       'Georgia', 'serif'],
         display:  ['"Fraunces"',       'Georgia', 'serif'],
-        grotesk:  ['"Space Grotesk"',  'system-ui', 'sans-serif'],
+        grotesk:  ['"Geist"',          'system-ui', 'sans-serif'],
       },
       animation: {
         'fade-in':    'fadeIn 0.5s ease-out both',

@@ -17,7 +17,9 @@
  */
 
 import Noticia           from '../models/Noticia.js'
+import mongoose          from 'mongoose'
 import { cloudinary }    from '../config/index.js'
+import { gridfsMediaBucket } from '../middleware/upload.js'
 import { viewJaContabilizada } from '../utils/cache.js'
 import {
   popular,
@@ -209,21 +211,31 @@ export async function mudarStatus(req, res, next) {
   } catch (err) { next(err) }
 }
 
+async function removerMidiaPersistida(publicId) {
+  if(!publicId)return
+  if(String(publicId).startsWith('gridfs:')) {
+    const id=String(publicId).slice(7)
+    if(mongoose.isValidObjectId(id)) await gridfsMediaBucket().delete(new mongoose.Types.ObjectId(id)).catch(()=>{})
+    return
+  }
+  await cloudinary.uploader.destroy(publicId).catch(()=>{})
+}
+
 // ─── DELETE /api/noticias/:id ────────────────────────────────────────────────
-// Remove imagem principal e galeria do Cloudinary antes de deletar o documento.
+// Remove mídia persistente (Cloudinary ou GridFS) antes de deletar o documento.
 export async function excluir(req, res, next) {
   try {
     const noticia = await Noticia.findByIdAndDelete(req.params.id)
     if (!noticia) return res.status(404).json({ erro: 'Notícia não encontrada' })
 
     if (noticia.imagem_public_id) {
-      await cloudinary.uploader.destroy(noticia.imagem_public_id).catch(() => {})
+      await removerMidiaPersistida(noticia.imagem_public_id)
     }
     if (noticia.galeria?.length) {
       await Promise.all(
         noticia.galeria
           .filter(img => img.public_id)
-          .map(img => cloudinary.uploader.destroy(img.public_id).catch(() => {}))
+          .map(img => removerMidiaPersistida(img.public_id))
       )
     }
 
@@ -250,11 +262,11 @@ export async function adicionarGaleria(req, res, next) {
 }
 
 // ─── DELETE /api/noticias/:id/galeria/:publicId ──────────────────────────────
-// #18 — Remove uma imagem da galeria pelo public_id do Cloudinary.
+// #18 — Remove uma imagem da galeria pelo identificador do storage.
 export async function removerGaleria(req, res, next) {
   try {
     const publicId = decodeURIComponent(req.params.publicId)
-    await cloudinary.uploader.destroy(publicId).catch(() => {})
+    await removerMidiaPersistida(publicId)
     const noticia = await Noticia.findByIdAndUpdate(
       req.params.id,
       { $pull: { galeria: { public_id: publicId } } },

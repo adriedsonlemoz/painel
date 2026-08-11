@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertTriangle, ArrowLeft, Bug, Copy, Home, RefreshCw, ServerCrash, WifiOff } from 'lucide-react'
 
 const VARIANTS = {
@@ -43,6 +44,7 @@ export default function AppErrorScreen({
 }) {
   const data = VARIANTS[variant] || VARIANTS.render
   const Icon = data.Icon
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   return (
     <main className="app-error-page">
@@ -94,10 +96,17 @@ export default function AppErrorScreen({
         </div>
 
         {details && (
-          <details className="app-error-details">
-            <summary>Detalhes técnicos</summary>
-            <div className="app-error-details__content">{details}</div>
-          </details>
+          <>
+            <button className="app-error-details-trigger" onClick={() => setDetailsOpen(true)}>Detalhes técnicos</button>
+            {detailsOpen && (
+              <div className="app-error-modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setDetailsOpen(false) }}>
+                <section className="app-error-modal" role="dialog" aria-modal="true" aria-label="Detalhes técnicos">
+                  <header><strong>Detalhes técnicos</strong><button onClick={() => setDetailsOpen(false)} aria-label="Fechar">×</button></header>
+                  <div className="app-error-details__content">{details}</div>
+                </section>
+              </div>
+            )}
+          </>
         )}
 
         <p className="app-error-footnote">Se o problema continuar, copie o diagnóstico e consulte a área de erros do painel.</p>

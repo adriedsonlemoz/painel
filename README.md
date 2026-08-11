@@ -97,69 +97,94 @@ npm run dev            # http://localhost:5173
 
 ---
 
-## ☁️ Deploy em produção
 
-### Backend — Render
+## Central Cloudflare inteligente (1.0.84)
 
-Use o `render.yaml` incluído na raiz do repositório:
+A integração Cloudflare usa duas superfícies separadas:
 
-1. No Render: **New → Blueprint** → conecte o repositório
-2. Clique em **Apply** — todas as variáveis já estão preenchidas
+- **API Token + Account ID** para a REST API da conta.
+- **R2 Access Key ID + Secret Access Key** para o endpoint S3 compatível do R2.
 
-Ou configure manualmente no painel **Environment**:
+O endpoint S3 é derivado automaticamente como `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
-| Variável                | Valor                                      |
-|-------------------------|--------------------------------------------|
-| `NODE_ENV`              | `production`                               |
-| `FRONTEND_URL`          | `https://alsistemas.vercel.app`            |
-| `MONGO_URI`             | string de conexão do MongoDB Atlas         |
-| `JWT_SECRET`            | chave secreta longa (mín. 64 caracteres)   |
-| `CLOUDINARY_CLOUD_NAME` | cloud name do Cloudinary                   |
-| `CLOUDINARY_API_KEY`    | API key do Cloudinary                      |
-| `CLOUDINARY_API_SECRET` | API secret do Cloudinary                   |
-| `GROQ_API_KEY`          | chave da API Groq                          |
-| `GITHUB_TOKEN`          | Personal Access Token do GitHub            |
+Em **Admin → Cloudflare**, a aba **Recursos** consulta a API real e identifica quais produtos o token consegue acessar. O painel possui módulos para Zonas/DNS, R2, Workers, Pages, Workers KV, D1, Queues, Vectorize e AI Gateway. Operações de escrita só são confirmadas pela própria Cloudflare quando executadas.
 
-### Frontend — Vercel
+O bucket usado pelo AL Sistemas pode ser selecionado em **Cloudflare → R2 Storage → Usar no AL**, evitando copiar nomes manualmente entre telas.
 
-| Variável       | Valor                                       |
-|----------------|---------------------------------------------|
-| `VITE_API_URL` | `https://alsistemas.onrender.com/api`       |
+A Central não administra a criação/revogação de API Tokens da própria conta. Essa exclusão deliberada reduz o risco de uma credencial administrativa revogar a si mesma ou remover acesso crítico.
 
-### APK Android
+## ☁️ Produção principal — Vercel + Render + MongoDB
 
-O APK debug é gerado automaticamente via GitHub Actions a cada push na `main`.  
-Consulte o [CAPACITOR.md](./CAPACITOR.md) para build manual.
+A partir da 1.0.83, o fluxo principal do AL Sistemas é:
 
----
+```text
+Vercel (frontend) → Render (backend/API) → MongoDB Atlas (dados + GridFS)
+```
 
-## ⚠️ Plano gratuito do Render
+### Configuração externa mínima
 
-O serviço "adormece" após 15 minutos sem uso — a primeira requisição pode levar 30–60 s.  
-Use o [UptimeRobot](https://uptimerobot.com) para pingar `/api/health` a cada 14 minutos e manter sempre ativo.
+**Render — backend**
 
-## Cofre interno de integrações
+| Variável | Obrigatória | Uso |
+|---|---:|---|
+| `MONGO_URI` | sim | Bootstrap e conexão com o MongoDB |
+| `MONGO_DB_NAME` | não | Nome do banco; padrão `alsistemas` |
+| `FRONTEND_URL` | não | Fallback de CORS durante uma primeira migração |
+| `MEDIA_STORAGE` | não | `gridfs`, `cloudinary` ou `auto`; em Render o padrão é GridFS |
 
-O painel de Setup pode armazenar Render, Vercel, GitHub, Groq e Anthropic de forma criptografada no MongoDB. Para que as credenciais sobrevivam a trocas de hospedagem, mantenha apenas `MONGO_URI`, `JWT_SECRET` e, preferencialmente, uma `CREDENTIALS_MASTER_KEY` longa e estável no ambiente de inicialização. Valores secretos nunca são devolvidos ao navegador; o painel mostra apenas estado, origem e data da última atualização.
+JWT, chave-mestra do cofre e estado de instalação passam a ter bootstrap persistente no MongoDB. Os segredos de bootstrap são armazenados selados; o servidor usa `MONGO_URI` para reconstruir o estado da instalação.
 
-## Central segura de configurações
+**Vercel — frontend**
 
-O AL Sistemas possui uma central em **Administração → Integrações e APIs**. O MongoDB e os segredos essenciais de inicialização são armazenados no cofre local criptografado `.al-sistemas/`; as demais credenciais são criptografadas no MongoDB. Variáveis `.env` continuam disponíveis apenas como fallback temporário de migração.
+| Variável | Obrigatória | Uso |
+|---|---:|---|
+| `VITE_API_URL` | sim | URL pública do Render terminando em `/api` |
 
-### Migração do ambiente antigo
+Exemplo:
 
-1. Faça backup do banco e do ambiente atual.
-2. Execute `npm run migrate:secure-config` no backend.
-3. Reinicie e valide MongoDB, autenticação e integrações no diagnóstico.
-4. Somente depois remova as variáveis antigas da hospedagem.
-5. Revogue e recrie qualquer credencial que já tenha aparecido em arquivos, logs ou commits.
+```env
+VITE_API_URL=https://al-sistemas-api.onrender.com/api
+```
 
-## Primeira configuração sem `.env`
+### Migração do Termux para a nuvem
 
-Ao iniciar sem configuração, o frontend redireciona automaticamente para `/admin/setup`.
-Apenas a URI do MongoDB Atlas e a conta administradora são obrigatórias. O `JWT_SECRET`
-é gerado automaticamente e salvo no cofre criptografado `.al-sistemas/`. Cloudinary,
-GitHub, IA e demais integrações podem ser configurados posteriormente no painel.
+Antes de abandonar definitivamente o ambiente antigo, rode a versão 1.0.83 **uma vez** com o MongoDB atual conectado. Esse boot registra no MongoDB o bootstrap criptográfico já usado pelas credenciais salvas em **Integrações e APIs**.
+
+Depois:
+
+1. publique a 1.0.83 no GitHub;
+2. deixe Render e Vercel criarem as novas releases;
+3. abra **Admin → Central de Plataformas**;
+4. selecione o projeto Vercel e o serviço Render que formam a produção;
+5. use **Sincronizar URLs** e valide o diagnóstico.
+
+Se essa etapa de migração for pulada, os usuários/notícias continuam no MongoDB, mas credenciais antigas criptografadas pela instalação anterior podem precisar ser cadastradas novamente.
+
+### Setup e administrador
+
+O MongoDB é a autoridade da instalação. Se o banco conectado já possui usuários, uma nova instância Render reconhece a instalação existente e **não abre novamente o Setup**. O wizard só aparece quando o banco realmente ainda não possui uma instalação administrativa.
+
+### Integrações
+
+Render, Vercel, GitHub, Gemini, OpenRouter, Cloudinary e demais integrações continuam centralizadas em **Admin → Integrações e APIs**. As telas consumidoras leem essa configuração; variáveis de ambiente são apenas bootstrap/fallback.
+
+### Mídia e armazenamento
+
+Em Render/Vercel, novas mídias do portal usam **MongoDB GridFS** por padrão, evitando depender do disco temporário da instância. Cloudinary continua suportado como opção quando configurado. URLs antigas do Cloudinary continuam válidas.
+
+### Atualizar o portal
+
+Em produção, **Atualizações** não substitui arquivos dentro da instância Render/Vercel:
+
+```text
+Enviar ZIP completo
+→ validar
+→ publicar no GitHub
+→ Render/Vercel detectam o commit
+→ novas releases são construídas
+```
+
+No VPS, o atualizador local com staging/snapshot/rollback continua disponível.
 
 ### MongoDB: Atlas ou VPS
 
@@ -167,8 +192,11 @@ O AL Sistemas 1.0.3 aceita MongoDB Atlas (`mongodb+srv://`) e MongoDB Community/
 
 
 
-### Persistência do setup (1.0.5)
-O wizard não gera um arquivo `.env`. As credenciais de bootstrap são armazenadas criptografadas em `backend/.al-sistemas/bootstrap.vault.json`, protegido por `backend/.al-sistemas/master.key` (ou por `CREDENTIALS_MASTER_KEY` quando fornecida pelo ambiente). O estado `INSTALL_COMPLETED` é persistido no mesmo cofre para que uma reconexão momentânea do MongoDB não reabra o instalador. Variáveis de ambiente continuam suportadas para configuração de infraestrutura/deploy.
+### Persistência do Setup
+
+Em Termux/VPS, o cofre local continua disponível em `~/.al-sistemas`. Em Render/Vercel, a 1.0.83 usa o MongoDB como autoridade da instalação: o estado do Setup e o material criptográfico necessário são persistidos de forma selada no banco.
+
+Isso permite que uma nova instância Render reconheça o mesmo administrador e as mesmas Integrações sem depender do filesystem da instância.
 
 ### Atualizações do próprio sistema
 
@@ -187,35 +215,24 @@ Restrinja o token aos repositórios necessários e conceda **Contents: Read and 
 O AL Sistemas valida o token, identifica a conta e lista os repositórios permitidos. O repositório padrão é opcional.
 
 
-### Atualizações: servidor local ou GitHub/Vercel
+### Atualizações: VPS ou produção gerenciada
 
-Em **Admin → Desenvolvimento → Atualizações**, um pacote `alsistemas-X.Y.Z.zip` pode seguir dois destinos:
+Em **Admin → Desenvolvimento → Atualizações**, um pacote completo pode seguir dois fluxos:
 
-- **Instalar neste servidor**: fluxo tradicional para Termux/VPS, com snapshot, dependências, migrações, reinício e health check.
-- **GitHub / Vercel**: usa a integração GitHub configurada em **Admin → Integrações e APIs → GitHub**, lista os repositórios autorizados e cria um commit na branch escolhida.
+- **Termux/VPS persistente:** simulação, staging, snapshot, instalação e rollback local.
+- **Render/Vercel:** o navegador mantém o ZIP temporariamente, o AL valida o pacote e publica a release no GitHub. As plataformas constroem novas releases a partir do commit.
 
-No modo GitHub existem destinos para projeto completo, somente `frontend/`, frontend na raiz de um repositório dedicado ou somente `backend/`. Arquivos persistentes e credenciais locais não são publicados. Se o repositório estiver conectado a um projeto Vercel, o push pode acionar o deployment conforme a configuração Git da Vercel.
+Em Render/Vercel não existe staging permanente nem tentativa de substituir os arquivos da instância em execução.
 
+### Persistência das credenciais
 
-#### Comportamento em Vercel
+As integrações GitHub, Cloudinary, Gemini, OpenRouter, Render, Vercel e demais APIs ficam criptografadas no MongoDB. A 1.0.83 introduz um bootstrap persistente selado para transportar de forma segura a chave-mestra entre uma instalação antiga e a hospedagem gerenciada.
 
-Quando o backend detecta o runtime Vercel, **Instalar neste servidor** é desativado. O filesystem da Function não é usado como armazenamento permanente de atualização. Ao validar um ZIP, o navegador mantém o arquivo selecionado; ao escolher **GitHub / Vercel**, o pacote é reenviado e processado temporariamente em `/tmp` dentro da mesma requisição. Após o commit no GitHub, os arquivos temporários são removidos.
-
-Em Termux/VPS, o comportamento continua persistente: staging, snapshots, histórico local, instalação e rollback permanecem disponíveis.
-
-
-### Persistência das credenciais e reinstalação
-
-A partir da 1.0.33, em Termux/VPS, o cofre de bootstrap fica por padrão em `~/.al-sistemas`, fora da pasta do projeto. Assim, apagar e reinstalar `~/Painel` não remove automaticamente a URI do MongoDB nem a chave mestra usada para abrir credenciais armazenadas no banco.
-
-As integrações GitHub, Cloudinary, Groq e demais APIs continuam armazenadas criptografadas no MongoDB. A chave de criptografia fica localmente no servidor (ou em `CREDENTIALS_MASTER_KEY` no ambiente). O MongoDB é uma exceção: sua URI precisa existir localmente ou no ambiente, pois ela é necessária antes que o sistema consiga acessar o próprio banco.
-
-O provedor padrão do assistente de IA é **Groq**, com Anthropic como alternativa configurável.
-
+Para uma migração sem perda das integrações, execute a 1.0.83 uma vez no ambiente antigo com o mesmo `MONGO_URI` antes do corte. Depois disso, o backend hospedado precisa apenas da URI do Mongo para recuperar o estado persistente.
 
 ### Ajuda para obter chaves de integrações
 
-A tela **Admin → Integrações e APIs** inclui instruções e atalhos oficiais para MongoDB Atlas, Cloudinary, Groq, Anthropic, OpenAI, Gemini e OpenRouter. Cada integração informa os dados esperados, onde gerar a credencial e como testá-la antes de uso.
+A tela **Admin → Integrações e APIs** inclui instruções e atalhos oficiais para MongoDB Atlas, Cloudinary, GitHub, Render, Vercel, Gemini e OpenRouter. Cada integração informa os dados esperados, onde gerar a credencial e como testá-la antes de uso.
 
 
 ### Monitor independente durante atualização local

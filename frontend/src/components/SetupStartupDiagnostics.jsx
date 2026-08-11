@@ -38,7 +38,7 @@ export default function SetupStartupDiagnostics({
       background: '#ffffff',
       boxShadow: '0 12px 34px rgba(15, 23, 42, .08)',
       color: '#1f2937',
-      fontFamily: "Inter, 'Segoe UI', system-ui, sans-serif",
+      fontFamily: "Geist, 'Segoe UI', system-ui, sans-serif",
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', marginBottom: 12 }}>
         <strong style={{ fontSize: 14 }}>{title}</strong>

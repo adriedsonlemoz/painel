@@ -20,7 +20,7 @@ import { BASE_URL }                       from '../../services/domains/http.js'
 import { T as C, SPACE, RADIUS, FONT }   from '../../themes/tokens'
 import {
   DSPageHeader,
-  DSBtn, DSBadge, DSEmptyState,
+  DSBtn, DSBadge, DSEmptyState, DSModal,
 } from '../../components/admin/ui/DS'
 import AdminIcon         from '../../components/admin/ui/AdminIcon'
 import ProjetoSyncModal  from './ProjetoSyncModal.jsx'
@@ -321,7 +321,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
 
       {/* ── Detalhes expandidos ──────────────────────────── */}
       {expandido && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
+        <DSModal open={expandido} onClose={()=>setExpandido(false)} title={`Detalhes — ${projeto.nome}`} size="md"><div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
           <div style={{ fontSize: FONT.sm, color: C.muted }}>
             <span style={{ color: C.subtle }}>Caminho:</span>{' '}
             {/* ✅ C.surf2 → C.surface2 */}
@@ -362,7 +362,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
               </DSBtn>
             </div>
           )}
-        </div>
+        </div></DSModal>
       )}
     </div>
   )
@@ -1018,7 +1018,7 @@ function CardGridFS({ projeto, onAbrir, onDeletar, onCommit, onUpload, onDownloa
 
       {/* ── Detalhes expandidos ───────────────────────────── */}
       {expandido && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
+        <DSModal open={expandido} onClose={()=>setExpandido(false)} title={`GridFS — ${projeto.nome}`} size="md"><div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
           <div style={{ fontSize: FONT.sm, color: C.muted }}>
             <span style={{ color: C.subtle }}>Armazenamento:</span>{' '}
             <code style={{ fontSize: 10, background: C.surface2, padding: '1px 5px', borderRadius: 3, color: C.text }}>
@@ -1044,7 +1044,7 @@ function CardGridFS({ projeto, onAbrir, onDeletar, onCommit, onUpload, onDownloa
               <AdminIcon name="trash" size={13} />
             </DSBtn>
           </div>
-        </div>
+        </div></DSModal>
       )}
     </div>
   )

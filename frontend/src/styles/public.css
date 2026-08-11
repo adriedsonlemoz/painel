@@ -83,3 +83,55 @@
 .prose-news li           { @apply ml-5 list-disc text-gray-700 leading-relaxed font-body; }
 .prose-news blockquote   { @apply border-l-4 border-brand-300 pl-4 italic text-gray-500 my-4; }
 
+
+
+/* ════════════════════════════════════════════════════════════
+   PORTAL — escala compacta e responsividade 1.0.86
+   ════════════════════════════════════════════════════════════ */
+:root {
+  --portal-font-body: 'Nunito', system-ui, sans-serif;
+  --portal-font-ui: 'Geist', system-ui, sans-serif;
+  --portal-font-display: 'Fraunces', Georgia, serif;
+  --portal-radius-card: 16px;
+  --portal-text: #111827;
+  --portal-muted: #6b7280;
+  --portal-brand: #ff5c00;
+}
+
+.portal-topic-grid {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 0;
+}
+.portal-topic-grid > * { min-width: 0; border-right: 1px solid #f3f4f6; border-bottom: 1px solid #f3f4f6; }
+.portal-category-tabs > * { min-width: 0; }
+
+.prose-news p { font-size: 0.96rem; }
+.prose-news h1 { font-size: 1.65rem; }
+.prose-news h2 { font-size: 1.35rem; }
+.prose-news h3 { font-size: 1.12rem; }
+
+@media (max-width: 640px) {
+  .wrap, .wrap-full { padding-left: 12px; padding-right: 12px; }
+  .section-title { margin-bottom: 14px; gap: 10px; align-items: flex-start; }
+  .section-title-text { font-size: 1.05rem; line-height: 1.3; }
+  .section-title-link { font-size: .76rem; flex-shrink: 0; }
+  .card { border-radius: 14px; }
+  .portal-topic-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .portal-topic-grid > * { border-right: 1px solid #f3f4f6; }
+  .portal-category-tabs { gap: 6px; }
+  .portal-category-tabs button { flex: 1 1 auto; white-space: normal; padding-left: 10px; padding-right: 10px; font-size: .75rem; }
+
+  /* A única faixa que antes exigia gesto horizontal vira grade fluida. */
+  .scroll-x { display: grid; grid-template-columns: 1fr; overflow: visible; gap: 10px; padding-bottom: 0; }
+  .scroll-x > * { width: 100% !important; min-width: 0; }
+
+  .prose-news p { font-size: .92rem; line-height: 1.68; }
+  .prose-news h1 { font-size: 1.45rem; }
+  .prose-news h2 { font-size: 1.22rem; }
+  .prose-news h3 { font-size: 1.05rem; }
+}
+
+@media (max-width: 380px) {
+  .portal-topic-grid { grid-template-columns: 1fr 1fr; }
+  .section-title-text { font-size: 1rem; }
+}

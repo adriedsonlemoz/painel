@@ -166,7 +166,7 @@
 }
 .adm-stat-icon svg { width: 18px; height: 18px; }
 .adm-stat-label { font-size: 11px; font-weight: 600; color: var(--adm-muted); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px; }
-.adm-stat-value { font-size: 28px; font-weight: 700; color: var(--adm-text); letter-spacing: -.5px; line-height: 1.1; }
+.adm-stat-value { font-size: 24px; font-weight: 700; color: var(--adm-text); letter-spacing: -.5px; line-height: 1.1; }
 .adm-stat-delta { font-size: 11px; color: var(--adm-accent); margin-top: 5px; font-weight: 500; }
 .adm-stat-delta.neutral { color: var(--adm-muted); }
 
@@ -329,7 +329,7 @@ select.adm-input option { background: var(--adm-surface2); }
   display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 18px; gap: 16px; flex-wrap: wrap;
 }
-.adm-page-title { font-size: 20px; font-weight: 600; color: var(--adm-text); letter-spacing: -.3px; }
+.adm-page-title { font-size: 18px; font-weight: 600; color: var(--adm-text); letter-spacing: -.3px; }
 .adm-page-sub { font-size: 12px; color: var(--adm-muted); margin-top: 3px; }
 .adm-page-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -498,4 +498,193 @@ select.adm-input { max-width: 100%; }
   font-size: 10px; font-weight: 700; color: var(--adm-accent);
   background: rgba(var(--adm-accent-rgb,107,124,78),.12);
   padding: 2px 7px; border-radius: 10px;
+}
+
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE FOUNDATION — 1.0.86 visual pass
+   Regras de segurança para impedir vazamento horizontal e manter
+   a escala tipográfica compacta em qualquer módulo administrativo.
+   ════════════════════════════════════════════════════════════ */
+.admin-shell *, .admin-shell *::before, .admin-shell *::after { box-sizing: border-box; }
+.admin-shell img, .admin-shell video, .admin-shell canvas, .admin-shell svg { max-width: 100%; }
+.admin-shell p, .admin-shell span, .admin-shell div, .admin-shell label, .admin-shell code, .admin-shell pre { overflow-wrap: anywhere; }
+.admin-shell h1 { font-size: 18px !important; line-height: 1.25; }
+.admin-shell h2 { font-size: 17px !important; line-height: 1.3; }
+.admin-shell h3 { font-size: 15px !important; line-height: 1.35; }
+.admin-shell h4 { font-size: 14px !important; line-height: 1.4; }
+.admin-shell .adm-page-title { font-size: 18px !important; line-height: 1.25; }
+.admin-shell .adm-stat-value { font-size: 24px !important; }
+.admin-shell .adm-card,
+.admin-shell .adm-page,
+.admin-shell .adm-form-col,
+.admin-shell .adm-table-scroll,
+.admin-shell [style*="display: flex"],
+.admin-shell [style*="display:'flex'"],
+.admin-shell [style*="display: 'flex'"] { min-width: 0; }
+.admin-shell input, .admin-shell textarea, .admin-shell select, .admin-shell button { max-width: 100%; }
+.admin-shell pre, .admin-shell code { white-space: pre-wrap; word-break: break-word; }
+.admin-shell .adm-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; border-radius: inherit; }
+.admin-shell .adm-table { width: 100%; }
+
+/* Overlay padrão: modal no desktop, bottom-sheet no celular. */
+.adm-modal-backdrop { overscroll-behavior: contain; }
+.adm-modal { overflow: hidden; }
+.adm-modal-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adm-modal-body > .adm-card:first-child:last-child { margin: 0 !important; }
+
+/* Grids reutilizáveis: 3 desktop, 2 tablet, 1 mobile. */
+.adm-responsive-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+.adm-responsive-grid--wide { grid-template-columns: repeat(2, minmax(0,1fr)); }
+
+@media (max-width: 980px) {
+  .adm-main { max-width: 100%; }
+  .adm-responsive-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .admin-shell [style*="minmax(300px"],
+  .admin-shell [style*="minmax(320px"],
+  .admin-shell [style*="minmax(340px"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .admin-shell [style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+}
+
+@media (max-width: 700px) {
+  .admin-shell { overflow-x: clip; }
+  .adm-main { padding: 12px 12px 24px; }
+  .adm-page-header { margin-bottom: 14px; align-items: stretch; }
+  .adm-page-header > * { min-width: 0; }
+  .adm-page-actions { width: 100%; display: grid; grid-template-columns: minmax(0,1fr); }
+  .adm-page-actions > .adm-btn, .adm-page-actions > button, .adm-page-actions > a { width: 100%; justify-content: center; }
+  .adm-card-section { padding: 12px 13px; }
+  .adm-stats-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+  .adm-stat-card { padding: 11px 12px; }
+  .adm-stat-value { font-size: 21px !important; }
+  .adm-stat-icon { width: 32px; height: 32px; }
+  .adm-table th, .adm-table td { padding: 9px 11px; font-size: 12px; }
+
+  /* Abas deixam de depender de scroll horizontal. */
+  .adm-tabs { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); overflow: visible; }
+  .adm-tab-btn { justify-content: center; white-space: normal; text-align: center; padding: 7px 8px; min-width: 0; }
+
+  /* Todo grid de formulário/card com largura mínima grande empilha no celular. */
+  .adm-responsive-grid, .adm-responsive-grid--wide,
+  .admin-shell [style*="grid-template-columns: 1fr 1fr"],
+  .admin-shell [style*="grid-template-columns:'1fr 1fr'"],
+  .admin-shell [style*="gridTemplateColumns"],
+  .admin-shell [style*="minmax(150px"],
+  .admin-shell [style*="minmax(160px"],
+  .admin-shell [style*="minmax(170px"],
+  .admin-shell [style*="minmax(180px"],
+  .admin-shell [style*="minmax(200px"],
+  .admin-shell [style*="minmax(220px"],
+  .admin-shell [style*="minmax(240px"],
+  .admin-shell [style*="minmax(260px"],
+  .admin-shell [style*="minmax(290px"],
+  .admin-shell [style*="minmax(300px"],
+  .admin-shell [style*="minmax(320px"],
+  .admin-shell [style*="minmax(340px"] { grid-template-columns: minmax(0,1fr) !important; }
+
+  /* Exceções compactas que continuam úteis em 2 colunas. */
+  .adm-stats-grid,
+  .cloudflare-config-tabs,
+  .updates-command-grid,
+  .updates-overview { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+
+  .adm-btn { white-space: normal; text-align: center; justify-content: center; }
+  .adm-toggle-row { gap: 12px; align-items: flex-start; }
+  .adm-upload-zone { padding: 18px 12px; }
+
+  .adm-modal-backdrop {
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+  .adm-modal {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: 92dvh !important;
+    border-radius: 16px 16px 0 0 !important;
+    border-bottom: 0 !important;
+  }
+  .adm-modal-head { padding: 11px 13px !important; }
+  .adm-modal-body { padding: 13px !important; }
+  .adm-modal-footer { padding: 11px 13px calc(11px + env(safe-area-inset-bottom)) !important; display: grid !important; grid-template-columns: 1fr !important; }
+  .adm-modal-footer > * { width: 100%; justify-content: center; }
+  .adm-modal-body .adm-card { border-radius: 10px; }
+
+  /* drawers já existentes tornam-se painéis de tela cheia/baixo sem extrapolar. */
+  .gh-repo-head { padding: 12px 13px !important; }
+  .gh-repo-head > div:last-child { width: 100%; flex-wrap: wrap; }
+  .gh-repo-head > div:last-child > * { flex: 1 1 auto; justify-content: center; }
+  .gh-command-deck { top: 0 !important; padding: 10px 13px !important; }
+  .gh-command-grid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+  .gh-clean-stats { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+  .gh-file-row { grid-template-columns: minmax(0,1fr) !important; }
+
+  /* Formulários inline deixam de comprimir inputs e ações. */
+  .adm-form-inline-row { display: grid !important; grid-template-columns: 1fr !important; }
+  .adm-form-inline-row > * { min-width: 0 !important; width: 100%; }
+  .adm-form-inline-actions { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; }
+
+  /* evita cards com mínimo fixo mais largo que o viewport */
+  .admin-shell [style*="minWidth: 180"], .admin-shell [style*="min-width: 180"],
+  .admin-shell [style*="minWidth: 300"], .admin-shell [style*="min-width: 300"],
+  .admin-shell [style*="minWidth: 340"], .admin-shell [style*="min-width: 340"] { min-width: 0 !important; }
+}
+
+@media (max-width: 390px) {
+  .adm-main { padding-left: 10px; padding-right: 10px; }
+  .adm-stats-grid { grid-template-columns: 1fr 1fr; }
+  .adm-page-title { font-size: 17px !important; }
+  .adm-page-sub { font-size: 11px; line-height: 1.45; }
+  .adm-btn { font-size: 12px; padding-left: 9px; padding-right: 9px; }
+}
+
+/* MongoDB: painel lateral só quando há largura de verdade. */
+@media (max-width: 760px) {
+  .admin-shell .mongo-explorer-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .admin-shell .mongo-explorer-grid > :first-child {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+}
+
+/* Grids específicos que precisam manter densidade sem vazar. */
+@media (max-width: 980px) {
+  .admin-shell .aba-strip,
+  .admin-shell .monitor-stats-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+}
+@media (max-width: 700px) {
+  .admin-shell .newsletter-stats-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; max-width: none !important; }
+  .admin-shell .gh-detail-grid,
+  .admin-shell .cloudflare-two-col { grid-template-columns: minmax(0,1fr) !important; }
+}
+@media (max-width: 390px) {
+  .admin-shell .newsletter-stats-grid { grid-template-columns: minmax(0,1fr) !important; }
+}
+
+/* Tabelas mais importantes viram cards no telefone em vez de criar uma faixa horizontal. */
+@media (max-width: 700px) {
+  .admin-shell .newsletter-table,
+  .admin-shell .newsletter-table tbody,
+  .admin-shell .mongo-doc-table,
+  .admin-shell .mongo-doc-table tbody { display: block; width: 100%; min-width: 0 !important; }
+  .admin-shell .newsletter-table thead,
+  .admin-shell .mongo-doc-table thead { display: none; }
+  .admin-shell .newsletter-table tbody,
+  .admin-shell .mongo-doc-table tbody { display: grid; gap: 9px; padding: 10px; }
+  .admin-shell .newsletter-table tr,
+  .admin-shell .mongo-doc-table tr { display: block; border: 1px solid var(--adm-border) !important; border-radius: 10px; padding: 8px 10px; background: var(--adm-surface2); }
+  .admin-shell .newsletter-table td,
+  .admin-shell .mongo-doc-table td { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; max-width: none !important; width: 100%; padding: 6px 0 !important; border: 0 !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+  .admin-shell .newsletter-table td::before,
+  .admin-shell .mongo-doc-table td::before { flex: 0 0 auto; color: var(--adm-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+  .admin-shell .newsletter-table td:nth-child(1)::before { content: 'Assinante'; }
+  .admin-shell .newsletter-table td:nth-child(2)::before { content: 'Email'; }
+  .admin-shell .newsletter-table td:nth-child(3)::before { content: 'Status'; }
+  .admin-shell .newsletter-table td:nth-child(4)::before { content: 'Inscrito'; }
+  .admin-shell .newsletter-table td:nth-child(5)::before { content: 'Ações'; }
+  .admin-shell .mongo-doc-table td:nth-child(1)::before { content: '_id'; }
+  .admin-shell .mongo-doc-table td:nth-child(2)::before { content: 'Campos'; }
+  .admin-shell .mongo-doc-table td:nth-child(3)::before { content: 'Ações'; }
 }

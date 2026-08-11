@@ -19,7 +19,7 @@
     radial-gradient(circle at 85% 85%, rgba(34,197,94,.06), transparent 34%),
     #f7faf8;
   color: #18221d;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .app-error-card {
   width: min(720px, 100%);
@@ -50,3 +50,13 @@
 .app-error-details pre { margin:0;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word;border-radius:12px;padding:14px;background:#f6f8f7;border:1px solid #dce5df;color:#47584e;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left; }
 .app-error-footnote { margin:22px 0 0;color:#7b8a81;font-size:12px;line-height:1.5; }
 @media (max-width: 560px) { .app-error-page { padding:14px;align-items:stretch; } .app-error-card { margin:0;border-radius:18px;padding:24px 18px; } .app-error-actions { display:grid;grid-template-columns:1fr; } .app-error-btn { width:100%; } }
+
+/* Diagnóstico técnico em overlay: não aumenta a página ao abrir. */
+.app-error-details-trigger { margin-top:24px;border:0;background:transparent;color:#5f7066;font-size:13px;font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px; }
+.app-error-modal-backdrop { position:fixed;inset:0;z-index:1400;background:rgba(15,23,42,.48);display:flex;align-items:center;justify-content:center;padding:18px; }
+.app-error-modal { width:min(720px,100%);max-height:82dvh;overflow:hidden;background:#fff;border:1px solid #dce5df;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.22);display:flex;flex-direction:column; }
+.app-error-modal header { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid #e3ebe6;color:#27352d;font-size:14px; }
+.app-error-modal header button { border:0;background:transparent;font-size:22px;line-height:1;cursor:pointer;color:#5f7066; }
+.app-error-modal .app-error-details__content { margin:0;padding:14px;overflow:auto; }
+.app-error-modal pre { margin:0;max-height:none;overflow:visible;white-space:pre-wrap;word-break:break-word;border-radius:10px;padding:12px;background:#f6f8f7;border:1px solid #dce5df;color:#47584e;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left; }
+@media (max-width:560px) { .app-error-modal-backdrop { align-items:flex-end;padding:0; } .app-error-modal { width:100%;max-height:90dvh;border-radius:16px 16px 0 0;border-bottom:0; } }

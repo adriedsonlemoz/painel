@@ -126,7 +126,7 @@ function StatCard({ label, value, cor, sub, loading }) {
     }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:cor, borderRadius:'10px 10px 0 0' }} />
       <div style={{ fontSize:FONT.xs, color:C.muted, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:SPACE.sm, fontWeight:600 }}>{label}</div>
-      <div style={{ fontSize:26, fontWeight:900, color:C.text, lineHeight:1 }}>
+      <div style={{ fontSize:22, fontWeight:900, color:C.text, lineHeight:1 }}>
         {loading ? <span style={{ opacity:.3 }}>···</span> : (value ?? 0)}
       </div>
       {sub && <div style={{ fontSize:FONT.xs, color:C.muted, marginTop:4 }}>{sub}</div>}

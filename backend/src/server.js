@@ -28,6 +28,8 @@ import path from 'node:path'
 
 import { iniciarConexoes, conectarMongo, configurarCloudinary, verificarCloudinary } from './config/index.js'
 import { ensureBootstrapSecrets } from './utils/localVault.js'
+import { ensurePersistentBootstrap } from './utils/hostedBootstrap.js'
+import { hydratePlatformOrigins, isPlatformOriginAllowed } from './utils/platformOrigins.js'
 import { iniciarRedis } from './utils/redis.js'
 import { swaggerSpec }     from './config/swagger.js'
 import { logger }          from './utils/logger.js'
@@ -96,11 +98,15 @@ ensureBootstrapSecrets()
 
 const app  = express()
 const PORT = process.env.PORT || 3001
+let APP_VERSION = 'desconhecida'
+try {
+  APP_VERSION = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version || APP_VERSION
+} catch {}
 
 app.get('/', (_req, res) => res.json({
   service: 'AL Sistemas API',
   status: 'online',
-  version: '1.0.60',
+  version: APP_VERSION,
   setup: 'Use /api/setup/status para verificar a instalação.',
 }))
 
@@ -139,33 +145,23 @@ app.use(compression({
 }))
 
 // ─── CORS ────────────────────────────────────────────────────
-// FRONTEND_URL aceita lista separada por vírgula para cobrir múltiplos domínios.
-// Ex.: FRONTEND_URL=https://alsistemas.vercel.app
-const allowedOrigins = new Set([
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:4173',
-  'http://127.0.0.1:4173',
-  ...(process.env.FRONTEND_URL || '')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean),
-])
-
+// Produção não depende mais exclusivamente de FRONTEND_URL. Após conectar o
+// Mongo, as origens Vercel cadastradas em Plataformas/Integrações são hidratadas
+// em memória e passam a ser aceitas automaticamente.
 app.use(cors({
   origin: (origin, callback) => {
-    // Sem origin: Postman, curl ou testes — permitido
     if (!origin) return callback(null, true)
-    if (allowedOrigins.has(origin)) return callback(null, true)
-    // Opcional para Preview Deployments da Vercel. Mantém desativado por padrão
-    // porque cookies administrativos não devem aceitar origens curingas sem intenção.
-    if (process.env.ALLOW_VERCEL_PREVIEWS === 'true') {
-      try {
-        const host = new URL(origin).hostname
-        if (host.endsWith('.vercel.app')) return callback(null, true)
-      } catch {}
-    }
-    callback(new Error(`CORS: origem não permitida — ${origin}`))
+    if (isPlatformOriginAllowed(origin)) return callback(null, true)
+
+    // Primeira requisição após um cold start pode chegar antes da hidratação
+    // das origens. Faz uma única tentativa de sincronizar a conta Vercel e
+    // decide novamente, sem liberar curingas.
+    hydratePlatformOrigins({remote:true})
+      .then(() => callback(
+        isPlatformOriginAllowed(origin) ? null : new Error(`CORS: origem não permitida — ${origin}`),
+        isPlatformOriginAllowed(origin)
+      ))
+      .catch(() => callback(new Error(`CORS: origem não permitida — ${origin}`)))
   },
   credentials: true,
 }))
@@ -322,6 +318,10 @@ async function iniciar() {
     if (encerrando || mongoose.connection.readyState === 1) return
     try {
       await conectarMongo()
+      // Mongo é a âncora da instalação em Render/Vercel: restaura JWT/chave
+      // de credenciais e reconhece automaticamente uma instalação existente.
+      await ensurePersistentBootstrap().catch(err => logger.warn({err:err.message}, 'Falha ao sincronizar bootstrap persistente'))
+      await hydratePlatformOrigins({remote:true}).catch(err => logger.warn({err:err.message}, 'Falha ao hidratar origens das plataformas'))
       await importarErrosAtualizadorSpool({limit:200}).catch(err => logger.warn({err:err.message}, 'Falha ao importar erros de workers'))
       if (!rssIniciado) {
         iniciarRssJob(process.env.RSS_CRON || '0 * * * *')

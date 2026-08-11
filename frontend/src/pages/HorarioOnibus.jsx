@@ -95,7 +95,7 @@ function ProximoOnibusCard({ linha, agora }) {
         <div className="flex-1 min-w-0">
           <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Próxima partida</p>
           <div className="flex items-baseline gap-2 mt-1 flex-wrap">
-            <span className="font-black text-3xl leading-none" style={{ color: cor }}>{proximo.hora}</span>
+            <span className="font-black text-2xl leading-none" style={{ color: cor }}>{proximo.hora}</span>
             <span className="text-xs font-extrabold px-2.5 py-1 rounded-full text-white" style={{ background: cor }}>{quando}</span>
           </div>
           {proximo.observacao && <p className="text-xs text-gray-500 mt-2 flex gap-1.5"><AlertCircle size={13}/>{proximo.observacao}</p>}

@@ -75,11 +75,11 @@ export default function AdminNewsletter() {
       </div>
 
       {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: SPACE.lg, marginBottom: SPACE.xl2, maxWidth: 480 }}>
+      <div className="newsletter-stats-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: SPACE.lg, marginBottom: SPACE.xl2, maxWidth: 480 }}>
         {[{label:'Total',valor:total,color:'var(--adm-text)'},{label:'Ativos',valor:ativos,color:'var(--adm-accent)'},{label:'Inativos',valor:inativos,color:'var(--adm-muted)'}].map(({label,valor,color}) => (
           <div key={label} className="adm-stat-card" style={{ textAlign:'center', padding: '14px 16px' }}>
             <div className="adm-stat-label">{label}</div>
-            <div className="adm-stat-value" style={{ color, fontSize: 22 }}>{valor}</div>
+            <div className="adm-stat-value" style={{ color, fontSize: 20 }}>{valor}</div>
           </div>
         ))}
       </div>
@@ -102,7 +102,7 @@ export default function AdminNewsletter() {
         {loading && <div className="adm-empty" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24" className="adm-spin" style={{margin:'0 auto',opacity:.5}}><path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/></svg></div>}
         {!loading && filtrados.length === 0 && <div className="adm-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><p>Nenhum assinante.</p></div>}
         {!loading && filtrados.length > 0 && (
-          <table className="adm-table" aria-label="Lista de assinantes">
+          <table className="adm-table newsletter-table" aria-label="Lista de assinantes">
             <thead><tr><th>Assinante</th><th>Email</th><th>Status</th><th>Inscrito em</th><th></th></tr></thead>
             <tbody>
               {filtrados.map(a => (

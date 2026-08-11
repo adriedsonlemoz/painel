@@ -50,7 +50,7 @@ GitHub ──push──► Render  → Backend Node.js  (api.seudominio.com)
 | Name | `alsistemas-backend` |
 | **Root Directory** | `backend` |
 | Runtime | Node |
-| Build Command | `npm ci --omit=dev` |
+| Build Command | `npm install --omit=dev --no-audit --no-fund` |
 | Start Command | `node src/server.js` |
 | Plan | Free |
 
@@ -60,27 +60,15 @@ GitHub ──push──► Render  → Backend Node.js  (api.seudominio.com)
 
 ### 3.2 Variáveis de ambiente
 
-Na aba **Environment**, adicione todas estas variáveis:
+Para uma instalação já migrada para a 1.0.83, o único segredo externo obrigatório no Render é:
 
 ```env
-NODE_ENV=production
 MONGO_URI=mongodb+srv://<usuario>:<senha>@cluster0.xxxxx.mongodb.net/al-sistemas?retryWrites=true&w=majority
-JWT_SECRET=<gere com: openssl rand -hex 64>
-JWT_EXPIRES_IN=7d
-CLOUDINARY_CLOUD_NAME=<seu cloud name>
-CLOUDINARY_API_KEY=<sua api key>
-CLOUDINARY_API_SECRET=<sua api secret>
-FRONTEND_URL=https://SEU-PROJETO.vercel.app
-AI_PROVIDER=groq
-GROQ_API_KEY=<sua key em console.groq.com>
-AI_MAX_TOKENS=1000
-GITHUB_TOKEN=<seu Personal Access Token>
-GITHUB_USER=<seu usuário GitHub>
 ```
 
-> **Redis é opcional.** O backend detecta automaticamente a ausência do Redis
-> e usa cache em memória como fallback. Se quiser Redis real (persiste entre
-> restarts), crie um banco gratuito no Upstash e adicione `REDIS_URL`.
+`MONGO_DB_NAME=alsistemas` é opcional. JWT, estado do Setup e chave-mestra das Integrações são reconstruídos pelo bootstrap persistente do MongoDB. Render, Vercel, GitHub, Gemini, OpenRouter, Cloudinary e demais credenciais ficam em **Integrações e APIs**.
+
+Se estiver fazendo o primeiro corte sem ter executado a 1.0.83 no ambiente antigo, `FRONTEND_URL` pode ser usado temporariamente como fallback de CORS.
 
 ### 3.3 Health check e auto-deploy
 
@@ -104,7 +92,7 @@ GITHUB_USER=<seu usuário GitHub>
 | Framework Preset | Vite |
 | Build Command | `npm run build` |
 | Output Directory | `dist` |
-| Install Command | `npm ci` |
+| Install Command | `npm install --no-audit --no-fund` |
 
 ### 4.2 Variáveis de ambiente
 
@@ -114,7 +102,7 @@ Em **Settings → Environment Variables**:
 VITE_API_URL=https://alsistemas-backend.onrender.com/api
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
-VITE_APP_VERSION=1.0.45
+VITE_APP_VERSION=1.0.83
 VITE_APP_ENV=production
 VITE_MODULE_PORTAL=true
 VITE_MODULE_GITHUB=true
@@ -136,34 +124,28 @@ após recarregar a página.
 
 ## 5. Conectar backend ↔ frontend (CORS)
 
-Após saber a URL do Vercel, atualize no Render:
-```
-FRONTEND_URL=https://SEU-PROJETO.vercel.app
-```
-O backend usa essa variável para liberar o CORS. Sem isso, o frontend
-receberá erro de bloqueio nas requisições.
+Na 1.0.83, abra **Admin → Central de Plataformas → Conectar produção** e selecione:
 
-Para testar Preview Deployments da Vercel em URLs `*.vercel.app`, você pode definir `ALLOW_VERCEL_PREVIEWS=true` no Render. Mantenha `false` em produção se não precisar dos previews administrativos.
+- o projeto Vercel do frontend;
+- o serviço Render do backend;
+- a URL pública do portal.
 
----
+O backend passa a sincronizar as origens da conta Vercel conectada. `FRONTEND_URL` continua aceito apenas como fallback para a primeira migração ou para uma origem externa que ainda não esteja cadastrada.
 
-## 6. Primeiro acesso — criar o usuário admin
-
-Após o backend estar no ar, crie o admin via seed:
-
-**Pelo Shell do Render** (aba Shell no serviço):
-```bash
-ADMIN_EMAIL=admin@seudominio.com ADMIN_SENHA=SuaSenhaForte123 node seed.js
-```
-
-Ou adicione as variáveis no dashboard e rode:
-```bash
-node seed.js
-```
-
-Depois acesse `/login` no frontend e entre com as credenciais criadas.
+`ALLOW_VERCEL_PREVIEWS=true` continua opcional quando você deseja permitir previews `*.vercel.app`.
 
 ---
+
+## 6. Setup e administrador
+
+Se `MONGO_URI` aponta para um banco **já usado pelo AL Sistemas**, os usuários existentes são detectados automaticamente e o Setup não é reaberto.
+
+Se o banco estiver vazio, abra o frontend e conclua `/admin/setup`; o primeiro administrador será criado pelo wizard.
+
+### Migração da instalação existente
+
+Antes do corte definitivo Termux → Render/Vercel, execute a 1.0.83 uma vez no ambiente antigo com o mesmo `MONGO_URI`. Esse boot migra o bootstrap criptográfico para o MongoDB de forma selada. Depois publique a mesma versão no GitHub.
+
 
 ## 7. Migrations do banco (se necessário)
 
@@ -202,16 +184,14 @@ npm run migrate:status   # verifica quais foram aplicadas
 **Render:** Settings → Custom Domains → Add Custom Domain
 
 Ambos emitem certificado TLS (HTTPS) automaticamente via Let's Encrypt.
-Após configurar domínio no Vercel, atualize `FRONTEND_URL` no Render com o novo domínio.
+Após configurar um novo domínio no Vercel, use **Central de Plataformas → Sincronizar URLs**.
 
 ---
 
 ## 10. Checklist antes de ir a produção
 
-- [ ] `JWT_SECRET` gerado com `openssl rand -hex 64` (mínimo 16 chars, validado pelo Zod)
-- [ ] `ADMIN_SENHA` é uma senha forte e única
 - [ ] Nenhum `.env` real está commitado no repositório (verificar com `git status`)
-- [ ] `FRONTEND_URL` no Render aponta para a URL real do Vercel
+- [ ] Projeto Vercel e serviço Render conectados em **Central de Plataformas**
 - [ ] `VITE_API_URL` no Vercel aponta para a URL real do Render + `/api`
 - [ ] MongoDB Network Access configurado (0.0.0.0/0 ou IPs fixos do Render)
 - [ ] Auto-Deploy habilitado no Render e no Vercel

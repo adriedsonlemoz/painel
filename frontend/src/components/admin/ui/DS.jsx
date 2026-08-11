@@ -16,7 +16,8 @@
  *   Tabela:      DSTableHeader, DSTable
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { T, SPACE, RADIUS, FONT, SHADOW, badgeStyle, alertBoxStyle, cardStyle } from '../../../themes/tokens'
 import AdminIcon from './AdminIcon'
 
@@ -436,56 +437,72 @@ export function DSTable({ children, style, minWidth }) {
  * </DSModal>
  */
 export function DSModal({ open, onClose, title, children, footer, size = 'md' }) {
-  if (!open) return null
-
   const widths = { sm: 400, md: 520, lg: 700, xl: 900 }
   const maxW = widths[size] || 520
+
+  useEffect(() => {
+    if (!open) return undefined
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (event) => { if (event.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+
+  if (!open || typeof document === 'undefined') return null
 
   function handleOverlayClick(e) {
     if (e.target === e.currentTarget) onClose?.()
   }
 
-  return (
+  const portalTarget = document.querySelector('.admin-shell') || document.body
+
+  return createPortal(
     <div
+      className="adm-modal-backdrop"
       onClick={handleOverlayClick}
+      role="presentation"
       style={{
-        position: 'fixed', inset: 0, zIndex: 500,
+        position: 'fixed', inset: 0, zIndex: 1200,
         background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: SPACE.xl,
       }}
     >
-      <div style={{
+      <section className={`adm-modal adm-modal-${size}`} role="dialog" aria-modal="true" aria-label={title} style={{
         ...cardStyle({ padding: 0, radius: RADIUS.xl }),
         width: '100%', maxWidth: maxW, boxShadow: SHADOW.md,
         display: 'flex', flexDirection: 'column',
-        maxHeight: 'calc(100vh - 80px)',
+        maxHeight: 'calc(100dvh - 48px)', minWidth: 0,
       }}>
         {/* Cabeçalho */}
-        <div style={{
+        <div className="adm-modal-head" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: `${SPACE.lg}px ${SPACE.xl}px`,
           borderBottom: `1px solid ${T.border}`,
-          flexShrink: 0,
+          flexShrink: 0, gap: SPACE.md,
         }}>
-          <span style={{ fontSize: FONT.lg, fontWeight: 700, color: T.text }}>{title}</span>
+          <span className="adm-modal-title" style={{ fontSize: FONT.lg, fontWeight: 700, color: T.text, minWidth: 0 }}>{title}</span>
           <DSBtn variant="ghost" size="icon" onClick={onClose} title="Fechar">
             <AdminIcon name="x" size={16} />
           </DSBtn>
         </div>
 
         {/* Corpo */}
-        <div style={{
+        <div className="adm-modal-body" style={{
           padding: `${SPACE.xl}px`,
-          overflowY: 'auto',
-          flex: 1,
+          overflowY: 'auto', overflowX: 'hidden',
+          flex: 1, minWidth: 0,
         }}>
           {children}
         </div>
 
         {/* Rodapé */}
         {footer && (
-          <div style={{
+          <div className="adm-modal-footer" style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: SPACE.sm,
             padding: `${SPACE.lg}px ${SPACE.xl}px`,
             borderTop: `1px solid ${T.border}`,
@@ -494,8 +511,9 @@ export function DSModal({ open, onClose, title, children, footer, size = 'md' })
             {footer}
           </div>
         )}
-      </div>
-    </div>
+      </section>
+    </div>,
+    portalTarget,
   )
 }
 

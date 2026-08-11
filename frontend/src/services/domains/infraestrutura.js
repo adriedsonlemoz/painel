@@ -56,8 +56,44 @@ export const infraestruturaService = {
   async limparCache()         { return api('/admin/infraestrutura/sistema/limpar-cache', { method: 'POST', body: '{}' }) },
   // ── Plataformas (Render + Vercel) ───────────────────────────
   async plataformasStatus()      { return api('/admin/infraestrutura/plataformas/status') },
+  async plataformasCentral()      { return api('/admin/infraestrutura/plataformas/central') },
+  async salvarProducaoPlataformas(renderServiceId, vercelProjectId, frontendOrigin = '') {
+    return api('/admin/infraestrutura/plataformas/producao', {
+      method:'PUT', body:JSON.stringify({ renderServiceId, vercelProjectId, frontendOrigin }),
+    })
+  },
+  async recarregarOrigensPlataformas() {
+    return api('/admin/infraestrutura/plataformas/recarregar-origens', { method:'POST', body:'{}' })
+  },
   async renderServicos()         { return api('/admin/infraestrutura/plataformas/render/servicos') },
   async renderDeploys(svcId)     { return api(`/admin/infraestrutura/plataformas/render/servicos/${svcId}/deploys`) },
+  async renderVariaveis(svcId)   { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env`) },
+  async renderSalvarVariavel(svcId, key, value) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env/${encodeURIComponent(key)}`, {
+      method:'PUT', body:JSON.stringify({value}),
+    })
+  },
+  async renderDeploy(svcId, { clearCache=false, commitId='' } = {}) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/deploy`, {
+      method:'POST', body:JSON.stringify({clearCache,commitId}),
+    })
+  },
+  async renderRestart(svcId) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/restart`, {
+      method:'POST', body:'{}',
+    })
+  },
+  async renderRollback(svcId, deployId) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/rollback`, {
+      method:'POST', body:JSON.stringify({deployId}),
+    })
+  },
+  async renderCancelarDeploy(svcId, deployId) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/deploys/${encodeURIComponent(deployId)}/cancelar`, {
+      method:'POST', body:'{}',
+    })
+  },
+  async renderLogs(svcId)       { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/logs`) },
   async vercelConfiguracao()      { return api('/admin/infraestrutura/plataformas/vercel/configuracao') },
   async salvarVercelConfiguracao(token, teamId = '') {
     return api('/admin/infraestrutura/plataformas/vercel/configuracao', {
@@ -74,4 +110,6 @@ export const infraestruturaService = {
   },
   async vercelProjetos()         { return api('/admin/infraestrutura/plataformas/vercel/projetos') },
   async vercelDeploys(projId)    { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${projId}/deploys`) },
+  async vercelVariaveis(projId)  { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env`) },
+  async vercelDeployLogs(deployId){ return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/logs`) },
 }

@@ -1,680 +1,431 @@
-/**
- * AbaPlataformas.jsx — Dashboard de status Render + Vercel
- * v2 — melhorias:
- *   • PlataformaItens  : accordion unificado (antes: ServicosRender + ProjetosVercel duplicados)
- *   • DeployItem       : componente único para Render e Vercel
- *   • durStr()         : exibe duração de deploys (campo `duracao` do backend)
- *   • ComponentList    : itens não-operacionais aparecem primeiro
- *   • ManutencaoList   : nova aba "Manutenção" quando há manutenções programadas
- *   • PlatformCard     : chevron aberto/fechado nos sub-abas; aba manutencao dinâmica
- *   • Erros com retry  : botão "Tentar novamente" nas seções autenticadas
- *   • Badge local removido → usa Badge do InfraBase
- */
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
 import { infraestruturaService } from '../../../services/api'
-import { C, Ico, Spin, PageCard, SectionTitle, Btn, Badge } from './InfraBase'
 
-// ── Cores por status ───────────────────────────────────────────
-const COR_INDICADOR = {
-  operational: { bg: '#14532d', txt: '#4ade80' },
-  minor:       { bg: '#713f12', txt: '#fbbf24' },
-  major:       { bg: '#7f1d1d', txt: '#f87171' },
-  critical:    { bg: '#450a0a', txt: '#ef4444' },
+const tone={
+  green:'#16a34a', blue:'#2563eb', amber:'#d97706', red:'#dc2626',
+  purple:'#7c3aed', muted:'var(--adm-muted)', text:'var(--adm-text)',
+  surface:'var(--adm-surface)', surface2:'var(--adm-surface2)',
+  border:'var(--adm-border)', bg:'var(--adm-bg)',
 }
 
-const COR_COMPONENTE = {
-  operational:          '#22c55e',
-  degraded_performance: '#f59e0b',
-  partial_outage:       '#f97316',
-  major_outage:         '#ef4444',
-  under_maintenance:    '#60a5fa',
+const ago=value=>{
+  if(!value)return '—'
+  const raw=typeof value==='number'?value:new Date(value).getTime()
+  const diff=Math.max(0,Date.now()-raw)
+  const m=Math.floor(diff/60000)
+  if(m<1)return 'agora'
+  if(m<60)return `${m} min`
+  const h=Math.floor(m/60)
+  if(h<24)return `${h} h`
+  return `${Math.floor(h/24)} d`
+}
+const duration=seconds=>{
+  if(!seconds)return ''
+  if(seconds<60)return `${seconds}s`
+  return `${Math.floor(seconds/60)}m ${seconds%60}s`
+}
+function stateInfo(value=''){
+  const v=String(value||'').toUpperCase()
+  if(['READY','LIVE','OPERATIONAL','DEPLOYED'].includes(v)||v.endsWith('_LIVE'))return {label:'Online',color:tone.green}
+  if(['BUILDING','QUEUED','BUILD_IN_PROGRESS','UPDATE_IN_PROGRESS','PREPARING'].includes(v)||v.includes('BUILD'))return {label:'Em deploy',color:tone.blue}
+  if(['ERROR','FAILED','MAJOR_OUTAGE','PARTIAL_OUTAGE'].includes(v)||v.includes('FAIL')||v.includes('ERROR'))return {label:'Erro',color:tone.red}
+  if(['CANCELED','CANCELLED','DEACTIVATED','SUSPENDED'].includes(v)||v.includes('CANCEL'))return {label:'Parado',color:'#6b7280'}
+  return {label:value||'Desconhecido',color:'#6b7280'}
 }
 
-const COR_DEPLOY_RENDER = {
-  live:               '#22c55e',
-  build_in_progress:  '#60a5fa',
-  update_in_progress: '#60a5fa',
-  canceled:           '#6b7280',
-  deactivated:        '#6b7280',
-  error:              '#ef4444',
+function StatusPill({value}) {
+  const info=stateInfo(value)
+  return <span className="plat-pill" style={{color:info.color,borderColor:`${info.color}44`,background:`${info.color}0c`}}>● {info.label}</span>
 }
 
-const COR_DEPLOY_VERCEL = {
-  READY:    '#22c55e',
-  ERROR:    '#ef4444',
-  BUILDING: '#60a5fa',
-  CANCELED: '#6b7280',
-  QUEUED:   '#a78bfa',
+function Modal({title,kicker,onClose,children,wide=false}) {
+  return <div className="plat-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose?.()}>
+    <section className={`plat-modal ${wide?'wide':''}`} role="dialog" aria-modal="true">
+      <header className="plat-modal-head"><div><small>{kicker}</small><h2>{title}</h2></div><button onClick={onClose}>×</button></header>
+      {children}
+    </section>
+  </div>
 }
 
-const LABEL_COMPONENTE = {
-  operational:          'Operacional',
-  degraded_performance: 'Degradado',
-  partial_outage:       'Interrupção parcial',
-  major_outage:         'Interrupção grave',
-  under_maintenance:    'Manutenção',
-}
-
-const COR_ESTADO_RENDER = {
-  live:               '#22c55e',
-  suspended:          '#6b7280',
-  build_in_progress:  '#60a5fa',
-  update_in_progress: '#60a5fa',
-  error:              '#ef4444',
-}
-
-const IMPACTO_COR = {
-  none:     C.green,
-  minor:    '#f59e0b',
-  major:    '#f97316',
-  critical: '#ef4444',
-}
-
-// ── Helpers ────────────────────────────────────────────────────
-function ago(dateStr) {
-  if (!dateStr) return '—'
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 1)  return 'agora'
-  if (m < 60) return `${m} min atrás`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h atrás`
-  return `${Math.floor(h / 24)}d atrás`
-}
-
-function durStr(secs) {
-  if (!secs || secs <= 0) return null
-  if (secs < 60) return `${secs}s`
-  const m = Math.floor(secs / 60)
-  const s = secs % 60
-  return s ? `${m}m ${s}s` : `${m}m`
-}
-
-// ── DeployItem — unificado para Render e Vercel ─────────────────
-function DeployItem({ d, plataforma }) {
-  const isRender = plataforma === 'render'
-  const estadoKey = isRender ? d.status : d.estado
-  const corMap    = isRender ? COR_DEPLOY_RENDER : COR_DEPLOY_VERCEL
-  const cor       = corMap[estadoKey] || '#6b7280'
-  const dur       = durStr(d.duracao)
-
-  return (
-    <div style={{
-      padding: '6px 10px', borderRadius: 6, fontSize: 11,
-      background: C.surface, border: `1px solid ${cor}44`,
-      display: 'flex', gap: 8, alignItems: 'flex-start',
-    }}>
-      <span style={{ color: cor, fontWeight: 700, flexShrink: 0 }}>● {estadoKey}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {isRender && d.commit && (
-          <div style={{ color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <code style={{ color: '#60a5fa' }}>{d.commit.hash}</code>{' '}{d.commit.mensagem}
-          </div>
-        )}
-        {!isRender && d.commit && (
-          <div style={{ color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {d.hash && <code style={{ color: '#60a5fa' }}>{d.hash} </code>}
-            {d.commit}
-          </div>
-        )}
-        <div style={{ color: C.muted, display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-          {!isRender && d.ambiente && <span>{d.ambiente}</span>}
-          {!isRender && d.branch   && <span>← {d.branch}</span>}
-          <span>{ago(d.criado)}</span>
-          {dur && <span style={{ color: '#a78bfa' }}>⏱ {dur}</span>}
-        </div>
+function PlatformNode({kind,title,subtitle,status,url,deploy,onDeploys,onConfigure,onVariables,onLogs,onPrimaryAction,primaryActionLabel}) {
+  const isVercel=kind==='vercel'
+  return <article className={`plat-node ${kind}`}>
+    <div className="plat-node-top">
+      <div className="plat-brand">
+        <span className="plat-logo">{isVercel?'▲':'R'}</span>
+        <div><small>{isVercel?'FRONTEND':'BACKEND / API'}</small><h3>{title|| (isVercel?'Vercel não selecionada':'Render não selecionado')}</h3></div>
       </div>
-      {!isRender && d.url && (
-        <a href={d.url} target="_blank" rel="noreferrer"
-          style={{ color: '#60a5fa', flexShrink: 0 }}>{Ico.extLink}</a>
-      )}
+      {status&&<StatusPill value={status}/>}
     </div>
-  )
+    <p>{subtitle}</p>
+    {url&&<a className="plat-url" href={url} target="_blank" rel="noreferrer">{url.replace(/^https?:\/\//,'')} ↗</a>}
+    {deploy&&<div className="plat-deploy">
+      <div><small>ÚLTIMO DEPLOY</small><b>{deploy.commit?.mensagem||deploy.commit||'Deploy de produção'}</b></div>
+      <div className="plat-deploy-meta">
+        <StatusPill value={deploy.status||deploy.estado}/>
+        <span>{ago(deploy.criado)}{deploy.duracao?` · ${duration(deploy.duracao)}`:''}</span>
+      </div>
+    </div>}
+    <div className="plat-node-actions">
+      {onPrimaryAction&&<button className="node-primary" onClick={onPrimaryAction}>{primaryActionLabel}</button>}
+      {url&&<a href={url} target="_blank" rel="noreferrer">{isVercel?'Abrir portal':'Abrir API'}</a>}
+      <button onClick={onDeploys}>Deploys</button>
+      {onLogs&&<button onClick={onLogs}>Logs</button>}
+      {onVariables&&<button onClick={onVariables}>Variáveis</button>}
+      <button onClick={onConfigure}>Configurar</button>
+    </div>
+  </article>
 }
 
-// ── ComponentList — não-operacionais primeiro ──────────────────
-function ComponentList({ componentes = [] }) {
-  const [expandido, setExpandido] = useState(false)
-  const SHOW = 6
-
-  if (!componentes.length)
-    return <p style={{ fontSize: 12, color: C.muted }}>Nenhum componente reportado.</p>
-
-  // Não-operacionais primeiro, depois alfabético
-  const sorted = [...componentes].sort((a, b) => {
-    const aOk = a.ok !== false ? 1 : 0
-    const bOk = b.ok !== false ? 1 : 0
-    return aOk - bOk || a.nome.localeCompare(b.nome)
-  })
-
-  const visíveis = expandido ? sorted : sorted.slice(0, SHOW)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {visíveis.map((c, i) => (
-        <div key={i} style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '5px 8px', borderRadius: 6, background: C.surface,
-          border: `1px solid ${c.ok === false
-            ? (COR_COMPONENTE[c.status] + '55')
-            : C.border}`,
-          fontSize: 12,
-        }}>
-          <span style={{ color: C.text }}>{c.nome}</span>
-          <span style={{ color: COR_COMPONENTE[c.status] || '#6b7280', fontWeight: 600, fontSize: 11 }}>
-            ● {LABEL_COMPONENTE[c.status] || c.status}
-          </span>
-        </div>
-      ))}
-      {componentes.length > SHOW && (
-        <button onClick={() => setExpandido(v => !v)} style={{
-          fontSize: 11, color: C.muted, background: 'none', border: 'none',
-          cursor: 'pointer', textAlign: 'left', padding: '2px 0',
-        }}>
-          {expandido ? '▲ Mostrar menos' : `▼ +${componentes.length - SHOW} componentes`}
-        </button>
-      )}
-    </div>
-  )
+function Problems({items,onAction}) {
+  if(!items?.length)return <div className="plat-clear"><span>✓</span><div><b>Nenhum problema importante detectado</b><p>As conexões principais estão coerentes com a produção selecionada.</p></div></div>
+  return <div className="plat-problems">{items.map(item=>{
+    const color=item.nivel==='critical'||item.nivel==='error'?tone.red:item.nivel==='warning'?tone.amber:tone.blue
+    return <article key={item.id} style={{borderColor:`${color}55`}}>
+      <span className="plat-problem-mark" style={{color}}>!</span>
+      <div><b>{item.titulo}</b><p>{item.descricao}</p></div>
+      <button onClick={()=>onAction(item)}>Resolver / ver</button>
+    </article>
+  })}</div>
 }
 
-// ── IncidentList ───────────────────────────────────────────────
-function IncidentList({ incidentes = [] }) {
-  if (!incidentes.length)
-    return <p style={{ fontSize: 12, color: '#22c55e' }}>✓ Nenhum incidente ativo.</p>
+export default function AbaPlataformas(){
+  const [data,setData]=useState(null)
+  const [publicStatus,setPublicStatus]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [configOpen,setConfigOpen]=useState(false)
+  const [keysOpen,setKeysOpen]=useState(false)
+  const [deployPanel,setDeployPanel]=useState(null)
+  const [envPanel,setEnvPanel]=useState(null)
+  const [logsPanel,setLogsPanel]=useState(null)
+  const [actionConfirm,setActionConfirm]=useState(null)
+  const [actionBusy,setActionBusy]=useState(false)
+  const [saving,setSaving]=useState(false)
+  const [renderId,setRenderId]=useState('')
+  const [vercelId,setVercelId]=useState('')
+  const [origin,setOrigin]=useState('')
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {incidentes.map((inc, i) => (
-        <div key={i} style={{
-          padding: '8px 10px', borderRadius: 8,
-          background: `${IMPACTO_COR[inc.impacto] || '#6b7280'}11`,
-          border:     `1px solid ${IMPACTO_COR[inc.impacto] || '#6b7280'}44`,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <b style={{ fontSize: 12, color: C.text }}>{inc.nome}</b>
-            <Badge color={IMPACTO_COR[inc.impacto] || '#6b7280'}>
-              {inc.impacto?.toUpperCase()}
-            </Badge>
-          </div>
-          {inc.atualizacao && (
-            <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>{inc.atualizacao}</p>
-          )}
-          <p style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-            {inc.status} · {ago(inc.criado)}
-          </p>
-        </div>
-      ))}
-    </div>
-  )
-}
+  const load=useCallback(async(silent=false)=>{
+    if(!silent)setLoading(true)
+    try{
+      const [central,status]=await Promise.all([
+        infraestruturaService.plataformasCentral(),
+        infraestruturaService.plataformasStatus().catch(()=>null),
+      ])
+      setData(central);setPublicStatus(status)
+      setRenderId(central.producao?.renderServiceId||central.render?.selecionado?.id||'')
+      setVercelId(central.producao?.vercelProjectId||central.vercel?.selecionado?.id||'')
+      setOrigin(central.producao?.frontendOrigin||'')
+    }catch(e){toast.error(e.message)}
+    finally{if(!silent)setLoading(false)}
+  },[])
 
-// ── ManutencaoList ─────────────────────────────────────────────
-function ManutencaoList({ manutencoes = [] }) {
-  if (!manutencoes.length)
-    return <p style={{ fontSize: 12, color: C.muted }}>Nenhuma manutenção programada.</p>
+  useEffect(()=>{load()},[load])
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {manutencoes.map((m, i) => (
-        <div key={i} style={{
-          padding: '8px 10px', borderRadius: 8,
-          background: '#1e3a5f22',
-          border:     '1px solid #60a5fa44',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <b style={{ fontSize: 12, color: C.text }}>{m.nome}</b>
-            <Badge color="#60a5fa">{m.estado?.toUpperCase()}</Badge>
-          </div>
-          {m.descricao && (
-            <p style={{ fontSize: 11, color: C.muted, margin: '0 0 4px' }}>{m.descricao}</p>
-          )}
-          {m.inicio && (
-            <p style={{ fontSize: 10, color: C.muted, margin: 0 }}>
-              {new Date(m.inicio).toLocaleString('pt-BR')}
-              {m.fim ? ` → ${new Date(m.fim).toLocaleString('pt-BR')}` : ''}
-            </p>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
+  const selectedVercel=useMemo(()=>data?.vercel?.projetos?.find(x=>x.id===vercelId)||null,[data,vercelId])
+  useEffect(()=>{
+    if(!origin&&selectedVercel?.dominio)setOrigin(`https://${selectedVercel.dominio}`)
+  },[selectedVercel,origin])
 
-// ── PlataformaItens — accordion unificado (Render + Vercel) ────
-function PlataformaItens({ items = [], tipo, onCarregarDeploys }) {
-  const [selecionado, setSelecionado] = useState(null)
-  const [deploys,     setDeploys]     = useState({})
-  const [loadingId,   setLoadingId]   = useState(null)
-
-  async function toggle(id) {
-    if (selecionado === id) { setSelecionado(null); return }
-    if (deploys[id] !== undefined) { setSelecionado(id); return }
-    setLoadingId(id)
-    try {
-      const lista = await onCarregarDeploys(id)
-      setDeploys(prev => ({ ...prev, [id]: lista }))
-      setSelecionado(id)
-    } catch {
-      setDeploys(prev => ({ ...prev, [id]: [] }))
-      setSelecionado(id)
-    } finally { setLoadingId(null) }
+  async function saveProduction(){
+    if(!renderId||!vercelId)return toast.error('Selecione Render e Vercel.')
+    setSaving(true)
+    try{
+      const r=await infraestruturaService.salvarProducaoPlataformas(renderId,vercelId,origin)
+      toast.success(r.mensagem||'Produção conectada.')
+      setConfigOpen(false)
+      await load(true)
+    }catch(e){toast.error(e.message)}
+    finally{setSaving(false)}
   }
 
-  if (!items.length)
-    return <p style={{ fontSize: 13, color: C.muted }}>Nenhum item encontrado.</p>
+  async function refreshOrigins(){
+    try{
+      await infraestruturaService.recarregarOrigensPlataformas()
+      toast.success('Origens da Vercel sincronizadas com o backend.')
+      await load(true)
+    }catch(e){toast.error(e.message)}
+  }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.map(item => {
-        const id     = item.id
-        const isOpen = selecionado === id
-        const estadoCor = tipo === 'render'
-          ? (COR_ESTADO_RENDER[item.estado] || '#6b7280')
-          : C.border
+  async function openVariables(kind){
+    const target=kind==='render'?data?.render?.selecionado:data?.vercel?.selecionado
+    if(!target)return toast.error(`Selecione ${kind==='render'?'um serviço Render':'um projeto Vercel'} primeiro.`)
+    setEnvPanel({kind,title:`Variáveis · ${target.nome}`,loading:true,items:[],key:'',value:''})
+    try{
+      const r=kind==='render'
+        ? await infraestruturaService.renderVariaveis(target.id)
+        : await infraestruturaService.vercelVariaveis(target.id)
+      setEnvPanel(p=>({...p,loading:false,items:r.env||[]}))
+    }catch(e){
+      setEnvPanel(p=>({...p,loading:false,error:e.message}))
+    }
+  }
 
-        return (
-          <div key={id}>
-            <div
-              style={{
-                padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                background: C.surface,
-                border: `1px solid ${tipo === 'render' ? estadoCor + '55' : C.border}`,
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              }}
-              onClick={() => toggle(id)}
-            >
-              <div>
-                <b style={{ fontSize: 13, color: C.text }}>{item.nome}</b>
-                <div style={{ fontSize: 11, color: C.muted }}>
-                  {tipo === 'render' && (
-                    <>{item.tipo}{item.regiao ? ` · ${item.regiao}` : ''}{item.branch ? ` · ${item.branch}` : ''}</>
-                  )}
-                  {tipo === 'vercel' && (
-                    <>{item.framework}{item.git ? ` · ${item.git.tipo}: ${item.git.repositorio}` : ''}</>
-                  )}
-                </div>
-                {(item.url || item.dominio) && (
-                  <div style={{ fontSize: 11, color: '#60a5fa' }}>{item.url || item.dominio}</div>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {tipo === 'render' && item.estado && (
-                  <span style={{ color: estadoCor, fontSize: 11, fontWeight: 700 }}>
-                    ● {item.estado}
-                  </span>
-                )}
-                {loadingId === id
-                  ? <Spin size={12} />
-                  : <span style={{ color: C.muted, fontSize: 10 }}>{isOpen ? '▲' : '▼'}</span>
-                }
-              </div>
-            </div>
+  async function saveRenderVariable({deployAfter=false}={}){
+    const key=String(envPanel?.key||'').trim()
+    const value=String(envPanel?.value||'')
+    const service=data?.render?.selecionado
+    if(!service)return
+    if(!key||!value)return toast.error('Informe nome e valor da variável.')
+    setActionBusy(true)
+    try{
+      const r=await infraestruturaService.renderSalvarVariavel(service.id,key,value)
+      toast.success(r.mensagem||'Variável salva.')
+      const vars=await infraestruturaService.renderVariaveis(service.id)
+      setEnvPanel(p=>({...p,items:vars.env||[],key:'',value:''}))
+      if(deployAfter){
+        const d=await infraestruturaService.renderDeploy(service.id)
+        toast.success(d.mensagem||'Deploy iniciado.')
+        setEnvPanel(null)
+        await load(true)
+      }
+    }catch(e){toast.error(e.message)}
+    finally{setActionBusy(false)}
+  }
 
-            {isOpen && (
-              <div style={{ padding: '8px 4px 2px' }}>
-                <p style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Últimos deploys:</p>
-                {(deploys[id] || []).length === 0
-                  ? <p style={{ fontSize: 12, color: C.muted }}>Nenhum deploy encontrado.</p>
-                  : (deploys[id] || []).map((d, i) => (
-                      <div key={i} style={{ marginBottom: 5 }}>
-                        <DeployItem d={d} plataforma={tipo} />
-                      </div>
-                    ))
-                }
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+  async function openPlatformLogs(kind,deploymentId=''){
+    const target=kind==='render'?data?.render?.selecionado:data?.vercel?.selecionado
+    if(!target)return
+    setLogsPanel({kind,title:`Logs · ${target.nome}`,loading:true,items:[]})
+    try{
+      const r=kind==='render'
+        ? await infraestruturaService.renderLogs(target.id)
+        : await infraestruturaService.vercelDeployLogs(deploymentId)
+      setLogsPanel(p=>({...p,loading:false,items:r.logs||[]}))
+    }catch(e){setLogsPanel(p=>({...p,loading:false,error:e.message}))}
+  }
 
-// ── PlatformCard ───────────────────────────────────────────────
-function PlatformCard({ nome, dados, cor, logoChar }) {
-  const [abaLocal, setAbaLocal] = useState('status')
+  async function executePlatformAction(){
+    const action=actionConfirm
+    if(!action)return
+    const service=data?.render?.selecionado
+    if(!service)return
+    setActionBusy(true)
+    try{
+      let r
+      if(action.type==='deploy')r=await infraestruturaService.renderDeploy(service.id,{clearCache:Boolean(action.clearCache)})
+      if(action.type==='restart')r=await infraestruturaService.renderRestart(service.id)
+      if(action.type==='rollback')r=await infraestruturaService.renderRollback(service.id,action.deployId)
+      if(action.type==='cancel')r=await infraestruturaService.renderCancelarDeploy(service.id,action.deployId)
+      toast.success(r?.mensagem||'Ação enviada à Render.')
+      setActionConfirm(null)
+      setDeployPanel(null)
+      await new Promise(resolve=>setTimeout(resolve,650))
+      await load(true)
+    }catch(e){toast.error(e.message)}
+    finally{setActionBusy(false)}
+  }
 
-  if (!dados) return (
-    <PageCard>
-      <b style={{ fontSize: 15 }}>{logoChar} {nome}</b>
-      <p style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>Não foi possível obter status.</p>
-    </PageCard>
-  )
+  function confirmRenderDeploy(clearCache=false){
+    setActionConfirm({
+      type:'deploy',clearCache,
+      title:clearCache?'Novo deploy limpando cache?':'Iniciar novo deploy?',
+      message:clearCache
+        ? 'A Render descartará o cache de build e reconstruirá o backend a partir do repositório conectado.'
+        : 'A Render criará um novo deploy usando o commit mais recente da branch conectada.',
+      button:clearCache?'Deploy sem cache':'Iniciar deploy',
+    })
+  }
 
-  const ind          = COR_INDICADOR[dados.indicador] || COR_INDICADOR.minor
-  const nIncidentes  = dados.incidentes?.length   || 0
-  const nManutencoes = dados.manutencoes?.length  || 0
+  function problemAction(item){
+    if(item.acao==='conectar-producao')return setConfigOpen(true)
+    if(item.acao==='integracoes')return window.location.assign('/admin/integracoes')
+    if(item.acao==='erros')return window.location.assign('/admin/erros')
+    if(item.acao==='docs-render')return window.open(data?.acoes?.docsRender,'_blank','noopener')
+    if(item.acao==='docs-vercel')return window.open(data?.acoes?.docsVercel,'_blank','noopener')
+    if(item.acao==='render')return setDeployPanel({title:'Deploys Render',kind:'render',items:data?.render?.deploys||[]})
+    if(item.acao==='vercel')return setDeployPanel({title:'Deploys Vercel',kind:'vercel',items:data?.vercel?.deploys||[]})
+  }
 
-  const TABS = [
-    { id: 'status',     label: 'Componentes' },
-    { id: 'incidentes', label: nIncidentes ? `Incidentes (${nIncidentes})` : 'Incidentes' },
-    ...(nManutencoes ? [{ id: 'manutencao', label: `Manutenção (${nManutencoes})` }] : []),
-  ]
+  if(loading)return <div className="plat-loading">Sincronizando Render, Vercel e produção…</div>
+  if(!data)return <div className="plat-loading">Não foi possível carregar a Central de Plataformas.</div>
 
-  return (
-    <PageCard>
-      {/* Cabeçalho */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>{logoChar}</span>
-          <div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: C.text }}>{nome}</h3>
-            {dados.pagina_url && (
-              <a href={dados.pagina_url} target="_blank" rel="noreferrer"
-                style={{ fontSize: 11, color: '#60a5fa' }}>status page ↗</a>
-            )}
-          </div>
-        </div>
-        <div style={{
-          padding: '4px 12px', borderRadius: 20, fontWeight: 700, fontSize: 11,
-          background: ind.bg, color: ind.txt,
-        }}>
-          {dados.descricao}
-        </div>
-      </div>
+  const rd=data.render?.selecionado
+  const vc=data.vercel?.selecionado
+  const rdDeploy=data.render?.deploys?.[0]
+  const vcDeploy=data.vercel?.deploys?.[0]
+  const renderPublic=publicStatus?.render
+  const vercelPublic=publicStatus?.vercel
 
-      {/* Sub-tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, borderBottom: `1px solid ${C.border}`, paddingBottom: 8 }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setAbaLocal(t.id)} style={{
-            fontSize: 11, padding: '3px 10px', borderRadius: 20, cursor: 'pointer', border: 'none',
-            background: abaLocal === t.id ? cor : C.border,
-            color:      abaLocal === t.id ? '#fff' : C.muted,
-            fontWeight: abaLocal === t.id ? 700 : 400,
-          }}>{t.label}</button>
-        ))}
-      </div>
-
-      {abaLocal === 'status'     && <ComponentList  componentes={dados.componentes}  />}
-      {abaLocal === 'incidentes' && <IncidentList   incidentes={dados.incidentes}    />}
-      {abaLocal === 'manutencao' && <ManutencaoList manutencoes={dados.manutencoes}  />}
-
-      {dados.atualizado && (
-        <p style={{ fontSize: 10, color: C.muted, marginTop: 10, textAlign: 'right' }}>
-          Atualizado: {new Date(dados.atualizado).toLocaleString('pt-BR')}
-        </p>
-      )}
-    </PageCard>
-  )
-}
-
-// ── Bloco de erro com retry ────────────────────────────────────
-function ErroSection({ msg, onRetry }) {
-  return (
-    <div style={{ fontSize: 13 }}>
-      <p style={{ color: '#f87171', marginBottom: 8 }}>⚠ {msg}</p>
-      {onRetry && (
-        <Btn onClick={onRetry} variant="secondary" style={{ padding: '3px 12px', fontSize: 11, width: 'auto' }}>
-          {Ico.refresh} Tentar novamente
-        </Btn>
-      )}
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Componente principal
-// ═══════════════════════════════════════════════════════════════
-
-function VercelConfigCard({ configuracao }) {
-  return <PageCard>
-    <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+  return <div className="platform-center">
+    <section className="plat-hero">
       <div>
-        <SectionTitle icon={Ico.gear}>Conexão da API Vercel</SectionTitle>
-        <div style={{color:C.muted,fontSize:12,marginTop:5}}>{configuracao?.configurado ? 'Credencial central disponível para projetos e deploys.' : 'Vercel ainda não configurada na Central de Integrações.'}</div>
+        <small>AL SISTEMAS · PRODUÇÃO</small>
+        <h2>{data.producao?.ligada?'Produção conectada':'Conecte sua produção'}</h2>
+        <p>O painel trata Vercel como frontend, Render como API e MongoDB como fonte persistente dos dados.</p>
       </div>
-      <a href="/admin/integracoes" style={{padding:'7px 11px',borderRadius:7,border:`1px solid ${C.border}`,color:C.text,textDecoration:'none',fontSize:12,fontWeight:700}}>Abrir Integrações e APIs</a>
-    </div>
-  </PageCard>
-}
-
-export default function AbaPlataformas() {
-  const [status,      setStatus]      = useState(null)
-  const [render,      setRender]      = useState(null)
-  const [vercel,      setVercel]      = useState(null)
-  const [carregando,  setCarregando]  = useState(true)
-  const [erroRender,  setErroRender]  = useState(null)
-  const [erroVercel,  setErroVercel]  = useState(null)
-  const [intervalo,   setIntervalo]   = useState(30000)
-  const [ultimoCheck, setUltimoCheck] = useState(null)
-  const [vercelConfig, setVercelConfig] = useState(null)
-  const [syncRenderEm, setSyncRenderEm] = useState(null)
-  const [syncVercelEm, setSyncVercelEm] = useState(null)
-
-  const INTERVALOS = [
-    { label: 'Off',   ms: 0 },
-    { label: '30 s',  ms: 30000 },
-    { label: '1 min', ms: 60000 },
-    { label: '5 min', ms: 300000 },
-  ]
-
-  const carregar = useCallback(async (silencioso = false) => {
-    if (!silencioso) setCarregando(true)
-    try {
-      const dados = await infraestruturaService.plataformasStatus()
-      setStatus(dados)
-      setUltimoCheck(new Date())
-    } catch { /* silencioso */ }
-    finally { if (!silencioso) setCarregando(false) }
-  }, [])
-
-  const carregarRender = useCallback(async () => {
-    setErroRender(null)
-    try {
-      const dados = await infraestruturaService.renderServicos()
-      setRender(dados.servicos || [])
-      setSyncRenderEm(dados.sincronizadoEm || new Date().toISOString())
-    } catch (err) {
-      setErroRender(err.message)
-    }
-  }, [])
-
-  const carregarVercelConfig = useCallback(async () => {
-    try { setVercelConfig(await infraestruturaService.vercelConfiguracao()) } catch { setVercelConfig({ configurado: false }) }
-  }, [])
-
-  const carregarVercel = useCallback(async () => {
-    setErroVercel(null)
-    try {
-      const dados = await infraestruturaService.vercelProjetos()
-      setVercel(dados.projetos || [])
-      setSyncVercelEm(dados.sincronizadoEm || new Date().toISOString())
-    } catch (err) {
-      setErroVercel(err.message)
-    }
-  }, [])
-
-  useEffect(() => {
-    carregar()
-    carregarRender()
-    carregarVercelConfig()
-    carregarVercel()
-  }, [carregar, carregarRender, carregarVercelConfig, carregarVercel])
-
-  useEffect(() => {
-    if (!intervalo) return
-    const id = setInterval(() => carregar(true), intervalo)
-    return () => clearInterval(id)
-  }, [intervalo, carregar])
-
-  if (carregando) return (
-    <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-      <Spin size={24} />
-    </div>
-  )
-
-  const totalIncidentes =
-    (status?.render?.incidentes?.length || 0) +
-    (status?.vercel?.incidentes?.length || 0)
-
-  const totalManutencoes =
-    (status?.render?.manutencoes?.length || 0) +
-    (status?.vercel?.manutencoes?.length || 0)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-      {/* Barra de controle */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 14px', borderRadius: 10, flexWrap: 'wrap', gap: 10,
-        background: C.surface, border: `1px solid ${C.border}`, fontSize: 12,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.muted }}>
-          {Ico.refresh}
-          <span>Auto-refresh:</span>
-          {INTERVALOS.map(op => (
-            <button key={op.ms} onClick={() => setIntervalo(op.ms)} style={{
-              padding: '2px 10px', borderRadius: 20, cursor: 'pointer', fontSize: 11, border: 'none',
-              background: intervalo === op.ms ? '#3b82f6' : C.border,
-              color:      intervalo === op.ms ? '#fff' : C.text,
-              fontWeight: intervalo === op.ms ? 700 : 400,
-            }}>{op.label}</button>
-          ))}
-          {totalIncidentes > 0 && (
-            <span style={{
-              background: '#7f1d1d', color: '#f87171',
-              padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-            }}>
-              ⚠ {totalIncidentes} incidente{totalIncidentes > 1 ? 's' : ''} ativo{totalIncidentes > 1 ? 's' : ''}
-            </span>
-          )}
-          {totalManutencoes > 0 && (
-            <span style={{
-              background: '#1e3a5f', color: '#60a5fa',
-              padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-            }}>
-              🔧 {totalManutencoes} manutenção programada{totalManutencoes > 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {ultimoCheck && (
-            <span style={{ fontSize: 11, color: C.muted }}>
-              Verificado: {ultimoCheck.toLocaleTimeString('pt-BR')}
-            </span>
-          )}
-          <Btn
-            onClick={() => { carregar(); carregarRender(); carregarVercel() }}
-            variant="secondary"
-            style={{ padding: '3px 12px', fontSize: 11, width: 'auto' }}
-          >
-            {Ico.refresh} Atualizar tudo
-          </Btn>
-        </div>
+      <div className={`plat-production-state ${data.producao?.ligada&&data.producao?.corsOk?'ok':'warn'}`}>
+        <span>{data.producao?.ligada&&data.producao?.corsOk?'●':'○'}</span>
+        <div><b>{data.producao?.ligada&&data.producao?.corsOk?'PORTAL ONLINE':'CONFIGURAÇÃO PENDENTE'}</b><small>{data.sincronizadoEm?`sincronizado ${ago(data.sincronizadoEm)}`:'—'}</small></div>
       </div>
+    </section>
 
-      <VercelConfigCard configuracao={vercelConfig} onAtualizar={async () => { await carregarVercelConfig(); await carregarVercel() }} />
+    <section className="plat-topology">
+      <div className="plat-flow-node"><span>▲</span><div><small>FRONTEND</small><b>Vercel</b></div></div>
+      <div className="plat-flow-line"><i></i><small>HTTPS</small></div>
+      <div className="plat-flow-node"><span>R</span><div><small>API</small><b>Render</b></div></div>
+      <div className="plat-flow-line"><i></i><small>Mongo</small></div>
+      <div className="plat-flow-node"><span>DB</span><div><small>DADOS + GRIDFS</small><b>MongoDB</b></div></div>
+    </section>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:10 }}>
-        {[
-          { label:'Serviços Render', valor:render?.length ?? '—', detalhe:syncRenderEm ? `Atualizado ${ago(syncRenderEm)}` : 'Aguardando sincronização' },
-          { label:'Projetos Vercel', valor:vercel?.length ?? '—', detalhe:syncVercelEm ? `Atualizado ${ago(syncVercelEm)}` : 'Aguardando sincronização' },
-          { label:'Incidentes ativos', valor:totalIncidentes, detalhe:totalIncidentes ? 'Requer atenção' : 'Tudo operacional' },
-          { label:'Manutenções', valor:totalManutencoes, detalhe:totalManutencoes ? 'Programadas' : 'Nenhuma programada' },
-        ].map(card => <div key={card.label} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:'12px 14px'}}>
-          <div style={{fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'.04em'}}>{card.label}</div>
-          <div style={{fontSize:22,fontWeight:800,color:C.text,margin:'4px 0'}}>{card.valor}</div>
-          <div style={{fontSize:11,color:C.muted}}>{card.detalhe}</div>
-        </div>)}
+    <section className="plat-command">
+      <button className="primary" onClick={()=>window.location.assign('/admin/atualizacoes?acao=nova')}>⬆ Atualizar portal</button>
+      <button onClick={()=>setConfigOpen(true)}>Conectar produção</button>
+      <button onClick={()=>setKeysOpen(true)}>Ver acessos</button>
+      <button onClick={refreshOrigins}>Sincronizar URLs</button>
+      <button onClick={()=>load()} className="ghost">↻ Atualizar</button>
+    </section>
+
+    <section className="plat-grid">
+      <PlatformNode
+        kind="vercel" title={vc?.nome}
+        subtitle={vc?`${vc.framework||'Projeto web'}${vc.git?.repositorio?` · ${vc.git.repositorio}`:''}`:'Escolha qual projeto Vercel representa o portal público.'}
+        status={vcDeploy?.estado} url={data.producao?.frontendOrigin||vcDeploy?.url} deploy={vcDeploy}
+        onDeploys={()=>setDeployPanel({title:'Deploys Vercel',kind:'vercel',items:data.vercel?.deploys||[]})}
+        onVariables={()=>openVariables('vercel')} onConfigure={()=>setConfigOpen(true)}
+        onPrimaryAction={()=>window.location.assign('/admin/atualizacoes?acao=nova')} primaryActionLabel="Atualizar portal"
+      />
+      <PlatformNode
+        kind="render" title={rd?.nome}
+        subtitle={rd?`${rd.tipo||'Web Service'}${rd.regiao?` · ${rd.regiao}`:''}${rd.branch?` · ${rd.branch}`:''}`:'Escolha qual serviço Render executa a API do AL Sistemas.'}
+        status={rdDeploy?.status||rd?.estado} url={data.producao?.backendUrl||rd?.url} deploy={rdDeploy}
+        onDeploys={()=>setDeployPanel({title:'Deploys Render',kind:'render',items:data.render?.deploys||[]})}
+        onVariables={()=>openVariables('render')} onLogs={()=>openPlatformLogs('render')} onConfigure={()=>setConfigOpen(true)}
+        onPrimaryAction={()=>confirmRenderDeploy(false)} primaryActionLabel="Deploy agora"
+      />
+    </section>
+
+    <section className="plat-insight-grid">
+      <article className="plat-insight">
+        <small>CONEXÃO DO PORTAL</small>
+        <b>{data.producao?.corsOk?'Vercel autorizada pela API':'Origem ainda não validada'}</b>
+        <p>{data.producao?.frontendOrigin||'Defina o frontend de produção para o backend reconhecer a origem automaticamente.'}</p>
+        <span className={data.producao?.corsOk?'good':'warn'}>{data.producao?.corsOk?'✓ CORS sincronizado':'! precisa de atenção'}</span>
+      </article>
+      <article className="plat-insight">
+        <small>STATUS DAS PLATAFORMAS</small>
+        <b>{renderPublic?.descricao||'Render'} · {vercelPublic?.descricao||'Vercel'}</b>
+        <p>{(renderPublic?.incidentes?.length||0)+(vercelPublic?.incidentes?.length||0)} incidente(s) público(s) ativo(s).</p>
+        <span className="good">Monitor oficial</span>
+      </article>
+      <article className="plat-insight">
+        <small>ARMAZENAMENTO</small>
+        <b>MongoDB + GridFS</b>
+        <p>Arquivos persistentes do portal não precisam depender do disco temporário do Render.</p>
+        <span className="good">Persistente</span>
+      </article>
+    </section>
+
+    <section className="plat-section">
+      <div className="plat-section-head"><div><small>DIAGNÓSTICO</small><h3>O que precisa da sua atenção</h3></div><a href="/admin/erros">Abrir Monitor de Erros →</a></div>
+      <Problems items={data.problemas} onAction={problemAction}/>
+    </section>
+
+    <section className="plat-section plat-credentials-strip">
+      <div><small>RENDER API</small><b>{data.credenciais?.render?.configurado?'Conectada':'Não configurada'}</b><span>{data.credenciais?.render?.mascarada||'—'} · {data.credenciais?.render?.origem||'sem origem'}</span></div>
+      <div><small>VERCEL API</small><b>{data.credenciais?.vercel?.configurado?'Conectada':'Não configurada'}</b><span>{data.credenciais?.vercel?.mascarada||'—'} · {data.credenciais?.vercel?.origem||'sem origem'}</span></div>
+      <a href="/admin/integracoes">Gerenciar em Integrações e APIs →</a>
+    </section>
+
+    {configOpen&&<Modal kicker="PRODUÇÃO" title="Conectar Vercel → Render" onClose={()=>setConfigOpen(false)}>
+      <p className="plat-modal-copy">Escolha quais recursos representam o portal. Essa ligação passa a orientar CORS, diagnóstico, links e publicação.</p>
+      <label className="plat-field">Frontend na Vercel
+        <select value={vercelId} onChange={e=>{setVercelId(e.target.value);setOrigin('')}}>
+          <option value="">Selecione…</option>
+          {(data.vercel?.projetos||[]).map(x=><option key={x.id} value={x.id}>{x.nome}{x.dominio?` · ${x.dominio}`:''}</option>)}
+        </select>
+      </label>
+      <label className="plat-field">Backend na Render
+        <select value={renderId} onChange={e=>setRenderId(e.target.value)}>
+          <option value="">Selecione…</option>
+          {(data.render?.servicos||[]).map(x=><option key={x.id} value={x.id}>{x.nome}{x.regiao?` · ${x.regiao}`:''}</option>)}
+        </select>
+      </label>
+      <label className="plat-field">URL pública do portal
+        <input value={origin} onChange={e=>setOrigin(e.target.value)} placeholder="https://meuportal.vercel.app"/>
+        <small>Normalmente detectada automaticamente pelo projeto Vercel.</small>
+      </label>
+      <div className="plat-create-links"><a href={data.acoes?.criarVercel} target="_blank" rel="noreferrer">+ Criar projeto na Vercel ↗</a><a href={data.acoes?.criarRender} target="_blank" rel="noreferrer">+ Criar serviço na Render ↗</a></div>
+      <div className="plat-modal-actions"><button onClick={()=>setConfigOpen(false)}>Cancelar</button><button className="primary" disabled={saving} onClick={saveProduction}>{saving?'Salvando…':'Conectar produção'}</button></div>
+    </Modal>}
+
+    {keysOpen&&<Modal kicker="ACESSOS" title="Credenciais das plataformas" onClose={()=>setKeysOpen(false)}>
+      <p className="plat-modal-copy">Por segurança o painel confirma a existência e a origem das chaves, mas não revela o segredo completo.</p>
+      {[['Render',data.credenciais?.render],['Vercel',data.credenciais?.vercel]].map(([name,c])=><div className="plat-key-row" key={name}><div><b>{name}</b><small>{c?.configurado?'Credencial disponível':'Não configurada'}</small></div><code>{c?.mascarada||'—'}</code><span>{c?.origem||'—'}</span></div>)}
+      <div className="plat-modal-actions"><a href="/admin/integracoes">Abrir Integrações e APIs</a><button onClick={()=>setKeysOpen(false)}>Fechar</button></div>
+    </Modal>}
+
+    {deployPanel&&<Modal kicker="DEPLOYS" title={deployPanel.title} wide onClose={()=>setDeployPanel(null)}>
+      {!deployPanel.items.length?<div className="plat-empty">Nenhum deploy encontrado.</div>:<div className="plat-deploy-list">{deployPanel.items.map((d,index)=>{
+        const st=d.status||d.estado
+        const running=['BUILDING','QUEUED','BUILD_IN_PROGRESS','UPDATE_IN_PROGRESS'].includes(String(st||'').toUpperCase())
+        return <article key={d.id}>
+          <div><StatusPill value={st}/><b>{d.commit?.mensagem||d.commit||'Deploy'}</b><small>{d.branch?`${d.branch} · `:''}{ago(d.criado)}{d.duracao?` · ${duration(d.duracao)}`:''}{d.hash?` · ${d.hash}`:''}</small></div>
+          <div className="plat-deploy-actions">
+            {d.url&&<a href={d.url} target="_blank" rel="noreferrer">Abrir ↗</a>}
+            {deployPanel.kind==='vercel'&&<button onClick={()=>openPlatformLogs('vercel',d.id)}>Logs</button>}
+            {deployPanel.kind==='render'&&running&&<button onClick={()=>setActionConfirm({type:'cancel',deployId:d.id,title:'Cancelar este deploy?',message:'A Render tentará interromper o deploy que ainda está em andamento.',button:'Cancelar deploy'})}>Cancelar</button>}
+            {deployPanel.kind==='render'&&index>0&&!running&&<button onClick={()=>setActionConfirm({type:'rollback',deployId:d.id,title:'Voltar para este deploy?',message:'A Render criará um rollback para esta versão anterior. O autodeploy continuará habilitado.',button:'Fazer rollback'})}>Rollback</button>}
+          </div>
+        </article>
+      })}</div>}
+      <div className="plat-modal-actions">
+        <button onClick={()=>setDeployPanel(null)}>Fechar</button>
+        {deployPanel.kind==='render'&&<button onClick={()=>setActionConfirm({type:'restart',title:'Reiniciar o backend?',message:'A Render reiniciará o serviço atual sem criar um novo commit. Use quando o código está correto, mas o processo precisa ser reiniciado.',button:'Reiniciar serviço'})}>Reiniciar serviço</button>}
+        {deployPanel.kind==='render'&&<button onClick={()=>confirmRenderDeploy(true)}>Deploy limpando cache</button>}
+        <button className="primary" onClick={()=>window.location.assign('/admin/atualizacoes?acao=nova')}>Atualizar portal</button>
       </div>
+    </Modal>}
 
-      {/* Status público — 2 colunas */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-        <PlatformCard nome="Render" dados={status?.render} cor="#7c3aed" logoChar="⬛" />
-        <PlatformCard nome="Vercel" dados={status?.vercel} cor="#000000" logoChar="▲" />
-      </div>
+    {envPanel&&<Modal kicker="CONFIGURAÇÃO" title={envPanel.title} wide onClose={()=>setEnvPanel(null)}>
+      <p className="plat-modal-copy">
+        Os valores sensíveis ficam mascarados. {envPanel.kind==='render'
+          ? 'Na Render, você pode criar ou substituir uma variável aqui; a mudança só entra na aplicação após um novo deploy.'
+          : 'Na Vercel, esta tela inspeciona nomes, ambientes e estado das variáveis. Alterações continuam protegidas pela configuração do projeto.'}
+      </p>
+      {envPanel.loading?<div className="plat-empty">Consultando variáveis…</div>:envPanel.error?<div className="plat-error">{envPanel.error}</div>:
+        <div className="plat-env-list">{envPanel.items.length?envPanel.items.map(item=><div className="plat-env-row" key={`${item.id||''}-${item.key}`}>
+          <div><b>{item.key}</b><small>{item.target?.length?item.target.join(' · '):envPanel.kind==='render'?'serviço':'projeto'}{item.gitBranch?` · ${item.gitBranch}`:''}</small></div>
+          <code>{item.valueMasked||'protegida'}</code>
+        </div>):<div className="plat-empty">Nenhuma variável encontrada.</div>}</div>
+      }
+      {envPanel.kind==='render'&&<section className="plat-env-editor">
+        <div><small>CRIAR OU SUBSTITUIR</small><b>Variável do serviço</b></div>
+        <div className="plat-env-inputs"><input value={envPanel.key||''} onChange={e=>setEnvPanel(p=>({...p,key:e.target.value.toUpperCase()}))} placeholder="NOME_DA_VARIAVEL"/><input type="password" value={envPanel.value||''} onChange={e=>setEnvPanel(p=>({...p,value:e.target.value}))} placeholder="Novo valor"/></div>
+        <div className="plat-modal-actions"><button disabled={actionBusy} onClick={()=>saveRenderVariable()}>{actionBusy?'Salvando…':'Salvar'}</button><button className="primary" disabled={actionBusy} onClick={()=>saveRenderVariable({deployAfter:true})}>Salvar e fazer deploy</button></div>
+      </section>}
+      <div className="plat-modal-actions"><button onClick={()=>setEnvPanel(null)}>Fechar</button></div>
+    </Modal>}
 
-      {/* Render — Serviços e Deploys */}
-      <PageCard>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div><SectionTitle icon={Ico.gear}>Render — Serviços e Deploys</SectionTitle><div style={{fontSize:11,color:C.muted,marginTop:3}}>Sincronizado {ago(syncRenderEm)}{syncRenderEm ? ` · ${new Date(syncRenderEm).toLocaleString('pt-BR')}` : ''}</div></div>
-          {!erroRender && render !== null && (
-            <Btn onClick={carregarRender} variant="secondary" style={{ padding: '3px 12px', fontSize: 11, width: 'auto' }}>
-              {Ico.refresh}
-            </Btn>
-          )}
-        </div>
+    {logsPanel&&<Modal kicker="OBSERVABILIDADE" title={logsPanel.title} wide onClose={()=>setLogsPanel(null)}>
+      <p className="plat-modal-copy">Linhas mais recentes retornadas pela API da plataforma. Use esta visão para localizar falhas sem sair do AL Sistemas.</p>
+      {logsPanel.loading?<div className="plat-empty">Buscando logs…</div>:logsPanel.error?<div className="plat-error">{logsPanel.error}</div>:
+        <div className="plat-log-view">{logsPanel.items.length?logsPanel.items.map(log=><div key={log.id} className={`plat-log-line ${String(log.tipo||log.nivel||'').toLowerCase()}`}>
+          <span>{log.criado?ago(log.criado):'•'}</span><code>{log.texto||'evento sem mensagem'}</code>{log.statusCode&&<b>{log.statusCode}</b>}
+        </div>):<div className="plat-empty">Nenhuma linha de log disponível para esta consulta.</div>}</div>
+      }
+      <div className="plat-modal-actions"><button onClick={()=>setLogsPanel(null)}>Fechar</button></div>
+    </Modal>}
 
-        {erroRender ? (
-          <div>
-            <ErroSection
-              msg={erroRender}
-              onRetry={erroRender.includes('RENDER_API_KEY') ? null : carregarRender}
-            />
-            {erroRender.includes('RENDER_API_KEY') && (
-              <p style={{ color: C.muted, fontSize: 12, marginTop: 8 }}>
-                Para habilitar: adicione{' '}
-                <code style={{ background: C.border, padding: '1px 5px', borderRadius: 4 }}>RENDER_API_KEY</code>{' '}
-                nas variáveis de ambiente.{' '}
-                <a href="https://dashboard.render.com/u/settings#api-keys"
-                  target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
-                  Obter chave ↗
-                </a>
-              </p>
-            )}
-          </div>
-        ) : render === null ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-            <Spin size={16} />
-          </div>
-        ) : (
-          <PlataformaItens
-            items={render}
-            tipo="render"
-            onCarregarDeploys={async id => {
-              const res = await infraestruturaService.renderDeploys(id)
-              return res.deploys || []
-            }}
-          />
-        )}
-      </PageCard>
+    {actionConfirm&&<Modal kicker="CONFIRMAÇÃO" title={actionConfirm.title} onClose={()=>!actionBusy&&setActionConfirm(null)}>
+      <p className="plat-modal-copy">{actionConfirm.message}</p>
+      <div className="plat-modal-actions"><button disabled={actionBusy} onClick={()=>setActionConfirm(null)}>Voltar</button><button className="primary" disabled={actionBusy} onClick={executePlatformAction}>{actionBusy?'Enviando…':actionConfirm.button||'Confirmar'}</button></div>
+    </Modal>}
 
-      {/* Vercel — Projetos e Deploys */}
-      <PageCard>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div><SectionTitle icon={Ico.gear}>Vercel — Projetos e Deploys</SectionTitle><div style={{fontSize:11,color:C.muted,marginTop:3}}>Sincronizado {ago(syncVercelEm)}{syncVercelEm ? ` · ${new Date(syncVercelEm).toLocaleString('pt-BR')}` : ''}</div></div>
-          {!erroVercel && vercel !== null && (
-            <Btn onClick={carregarVercel} variant="secondary" style={{ padding: '3px 12px', fontSize: 11, width: 'auto' }}>
-              {Ico.refresh}
-            </Btn>
-          )}
-        </div>
-
-        {erroVercel ? (
-          <div>
-            <ErroSection
-              msg={erroVercel}
-              onRetry={erroVercel.includes('Token da Vercel') ? null : carregarVercel}
-            />
-            {erroVercel.includes('Token da Vercel') && (
-              <p style={{ color: C.muted, fontSize: 12, marginTop: 8 }}>
-                Configure o token no cartão <b>Conexão da API Vercel</b> acima ou use{' '}
-                <code style={{ background: C.border, padding: '1px 5px', borderRadius: 4 }}>VERCEL_TOKEN</code>.{' '}
-                <a href="https://vercel.com/account/tokens"
-                  target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
-                  Obter token ↗
-                </a>
-              </p>
-            )}
-          </div>
-        ) : vercel === null ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-            <Spin size={16} />
-          </div>
-        ) : (
-          <PlataformaItens
-            items={vercel}
-            tipo="vercel"
-            onCarregarDeploys={async id => {
-              const res = await infraestruturaService.vercelDeploys(id)
-              return res.deploys || []
-            }}
-          />
-        )}
-      </PageCard>
-
-    </div>
-  )
+    <style>{`
+      .platform-center{display:grid;gap:14px;min-width:0}.plat-loading{padding:45px 12px;text-align:center;color:var(--adm-muted)}
+      .plat-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:4px 2px}.plat-hero small,.plat-section-head small,.plat-insight small,.plat-credentials-strip small{font-size:9px;font-weight:900;letter-spacing:.14em;color:var(--adm-muted)}.plat-hero h2{margin:4px 0 5px;font-size:28px;letter-spacing:-.04em;color:var(--adm-text)}.plat-hero p{margin:0;max-width:680px;color:var(--adm-muted);font-size:13px;line-height:1.5}
+      .plat-production-state{display:flex;gap:9px;align-items:center;border:1px solid var(--adm-border);border-radius:14px;padding:10px 12px;background:var(--adm-surface);flex:0 0 auto}.plat-production-state>span{font-size:18px}.plat-production-state>div{display:grid;gap:2px}.plat-production-state b{font-size:10px;letter-spacing:.08em}.plat-production-state small{font-size:9px;color:var(--adm-muted)}.plat-production-state.ok>span,.plat-production-state.ok b{color:#16a34a}.plat-production-state.warn>span,.plat-production-state.warn b{color:#d97706}
+      .plat-topology{display:grid;grid-template-columns:minmax(0,1fr) 70px minmax(0,1fr) 70px minmax(0,1fr);align-items:center;border:1px solid var(--adm-border);border-radius:16px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));padding:14px;overflow:hidden}.plat-flow-node{display:flex;align-items:center;gap:10px;min-width:0}.plat-flow-node>span{width:38px;height:38px;border:1px solid var(--adm-border);border-radius:11px;display:grid;place-items:center;font-weight:900;color:#2563eb;background:var(--adm-bg)}.plat-flow-node>div{display:grid;gap:2px;min-width:0}.plat-flow-node small{font-size:8px;color:var(--adm-muted);font-weight:900;letter-spacing:.11em}.plat-flow-node b{font-size:13px;color:var(--adm-text)}.plat-flow-line{display:grid;justify-items:center;gap:3px}.plat-flow-line i{width:100%;height:1px;background:linear-gradient(90deg,var(--adm-border),#2563eb66,var(--adm-border))}.plat-flow-line small{font-size:7px;color:var(--adm-muted);letter-spacing:.08em}
+      .plat-command{display:flex;gap:8px;flex-wrap:wrap}.plat-command button,.plat-command a,.plat-node-actions button,.plat-node-actions a,.plat-problems button,.plat-modal-actions button,.plat-modal-actions a{border:1px solid var(--adm-border);border-radius:9px;padding:9px 12px;background:var(--adm-surface);color:var(--adm-text);font-size:11px;font-weight:800;text-decoration:none;cursor:pointer}.plat-command .primary,.plat-modal-actions .primary{background:#2563eb;color:#fff;border-color:#2563eb}.plat-command .ghost{margin-left:auto}
+      .plat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.plat-node{border:1px solid var(--adm-border);border-radius:16px;padding:16px;background:var(--adm-surface);min-width:0}.plat-node.vercel{border-top:3px solid #111827}.plat-node.render{border-top:3px solid #7c3aed}.plat-node-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.plat-brand{display:flex;gap:10px;align-items:center;min-width:0}.plat-logo{width:38px;height:38px;border-radius:11px;border:1px solid var(--adm-border);display:grid;place-items:center;background:var(--adm-bg);font-weight:900;color:var(--adm-text)}.plat-brand>div{min-width:0}.plat-brand small{font-size:8px;font-weight:900;letter-spacing:.12em;color:var(--adm-muted)}.plat-brand h3{margin:2px 0 0;font-size:17px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plat-node>p{font-size:11px;color:var(--adm-muted);line-height:1.45;margin:10px 0 5px}.plat-url{font-size:10px;color:#2563eb;text-decoration:none;overflow-wrap:anywhere}.plat-pill{display:inline-flex;align-items:center;border:1px solid;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:850;white-space:nowrap}.plat-deploy{margin-top:13px;padding:10px;border-radius:11px;background:var(--adm-surface2);border:1px solid var(--adm-border);display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.plat-deploy>div:first-child{display:grid;gap:3px;min-width:0}.plat-deploy small{font-size:8px;color:var(--adm-muted);font-weight:900;letter-spacing:.08em}.plat-deploy b{font-size:11px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plat-deploy-meta{display:grid;justify-items:end;gap:4px}.plat-deploy-meta>span:last-child{font-size:9px;color:var(--adm-muted)}.plat-node-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.plat-node-actions button,.plat-node-actions a{padding:7px 9px;font-size:10px}.plat-node-actions .node-primary{background:#2563eb;color:#fff;border-color:#2563eb}
+      .plat-insight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.plat-insight{border:1px solid var(--adm-border);border-radius:13px;padding:13px;background:var(--adm-surface);display:grid;gap:5px}.plat-insight b{font-size:13px;color:var(--adm-text)}.plat-insight p{font-size:10px;color:var(--adm-muted);line-height:1.45;margin:0;overflow-wrap:anywhere}.plat-insight>span{font-size:9px;font-weight:850;width:max-content}.plat-insight .good{color:#16a34a}.plat-insight .warn{color:#d97706}
+      .plat-section{border:1px solid var(--adm-border);border-radius:15px;background:var(--adm-surface);padding:15px}.plat-section-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:11px}.plat-section-head h3{margin:3px 0 0;font-size:16px;color:var(--adm-text)}.plat-section-head a{font-size:10px;color:#2563eb;text-decoration:none}.plat-clear{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:11px;background:#16a34a0a;border:1px solid #16a34a44}.plat-clear>span{color:#16a34a;font-weight:900}.plat-clear b{font-size:12px;color:var(--adm-text)}.plat-clear p{font-size:10px;color:var(--adm-muted);margin:3px 0 0}.plat-problems{display:grid;gap:8px}.plat-problems article{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:9px;align-items:center;border:1px solid;border-radius:11px;padding:10px;background:var(--adm-surface2)}.plat-problem-mark{font-size:17px;font-weight:900}.plat-problems b{font-size:11px;color:var(--adm-text)}.plat-problems p{font-size:10px;color:var(--adm-muted);margin:2px 0 0;line-height:1.4}.plat-problems button{padding:6px 8px;font-size:9px}
+      .plat-credentials-strip{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:center}.plat-credentials-strip>div{display:grid;gap:2px}.plat-credentials-strip b{font-size:11px;color:var(--adm-text)}.plat-credentials-strip span{font-size:9px;color:var(--adm-muted)}.plat-credentials-strip>a{font-size:10px;color:#2563eb;text-decoration:none}
+      .plat-overlay{position:fixed;inset:0;z-index:1400;display:flex;align-items:center;justify-content:center;padding:12px;background:rgba(15,23,42,.42);backdrop-filter:blur(3px)}.plat-modal{width:min(100%,560px);max-height:calc(100dvh - 24px);overflow:auto;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:18px;padding:18px;box-shadow:0 25px 80px rgba(15,23,42,.28)}.plat-modal.wide{width:min(100%,760px)}.plat-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.plat-modal-head small{font-size:9px;color:var(--adm-muted);letter-spacing:.13em;font-weight:900}.plat-modal-head h2{margin:4px 0 0;color:var(--adm-text);font-size:20px}.plat-modal-head button{width:32px;height:32px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);font-size:20px}.plat-modal-copy{font-size:11px;color:var(--adm-muted);line-height:1.5}.plat-field{display:block;font-size:11px;font-weight:800;color:var(--adm-text);margin-top:11px}.plat-field select,.plat-field input{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:10px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg);color:var(--adm-text)}.plat-field small{display:block;margin-top:4px;color:var(--adm-muted);font-weight:400}.plat-create-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:13px}.plat-create-links a{font-size:10px;color:#2563eb;text-decoration:none}.plat-modal-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:16px}.plat-key-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:10px 0;border-top:1px solid var(--adm-border)}.plat-key-row:first-of-type{border-top:0}.plat-key-row>div{display:grid}.plat-key-row b{font-size:12px;color:var(--adm-text)}.plat-key-row small,.plat-key-row span{font-size:9px;color:var(--adm-muted)}.plat-key-row code{font-size:10px;color:var(--adm-text);background:var(--adm-surface2);padding:5px 7px;border-radius:7px}.plat-deploy-list{display:grid;gap:7px}.plat-deploy-list article{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.plat-deploy-list article>div{display:grid;gap:4px;min-width:0}.plat-deploy-list b{font-size:11px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plat-deploy-list small{font-size:9px;color:var(--adm-muted)}.plat-deploy-list a{font-size:10px;color:#2563eb;text-decoration:none}.plat-deploy-actions{display:flex!important;grid-auto-flow:column;gap:6px!important;align-items:center}.plat-deploy-actions button,.plat-deploy-actions a{border:1px solid var(--adm-border);border-radius:7px;padding:5px 7px;background:var(--adm-surface);font-size:9px;color:var(--adm-text);cursor:pointer;text-decoration:none}.plat-empty{padding:14px;border:1px solid var(--adm-border);border-radius:10px;color:var(--adm-muted);font-size:11px}.plat-error{padding:11px;border:1px solid #dc262655;border-radius:10px;background:#dc26260a;color:#dc2626;font-size:11px}.plat-env-list{display:grid;border:1px solid var(--adm-border);border-radius:11px;overflow:hidden}.plat-env-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:9px 11px;background:var(--adm-surface2);border-top:1px solid var(--adm-border)}.plat-env-row:first-child{border-top:0}.plat-env-row>div{display:grid;gap:2px;min-width:0}.plat-env-row b{font-size:11px;color:var(--adm-text);overflow-wrap:anywhere}.plat-env-row small{font-size:8px;color:var(--adm-muted)}.plat-env-row code{font-size:9px;color:var(--adm-muted);white-space:nowrap}.plat-env-editor{margin-top:13px;padding:12px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface2)}.plat-env-editor>div:first-child{display:grid;gap:2px}.plat-env-editor small{font-size:8px;letter-spacing:.12em;font-weight:900;color:var(--adm-muted)}.plat-env-editor b{font-size:12px;color:var(--adm-text)}.plat-env-inputs{display:grid;grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr);gap:8px;margin-top:9px}.plat-env-inputs input{min-width:0;padding:9px 10px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-bg);color:var(--adm-text)}.plat-log-view{max-height:58vh;overflow:auto;border:1px solid var(--adm-border);border-radius:11px;background:#0b1220;padding:8px}.plat-log-line{display:grid;grid-template-columns:46px minmax(0,1fr) auto;gap:8px;padding:6px;border-top:1px solid rgba(255,255,255,.06);align-items:start}.plat-log-line:first-child{border-top:0}.plat-log-line>span{font:500 8px/1.4 monospace;color:#7f8da3}.plat-log-line code{white-space:pre-wrap;overflow-wrap:anywhere;font:500 9px/1.45 monospace;color:#d5deea}.plat-log-line>b{font-size:8px;color:#f59e0b}
+      @media(max-width:760px){.plat-hero{display:grid}.plat-production-state{width:max-content}.plat-topology{grid-template-columns:1fr 30px 1fr 30px 1fr;padding:10px}.plat-flow-node{display:grid;justify-items:center;text-align:center;gap:5px}.plat-flow-node>span{width:34px;height:34px}.plat-flow-node b{font-size:10px}.plat-flow-node small{font-size:7px}.plat-flow-line small{display:none}.plat-grid{grid-template-columns:1fr}.plat-insight-grid{grid-template-columns:1fr}.plat-credentials-strip{grid-template-columns:1fr 1fr}.plat-credentials-strip>a{grid-column:1/-1}.plat-command .ghost{margin-left:0}}
+      @media(max-width:500px){.plat-env-inputs{grid-template-columns:1fr}.plat-deploy-actions{flex-wrap:wrap;justify-content:flex-start}.plat-log-line{grid-template-columns:36px minmax(0,1fr)}.plat-log-line>b{grid-column:2}.plat-hero h2{font-size:24px}.plat-command{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.plat-command button{width:100%}.plat-topology{gap:3px}.plat-flow-node>span{width:30px;height:30px;font-size:9px}.plat-problems article{grid-template-columns:22px minmax(0,1fr)}.plat-problems button{grid-column:2}.plat-credentials-strip{grid-template-columns:1fr}.plat-key-row{grid-template-columns:1fr auto}.plat-key-row>span{grid-column:1/-1}.plat-modal{padding:15px}}
+    `}</style>
+  </div>
 }

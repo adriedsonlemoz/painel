@@ -8,8 +8,8 @@ export default function AdminPlataformas() {
   return (
     <div className="adm-page">
       <div className="adm-page-header">
-        <h1 className="adm-page-title">Plataformas</h1>
-        <p className="adm-page-sub">Status Render e Vercel — serviços, deploys e incidentes</p>
+        <h1 className="adm-page-title">Central de Plataformas</h1>
+        <p className="adm-page-sub">Produção Vercel + Render — deploys, conexões, problemas e publicação</p>
       </div>
       <Suspense fallback={
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>

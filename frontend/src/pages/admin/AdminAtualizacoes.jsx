@@ -46,20 +46,33 @@ export default function AdminAtualizacoes(){
     const active=data?.activeOperation?.jobId
     if(active&&!job&&/^job_[0-9]+_[a-f0-9]+$/.test(active))watch(active)
   },[data?.activeOperation?.jobId])
+  useEffect(()=>{
+    if(!data)return
+    const params=new URLSearchParams(window.location.search)
+    const acao=params.get('acao')
+    if(!['publicar','nova'].includes(acao))return
+    params.delete('acao')
+    const qs=params.toString()
+    window.history.replaceState({},document.title,`${window.location.pathname}${qs?`?${qs}`:''}${window.location.hash||''}`)
+    if(acao==='nova')setUiPanel('upload')
+    else openGithubPublish(null)
+  },[data])
   async function prepare(){ if(!file)return toast.error('Selecione um pacote .zip.'); setUploading(true); try{
     const r=await updatesService.preparar(file)
     const prepared=r.update
     toast.success(`${prepared.packageType==='incremental'?'Atualização incremental':'Pacote completo'} ${prepared.version} validado.`)
-    if(r.ephemeral){
-      setEphemeralStage(prepared)
+    const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
+    if(r.ephemeral||managedHost){
+      if(r.ephemeral)setEphemeralStage(prepared)
+      else { setEphemeralStage(null); await load({silent:true}) }
       setUiPanel(null)
+      // Em Render/Vercel a próxima etapa correta é publicar no GitHub.
       await openGithubPublish(prepared)
     }else{
       setFile(null)
       setEphemeralStage(null)
       await load({silent:true})
       setUiPanel(null)
-      // Fluxo contínuo: terminou de validar, já mostra a simulação da instalação.
       await install(prepared)
     }
   }catch(e){toast.error(e.message)}finally{setUploading(false)} }
@@ -262,8 +275,8 @@ export default function AdminAtualizacoes(){
     const sourceType=githubPublish.sourceType||'package'
     setGithubPublish(g=>({...g,submitting:true}))
     try{
-      const serverless=data?.updateCapabilities?.environment==='vercel'
-      if(serverless){
+      const directManaged=['vercel','render'].includes(data?.updateCapabilities?.environment)
+      if(directManaged){
         if(!file) throw new Error('O ZIP selecionado não está mais disponível no navegador. Selecione o pacote novamente.')
         setGithubPublish(null)
         setJob({
@@ -285,7 +298,7 @@ export default function AdminAtualizacoes(){
         watch(r.job.id,'github-publish')
       }
     }catch(e){
-      if(data?.updateCapabilities?.environment==='vercel'){
+      if(['vercel','render'].includes(data?.updateCapabilities?.environment)){
         setJob(j=>({...j,status:'failed',phase:'failed',phaseLabel:'Falha na publicação',progress:100,error:e.message,timeline:[...(j?.timeline||[]),{key:'failed',label:'Falha na publicação',progress:100,at:new Date().toISOString()}]}))
       }else{
         setGithubPublish(g=>({...g,submitting:false,error:e.message}))
@@ -293,6 +306,7 @@ export default function AdminAtualizacoes(){
     }
   }
   const serverless=data?.updateCapabilities?.environment==='vercel'
+  const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
   const activeOperation=data?.activeOperation||null
   const stagedPackages=ephemeralStage?[ephemeralStage,...(data?.staged||[])]:data?.staged||[]
   if(loading)return <div className="adm-page" style={{color:C.muted}}>Carregando atualizações…</div>
@@ -300,7 +314,7 @@ export default function AdminAtualizacoes(){
     <div className="updates-hero">
       <div>
         <div className="updates-kicker">CENTRAL DE ATUALIZAÇÕES</div>
-        <h1 style={{margin:0,color:C.text,fontSize:27}}>AL Sistemas <span style={{color:C.greenSolid}}>v{data?.installed?.version||'—'}</span></h1>
+        <h1 style={{margin:0,color:C.text,fontSize:22}}>AL Sistemas <span style={{color:C.greenSolid}}>v{data?.installed?.version||'—'}</span></h1>
         <p style={{color:C.muted,margin:'6px 0 0',fontSize:13,lineHeight:1.5}}>Atualização, publicação, diagnóstico e recuperação em uma única central. Os detalhes abrem em painéis próprios para manter esta tela curta.</p>
       </div>
       <div className={`updates-status-pill ${data?.installed?.synchronized?'ok':'warn'}`}>{data?.installed?.synchronized?'● Sistema sincronizado':'● Versões divergentes'}</div>
@@ -308,33 +322,33 @@ export default function AdminAtualizacoes(){
 
     {activeOperation&&<div className="updates-alert updates-alert-warn">
       <div><b>🔒 Atualizador ocupado</b><span>Job {activeOperation.jobId}</span></div>
-      {!serverless&&<button onClick={recoverActive}>Recuperar</button>}
+      {!managedHost&&<button onClick={recoverActive}>Recuperar</button>}
     </div>}
-    {serverless&&<div className="updates-alert updates-alert-info"><div><b>☁️ Vercel detectada</b><span>Instalação local desativada; publicação segue por GitHub/Vercel.</span></div></div>}
+    {managedHost&&<div className="updates-alert updates-alert-info"><div><b>☁️ {data?.runtime?.environment} detectada</b><span>Produção gerenciada: envie o ZIP e publique no GitHub; a plataforma cria a nova release sem substituir arquivos locais.</span></div></div>}
 
     <div className="updates-command-grid">
       <button className="updates-command updates-command-primary" onClick={()=>setUiPanel('upload')}>
         <span className="updates-command-icon">⬆</span><span><b>Nova versão</b><small>Enviar ZIP e validar</small></span>
       </button>
-      {!serverless&&<button className="updates-command updates-command-install" disabled={Boolean(activeOperation)} onClick={()=>setUiPanel('packages')}>
+      {!managedHost&&<button className="updates-command updates-command-install" disabled={Boolean(activeOperation)} onClick={()=>setUiPanel('packages')}>
         <span className="updates-command-icon">▶</span><span><b>Instalar</b><small>{stagedPackages.length?`${stagedPackages.length} versão(ões) pronta(s)`:'nenhuma versão preparada'}</small></span>
       </button>}
-      <button className="updates-command" disabled={Boolean(activeOperation)} onClick={()=>openGithubPublish(null)}>
-        <span className="updates-command-icon">⌁</span><span><b>Publicar</b><small>GitHub / Vercel</small></span>
+      <button className="updates-command" disabled={Boolean(activeOperation)} onClick={()=>openGithubPublish(managedHost?(stagedPackages[0]||null):null)}>
+        <span className="updates-command-icon">⌁</span><span><b>Publicar</b><small>{managedHost&&stagedPackages.length?'pacote preparado → GitHub':'GitHub / deploy'}</small></span>
       </button>
       <button className="updates-command" onClick={()=>setUiPanel('environment')}>
         <span className="updates-command-icon">◉</span><span><b>Ambiente</b><small>{data?.runtime?.environment||'Servidor'} · {diagnostics?.loading?'verificando':diagnostics?.ok?'pronto':'atenção'}</small></span>
       </button>
-      {!serverless&&<button className="updates-command" onClick={()=>setUiPanel('selftest')}>
+      {!managedHost&&<button className="updates-command" onClick={()=>setUiPanel('selftest')}>
         <span className="updates-command-icon">✓</span><span><b>Autoteste</b><small>{systemTest?.loading?'executando':systemTest?`${systemTest.score??'—'}% de saúde`:'verificar instalação'}</small></span>
       </button>}
-      {!serverless&&<button className="updates-command" onClick={()=>setUiPanel('snapshots')}>
+      {!managedHost&&<button className="updates-command" onClick={()=>setUiPanel('snapshots')}>
         <span className="updates-command-icon">↶</span><span><b>Snapshots</b><small>{data?.snapshots?.length||0} ponto(s) de retorno</small></span>
       </button>}
       <button className="updates-command" onClick={()=>setUiPanel('history')}>
         <span className="updates-command-icon">≡</span><span><b>Histórico</b><small>{data?.history?.length||0} operação(ões)</small></span>
       </button>
-      {!serverless&&<button className="updates-command" onClick={()=>setUiPanel('recovery')}>
+      {!managedHost&&<button className="updates-command" onClick={()=>setUiPanel('recovery')}>
         <span className="updates-command-icon">✦</span><span><b>Recuperação</b><small>{data?.restart?.strategy||'none'} · emergência</small></span>
       </button>}
     </div>
@@ -354,7 +368,7 @@ export default function AdminAtualizacoes(){
     {job&&job.type==='github-publish'&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}}/>}
 
     {uiPanel==='upload'&&<PanelModal kicker="NOVA VERSÃO" title="Validar e preparar pacote" onClose={()=>setUiPanel(null)}>
-      <p className="updates-panel-copy">{serverless?'Na Vercel, o ZIP é validado e permanece apenas durante o processamento.':'O ZIP é validado e extraído em staging. Nenhum arquivo da instalação é substituído nesta etapa.'}</p>
+      <p className="updates-panel-copy">{managedHost?'Em produção gerenciada, o ZIP é validado e a próxima etapa será Publicar no GitHub. Render/Vercel criam uma nova release; nenhum arquivo da instância atual é atualizado por cima.':'O ZIP é validado e extraído em staging. Nenhum arquivo da instalação é substituído nesta etapa.'}</p>
       <div className="updates-upload-row"><input className="updates-file-input" type="file" accept=".zip" onChange={e=>setFile(e.target.files?.[0]||null)} style={{color:C.text}}/><button className="updates-primary-action" disabled={uploading} onClick={prepare} style={{...btn,background:C.blue,color:'#fff'}}>{uploading?'Validando…':'Validar e preparar'}</button></div>
       {file&&<div className="updates-file-selected">Selecionado: <b>{file.name}</b> · {bytes(file.size)}</div>}
     </PanelModal>}
@@ -372,7 +386,7 @@ export default function AdminAtualizacoes(){
           ['MongoDB',data?.runtime?.stack?.mongodb?.stateLabel],
         ].map(([label,value])=><MiniStat key={label} label={label} value={value||'—'}/>)}
       </div>
-      {!serverless&&<>
+      {!managedHost&&<>
         <div className="updates-panel-section">
           <div className="updates-panel-head"><div><b>Diagnóstico do atualizador</b><small>{diagnostics?.loading?'Verificando permissões, recuperação e armazenamento…':diagnostics?.ok?'Ambiente pronto para atualizações protegidas.':diagnostics?'Existem bloqueios que precisam de atenção.':'Ainda não verificado.'}</small></div><button onClick={()=>runDiagnostics(true)} disabled={diagnostics?.loading||Boolean(activeOperation)}>{diagnostics?.loading?'Verificando…':'Verificar novamente'}</button></div>
           {!!diagnostics?.checks?.length&&<div className="updates-check-grid">{diagnostics.checks.map(c=><div key={c.id} className={`updates-check ${c.ok?'ok':'bad'}`}><b>{c.ok?'✓':'✕'} {c.label}</b>{c.detail!==undefined&&c.detail!==null&&<span>{typeof c.detail==='number'?bytes(c.detail):String(c.detail)}</span>}</div>)}</div>}
@@ -382,7 +396,7 @@ export default function AdminAtualizacoes(){
       </>}
     </PanelModal>}
 
-    {uiPanel==='selftest'&&!serverless&&<PanelModal kicker="AUTOTESTE" title="Saúde da instalação" onClose={()=>setUiPanel(null)} wide>
+    {uiPanel==='selftest'&&!managedHost&&<PanelModal kicker="AUTOTESTE" title="Saúde da instalação" onClose={()=>setUiPanel(null)} wide>
       <p className="updates-panel-copy">Confere backend, MongoDB, versões, arquivos essenciais, gravação, health check, RSS, portal e integrações conectadas sem alterar dados.</p>
       <div className="updates-panel-actions"><button className="primary-green" onClick={runSystemSelfTest} disabled={systemTest?.loading||Boolean(activeOperation)}>{systemTest?.loading?'Executando testes…':'Executar autoteste completo'}</button>{systemTest&&!systemTest.loading&&<button onClick={copySystemTest}>📋 Copiar diagnóstico</button>}</div>
       {systemTest?.loading&&<div className="updates-loading-panel">Executando verificações da instalação…</div>}
@@ -416,20 +430,20 @@ export default function AdminAtualizacoes(){
           <section className="updates-release-notes">
             <div className="updates-release-notes-head"><div><small>RELEASE BRIEF</small><b>O que mudou nesta versão</b></div><span>{notes.length} item(ns)</span></div>
             {notes.length?<div className="updates-release-note-list">{notes.slice(0,5).map((note,i)=><div key={i}><i>{String(i+1).padStart(2,'0')}</i><span>{note}</span></div>)}</div>:<div className="updates-empty">Esta versão não trouxe notas de alteração.</div>}
-            {notes.length>5&&<details className="updates-release-more"><summary>Ver changelog completo</summary><pre>{s.changelog}</pre></details>}
+            {notes.length>5&&<div className="updates-release-more updates-release-more-static"><div className="updates-release-more-title">Changelog completo</div><pre>{s.changelog}</pre></div>}
           </section>
           <div className="updates-release-health">
             <span>✓ {dependencyState[0]}</span><span>✓ {dependencyState[1]}</span><span>✓ integridade validada</span>
           </div>
           <div className="updates-release-actions">
-            {!serverless&&<button className="updates-install-action" disabled={Boolean(activeOperation)} onClick={()=>install(s)}>Simular e instalar</button>}
+            {!managedHost&&<button className="updates-install-action" disabled={Boolean(activeOperation)} onClick={()=>install(s)}>Simular e instalar</button>}
             <button className="updates-delete-action" disabled={Boolean(activeOperation)} onClick={()=>deletePrepared(s)}>Excluir versão</button>
           </div>
         </article>
       })}
     </PanelModal>}
 
-    {uiPanel==='snapshots'&&!serverless&&<PanelModal kicker="ROLLBACK" title="Snapshots disponíveis" onClose={()=>setUiPanel(null)}>
+    {uiPanel==='snapshots'&&!managedHost&&<PanelModal kicker="ROLLBACK" title="Snapshots disponíveis" onClose={()=>setUiPanel(null)}>
       <p className="updates-panel-copy">Retenção automática: os {data?.updateCapabilities?.snapshotRetention||3} snapshots mais recentes são mantidos.</p>
       {!data?.snapshots?.length?<div className="updates-empty">Nenhum snapshot criado ainda.</div>:data.snapshots.map(s=><div key={s.id} className="updates-list-row"><div><b>v{s.version}</b><small>{fmt(s.createdAt)}{s.safe===false?' · rollback manual indisponível':''}</small></div><div className="updates-row-actions"><button disabled={s.safe===false||Boolean(activeOperation)} onClick={()=>rollback(s)}>Rollback</button><button className="updates-delete-action" disabled={Boolean(activeOperation)} onClick={()=>deleteSnapshotItem(s)}>Excluir</button></div></div>)}
     </PanelModal>}
@@ -438,7 +452,7 @@ export default function AdminAtualizacoes(){
       {!data?.history?.length?<div className="updates-empty">Sem atualizações registradas.</div>:data.history.map(h=><div key={h.id} className="updates-history-row"><div><b>{h.type==='rollback'?'Rollback':h.type==='github-publish'?'GitHub':h.type==='recovery'?'Recuperação':'Atualização'} {h.fromVersion} → {h.toVersion}</b>{h.repository&&<span>{h.repository}{h.branch?` @ ${h.branch}`:''}</span>}<small>{fmt(h.createdAt)}</small></div><span className={`updates-history-status ${h.status==='success'?'ok':h.status==='rolled-back'?'bad':''}`}>{h.status}</span></div>)}
     </PanelModal>}
 
-    {uiPanel==='recovery'&&!serverless&&<PanelModal kicker="RECUPERAÇÃO" title="Reinício e emergência" onClose={()=>setUiPanel(null)}>
+    {uiPanel==='recovery'&&!managedHost&&<PanelModal kicker="RECUPERAÇÃO" title="Reinício e emergência" onClose={()=>setUiPanel(null)}>
       <div className="updates-runtime-grid" style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10}}><MiniStat label="Estratégia" value={data?.restart?.strategy||'none'}/><MiniStat label="Gerenciador" value={data?.runtime?.processManager||'—'}/></div>
       <p className="updates-panel-copy">Use a recuperação de emergência somente se uma atualização for interrompida e o backend não voltar sozinho.</p>
       {data?.updateCapabilities?.emergencyRecoveryCommand?<><div className="updates-code-label">COMANDO DE EMERGÊNCIA</div><code className="updates-code-block">{data.updateCapabilities.emergencyRecoveryCommand}</code></>:<div className="updates-empty">Nenhum comando de recuperação foi informado para este ambiente.</div>}
@@ -448,7 +462,7 @@ export default function AdminAtualizacoes(){
       <div className="updates-modal updates-github-modal" role="dialog" aria-modal="true" aria-labelledby="github-publish-title">
         <div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>MÓDULO DE PUBLICAÇÃO · {githubPublish.sourceType==='installed'?'INSTALAÇÃO ATUAL':'PACOTE PREPARADO'}</div>
         <h2 id="github-publish-title" style={{margin:'7px 0 4px',color:C.text,fontSize:20}}>GitHub / Vercel</h2>
-        <p style={{margin:'0 0 16px',color:C.muted,fontSize:13,lineHeight:1.55}}>O AL Sistemas publica {githubPublish.sourceType==='installed'?<><b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>o pacote como <b>commit no GitHub</b>.</>} {serverless?'O arquivo será processado temporariamente nesta requisição e descartado ao final. ':''}A Vercel não recebe o ZIP diretamente: quando existir um projeto Vercel ligado ao repositório/branch, o push do GitHub dispara o deployment.</p>
+        <p style={{margin:'0 0 16px',color:C.muted,fontSize:13,lineHeight:1.55}}>O AL Sistemas publica {githubPublish.sourceType==='installed'?<><b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>o pacote como <b>commit no GitHub</b>.</>} {serverless?'O arquivo será processado temporariamente nesta requisição e descartado ao final. ':''}{managedHost?'Em produção, o GitHub vira a origem da nova release. ':''}A Vercel/Render recebem a mudança pelo repositório conectado; o ZIP não vira armazenamento da plataforma.</p>
         {githubPublish.loading?<div style={{padding:'16px 0',color:C.muted}}>Consultando repositórios autorizados…</div>:<>
           {githubPublish.error&&<div style={{padding:11,borderRadius:9,border:`1px solid ${C.red}`,color:C.red,background:'var(--adm-surface2)',fontSize:12,marginBottom:12}}>{githubPublish.error}</div>}
           {(githubPublish.repositories||[]).length>0&&<>
@@ -491,7 +505,7 @@ export default function AdminAtualizacoes(){
       .updates-modal-field{display:block;font-size:12px;font-weight:800;margin-bottom:12px;color:var(--adm-text)}.updates-modal-field input,.updates-modal-field select{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:10px 11px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-bg);color:var(--adm-text)}.updates-github-modal{width:min(100%,590px)}.updates-deploy-check{padding:11px;border-radius:9px;background:var(--adm-surface2);font-size:11px;color:var(--adm-muted);line-height:1.5;margin:10px 0}.updates-deploy-check>div+div{margin-top:4px}.updates-modal-footer{display:flex;justify-content:flex-end;gap:9px;flex-wrap:wrap;margin-top:18px}.updates-modal-footer .primary-blue,.primary-blue{background:#2563eb;color:#fff;border-color:#2563eb}.updates-modal-footer .primary-green,.primary-green{background:#16a34a;color:#fff;border-color:#16a34a}.updates-modal-footer .danger{background:#dc2626;color:#fff;border-color:#dc2626}
       .updates-progress-modal{width:min(650px,calc(100vw - 24px));max-height:90vh;overflow:auto;padding:0!important}.updates-progress-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:20px 20px 14px}.updates-progress-embedded{margin:0 20px;padding-bottom:4px}.updates-progress-close{border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);width:34px;height:34px;border-radius:10px;font-size:22px;line-height:1;cursor:pointer;flex:0 0 auto}.updates-progress-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px 20px;color:var(--adm-muted);font-size:12px}
       @media(max-width:760px){.updates-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-status-pill{display:none}}
-      @media(max-width:560px){.updates-hero h1{font-size:24px!important}.updates-command{padding:12px 10px;gap:8px}.updates-command-icon{width:31px;height:31px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:12px;align-items:center;justify-content:center}.updates-modal{width:100%;max-height:calc(100dvh - 24px);border-radius:18px;padding:16px}.updates-upload-row{grid-template-columns:1fr}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:100%;max-height:calc(100dvh - 24px);border-radius:18px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}}
+      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:12px 10px;gap:8px}.updates-command-icon{width:31px;height:31px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:0;align-items:flex-end;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0;border-bottom:0;padding:16px}.updates-upload-row{grid-template-columns:1fr}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}}
       @media(max-width:390px){.updates-command small{font-size:9px}.updates-command b{font-size:12px}.updates-overview>div{padding:9px}}
     `}</style>
   </div>
@@ -538,12 +552,12 @@ function PreflightSummary({data}){
   {!!data.notes?.length&&<div style={{padding:10,borderRadius:9,border:'1px solid #16a34a44',background:'#16a34a0a',fontSize:12,lineHeight:1.5}}>
     {data.notes.map((n,i)=><div key={i} style={{margin:i?'5px 0 0':0}}>✓ {n}</div>)}
   </div>}
-  {(files.samples?.added?.length||files.samples?.changed?.length||files.samples?.removed?.length)?<details style={{padding:10,borderRadius:9,border:'1px solid var(--adm-border)',background:'var(--adm-bg)',fontSize:12}}>
-    <summary style={{cursor:'pointer',fontWeight:800,color:C.text}}>Ver exemplos dos arquivos afetados</summary>
+  {(files.samples?.added?.length||files.samples?.changed?.length||files.samples?.removed?.length)?<div style={{padding:10,borderRadius:9,border:'1px solid var(--adm-border)',background:'var(--adm-bg)',fontSize:12,maxHeight:220,overflow:'auto'}}>
+    <div style={{fontWeight:800,color:C.text}}>Exemplos dos arquivos afetados</div>
     {!!files.samples?.added?.length&&<div style={{marginTop:8}}><b style={{color:C.greenSolid}}>Novos</b>{files.samples.added.map(x=><div className="updates-wrap" key={`a-${x}`}>+ {x}</div>)}</div>}
     {!!files.samples?.changed?.length&&<div style={{marginTop:8}}><b style={{color:C.blue}}>Alterados</b>{files.samples.changed.map(x=><div className="updates-wrap" key={`c-${x}`}>~ {x}</div>)}</div>}
     {!!files.samples?.removed?.length&&<div style={{marginTop:8}}><b style={{color:'#b7791f'}}>Removidos</b>{files.samples.removed.map(x=><div className="updates-wrap" key={`r-${x}`}>- {x}</div>)}</div>}
-  </details>:null}
+  </div>:null}
   {!!data.warnings?.length&&<div style={{padding:10,borderRadius:9,border:'1px solid #f59e0b55',background:'#f59e0b12',fontSize:12}}>
     {data.warnings.map((w,i)=><div key={i} style={{margin:i?'5px 0 0':0}}>⚠️ {w}</div>)}
   </div>}

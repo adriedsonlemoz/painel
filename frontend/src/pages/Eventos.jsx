@@ -218,7 +218,7 @@ export default function Eventos() {
               </div>
               <div>
                 <p className="font-grotesk text-xs font-black uppercase tracking-widest text-brand-500">Agenda local</p>
-                <h1 className="font-display text-2xl font-bold text-gray-900 sm:text-3xl">Eventos em Iguatama e região</h1>
+                <h1 className="font-display text-xl font-bold text-gray-900 sm:text-2xl">Eventos em Iguatama e região</h1>
               </div>
             </div>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-gray-500">Confira festas, encontros, atividades e programações da cidade em uma agenda simples e atualizada.</p>

@@ -234,7 +234,7 @@ function PainelBanco({ status: statusInicial, onConcluido }) {
   const cnt = contagens
 
   return (
-    <div style={{ minHeight: '100vh', background: C.pageBg, fontFamily: "'Inter','Segoe UI',system-ui,sans-serif", padding: '16px 10px' }}>
+    <div style={{ minHeight: '100vh', background: C.pageBg, fontFamily: "'Geist','Segoe UI',system-ui,sans-serif", padding: '16px 10px' }}>
       <div style={{ maxWidth: 540, margin: '0 auto' }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, color: C.text, marginBottom: 4 }}>Gerenciar Banco de Dados</h2>
         <p style={{ fontSize: FONT.base, color: C.muted, marginBottom: 24 }}>

@@ -74,7 +74,7 @@ function StatCard({ label, value, cor }) {
       borderRadius: RADIUS.lg, padding: `${SPACE.md}px ${SPACE.lg}px`,
       textAlign: 'center',
     }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color: cor || C.text }}>{value}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: cor || C.text }}>{value}</div>
       <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>{label}</div>
     </div>
   )

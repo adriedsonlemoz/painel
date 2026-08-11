@@ -156,7 +156,7 @@ function FirstRunGuard({ children }) {
     setProbeElapsed(null)
     setShowProbe(false)
     const visualTimer = setTimeout(() => active && setShowProbe(true), 700)
-    // /api/setup/status é intencionalmente local: não consulta MongoDB.
+    // /api/setup/status usa o Mongo como autoridade em produção para reconhecer instalações existentes.
     setState(prev => ({ ...prev, loading: rotaProtegida, error: null }))
     setupService.status()
       .then(data => {
@@ -168,6 +168,11 @@ function FirstRunGuard({ children }) {
         // seja possível enxergar/registrar o tempo responsável pelo atraso.
         if (elapsed >= 700) setShowProbe(true)
         window.__AL_SETUP_BOOT__ = { status: data, elapsed, at: Date.now() }
+        if (data.setup_pending) {
+          setState(prev => ({ ...prev, loading: true, checked: false, needed: false, error: null }))
+          window.setTimeout(() => active && setState(prev => ({ ...prev, retry: prev.retry + 1 })), 900)
+          return
+        }
         setState(prev => ({ ...prev, loading: false, checked: true, needed: Boolean(data.setup_needed), error: null }))
       })
       .catch(error => {
