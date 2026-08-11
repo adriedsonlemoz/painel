@@ -129,7 +129,9 @@ function cloudReleaseView(doc){
     packageBytes:d.packageBytes||0,repository:d.repository||'',branch:d.branch||'main',
     publishMode:d.publishMode||'project',commitSha:d.commitSha||'',commitUrl:d.commitUrl||'',
     githubStatus:d.githubStatus||'pending',githubVerified:Boolean(d.githubVerified),githubVerifiedAt:d.githubVerifiedAt||null,githubVerification:d.githubVerification||{},
-    productionTarget:d.productionTarget||{},trackingStartedAt:d.trackingStartedAt||null,lastCheckedAt:d.lastCheckedAt||null,trackingAttempts:Number(d.trackingAttempts||0),
+    productionTarget:d.productionTarget||{},targetLockedAt:d.targetLockedAt||null,
+    publishJob:{id:d.publishJobId||'',status:d.publishStatus||'',phase:d.publishPhase||'',phaseLabel:d.publishPhaseLabel||'',progress:Number(d.publishProgress||0),heartbeatAt:d.publishHeartbeatAt||null,startedAt:d.publishStartedAt||null,completedAt:d.publishCompletedAt||null,attempts:Number(d.publishAttempts||0),error:d.publishError||'',commitMessage:d.publishCommitMessage||'',candidateSha:d.publishCandidateSha||'',candidateUrl:d.publishCandidateUrl||'',timeline:Array.isArray(d.publishTimeline)?d.publishTimeline:[]},
+    trackingStartedAt:d.trackingStartedAt||null,lastCheckedAt:d.lastCheckedAt||null,trackingAttempts:Number(d.trackingAttempts||0),
     stalledAt:d.stalledAt||null,interruptedAt:d.interruptedAt||null,recovery:d.recovery||{},vercel:d.vercel||{},render:d.render||{},
     productionReady:Boolean(d.productionReady),error:d.error||'',publishedAt:d.publishedAt||null,
     completedAt:d.completedAt||null,
@@ -137,23 +139,12 @@ function cloudReleaseView(doc){
 }
 async function listCloudReleases(limit=20){
   if(mongoose.connection.readyState!==1)return []
-  const docs=await UpdateRelease.find({}).sort({createdAt:-1}).limit(limit).lean()
-  const publishTimeout=Math.max(2*60*1000,Number(process.env.AL_UPDATE_GITHUB_PUBLISH_TIMEOUT_MS||12*60*1000))
-  const now=Date.now()
+  const docs=await UpdateRelease.find({}).sort({createdAt:-1}).limit(limit)
   for(const doc of docs){
-    if(doc.status==='publishing'&&!doc.commitSha){
-      const started=new Date(doc.updatedAt||doc.publishedAt||doc.createdAt||0).getTime()
-      if(started&&now-started>publishTimeout){
-        doc.status='publish-stalled'
-        doc.error='A publicação no GitHub foi interrompida antes de confirmar um commit. O pacote continua preservado no R2 e pode ser publicado novamente.'
-        doc.stalledAt=new Date()
-        doc.completedAt=new Date()
-        doc.recovery={action:'republish',message:'Reinicie a publicação usando o ZIP já armazenado no R2.',detectedAt:new Date()}
-        await UpdateRelease.updateOne({_id:doc._id},{$set:{status:doc.status,error:doc.error,stalledAt:doc.stalledAt,completedAt:doc.completedAt,recovery:doc.recovery}}).catch(()=>{})
-      }
-    }
+    if(doc.status==='publishing'&&!doc.commitSha) await ensureManagedPublishContinuity(doc)
   }
-  return docs.map(cloudReleaseView)
+  const fresh=await UpdateRelease.find({_id:{$in:docs.map(d=>d._id)}}).sort({createdAt:-1}).lean()
+  return fresh.map(cloudReleaseView)
 }
 async function cloudStorageStatus(){
   try{return await testR2UpdateStorage()}
@@ -232,8 +223,24 @@ async function verifyGithubReleaseCommit({token,repository,branch,commitSha,vers
   try{manifest=JSON.parse(Buffer.from(String(file.content).replace(/\n/g,''),'base64').toString('utf8'))}catch{throw new Error('O commit foi criado, mas al-sistemas.json não pôde ser validado.') }
   if(String(manifest.version||'')!==String(version||''))throw new Error(`O commit publicado contém AL Sistemas ${manifest.version||'sem versão'}, mas a release preparada é ${version}.`)
   let headSha=''
-  try{const branchData=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch||'main')}`);headSha=branchData?.commit?.sha||''}catch{}
-  return {ok:true,repository:normalized,branch:branch||'main',commitSha:commit.sha,branchHeadSha:headSha,version:String(manifest.version||''),verifiedAt:new Date()}
+  let branchContainsCommit=false
+  let branchRelation='unknown'
+  try{
+    const branchData=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch||'main')}`)
+    headSha=branchData?.commit?.sha||''
+    if(headSha&&headSha.toLowerCase()===String(commitSha).toLowerCase()){
+      branchContainsCommit=true
+      branchRelation='head'
+    }else if(headSha){
+      const compare=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(commitSha)}...${encodeURIComponent(branch||'main')}`)
+      branchRelation=String(compare?.status||'unknown')
+      branchContainsCommit=['ahead','identical'].includes(branchRelation)
+    }
+  }catch(e){
+    throw new Error(`O commit existe, mas não foi possível confirmar a branch ${branch||'main'}: ${e.message}`)
+  }
+  if(!branchContainsCommit)throw new Error(`O commit ${String(commitSha).slice(0,12)} existe no GitHub, porém a branch ${branch||'main'} não aponta para ele nem o contém em sua história (estado: ${branchRelation}).`)
+  return {ok:true,repository:normalized,branch:branch||'main',commitSha:commit.sha,branchHeadSha:headSha,branchContainsCommit,branchRelation,version:String(manifest.version||''),verifiedAt:new Date()}
 }
 async function platformDeployState(release){
   const [vercelCred,renderCred]=await Promise.all([
@@ -346,6 +353,179 @@ async function maybeTriggerRenderCommit(commitSha){
     return {triggered:true,deployId:deploy.id||''}
   }catch(e){return {triggered:false,reason:'error',error:e.message}}
 }
+
+const cloudPublishRunners=new Set()
+const CLOUD_PUBLISH_STALE_MS=Math.max(15_000,Number(process.env.AL_UPDATE_PUBLISH_HEARTBEAT_STALE_MS||35_000))
+const CLOUD_PUBLISH_MAX_ATTEMPTS=Math.max(1,Math.min(6,Number(process.env.AL_UPDATE_PUBLISH_MAX_ATTEMPTS||3)))
+const CLOUD_PUBLISH_TOTAL_TIMEOUT_MS=Math.max(5*60_000,Number(process.env.AL_UPDATE_GITHUB_PUBLISH_TIMEOUT_MS||25*60_000))
+
+function managedPublishRetryable(err){
+  const status=Number(err?.status||0)
+  return [408,425,429,500,502,503,504].includes(status)||/timeout|temporar|ECONN|ETIMEDOUT|fetch failed|network/i.test(String(err?.message||''))
+}
+
+async function updateManagedPublishProgress(releaseId,current={}){
+  const state=await UpdateRelease.findOne({releaseId}).select('status').lean().catch(()=>null)
+  if(state?.status==='interrupted'){
+    const e=new Error('Publicação encerrada pelo usuário. O pacote permanece no R2.');e.code='UPDATE_PUBLISH_INTERRUPTED';e.status=409;throw e
+  }
+  const timeline=Array.isArray(current.timeline)?current.timeline.slice(-30):[]
+  await UpdateRelease.updateOne({releaseId},{$set:{
+    publishStatus:current.status||'running',publishPhase:current.phase||'',publishPhaseLabel:current.phaseLabel||'',publishProgress:Number(current.progress||0),
+    publishHeartbeatAt:new Date(),publishError:current.error||'',publishTimeline:timeline,githubStatus:current.status==='failed'?'failed':'running',
+  }}).catch(()=>{})
+}
+
+function scheduleManagedReleasePublish(releaseId,{delayMs=0}={}){
+  if(!releaseId||cloudPublishRunners.has(releaseId))return false
+  const launch=()=>{
+    if(cloudPublishRunners.has(releaseId))return
+    cloudPublishRunners.add(releaseId)
+    void executeManagedReleasePublish(releaseId)
+      .catch(async err=>{
+        const current=await UpdateRelease.findOne({releaseId}).select('status').lean().catch(()=>null)
+        if(current?.status==='publishing')await UpdateRelease.updateOne({releaseId},{$set:{status:'failed',githubStatus:'failed',publishStatus:'failed',publishPhase:'failed',publishPhaseLabel:'Falha antes de iniciar a publicação',publishProgress:100,publishCompletedAt:new Date(),publishError:String(err?.message||err),error:String(err?.message||err),completedAt:new Date()}}).catch(()=>{})
+      })
+      .finally(()=>cloudPublishRunners.delete(releaseId))
+  }
+  if(delayMs>0){const t=setTimeout(launch,delayMs);t.unref?.()}else setImmediate(launch)
+  return true
+}
+
+async function ensureManagedPublishContinuity(doc){
+  if(!doc||doc.status!=='publishing'||doc.commitSha)return doc
+  const now=Date.now()
+  const heartbeat=new Date(doc.publishHeartbeatAt||doc.updatedAt||doc.createdAt||0).getTime()
+  const started=new Date(doc.publishStartedAt||doc.createdAt||0).getTime()
+  const attempts=Number(doc.publishAttempts||0)
+  const totalAge=started?now-started:0
+  const stale=!heartbeat||now-heartbeat>CLOUD_PUBLISH_STALE_MS
+  if(totalAge>CLOUD_PUBLISH_TOTAL_TIMEOUT_MS||attempts>=CLOUD_PUBLISH_MAX_ATTEMPTS&&stale){
+    await UpdateRelease.updateOne({_id:doc._id},{$set:{
+      status:'publish-stalled',githubStatus:'interrupted',publishStatus:'stalled',publishCompletedAt:new Date(),stalledAt:new Date(),completedAt:new Date(),
+      error:'A publicação persistente não conseguiu confirmar o GitHub dentro do limite de segurança. O ZIP continua preservado no R2.',
+      publishError:'Limite de retomadas automáticas atingido.',recovery:{action:'republish',message:'Use “Publicar novamente do R2” para iniciar uma nova tentativa no destino bloqueado.',detectedAt:new Date()},
+    }}).catch(()=>{})
+    return doc
+  }
+  if(stale)scheduleManagedReleasePublish(doc.releaseId)
+  return doc
+}
+
+async function executeManagedReleasePublish(releaseId){
+  let tempDir=null,packageRoot=null,heartbeat=null
+  const release=await UpdateRelease.findOne({releaseId})
+  if(!release||release.status!=='publishing'||release.commitSha)return
+  const attempt=Number(release.publishAttempts||0)+1
+  if(attempt>CLOUD_PUBLISH_MAX_ATTEMPTS){await ensureManagedPublishContinuity(release);return}
+  const repository=normalizeGithubRepository(release.repository||'')
+  const branch=String(release.branch||'main').trim()||'main'
+  if(!repository)throw new Error('Destino GitHub congelado ausente na release persistente.')
+  const frozenRepo=normalizeGithubRepository(release.productionTarget?.repository||'')
+  const frozenBranch=String(release.productionTarget?.branch||'main').trim()||'main'
+  if(frozenRepo&&frozenRepo.toLowerCase()!==repository.toLowerCase())throw new Error('O destino persistido da release diverge do destino GitHub congelado.')
+  if(frozenRepo&&frozenBranch.toLowerCase()!==branch.toLowerCase())throw new Error('A branch persistida da release diverge da branch de produção congelada.')
+  const token=await githubToken()
+  if(!token)throw Object.assign(new Error('GitHub não conectado. Configure a credencial em Integrações e APIs.'),{status:401})
+  const now=new Date()
+  // Se o Render reiniciou depois do push, confirme primeiro o SHA candidato já persistido.
+  // Isso evita criar um segundo commit apenas porque a verificação pós-push foi interrompida.
+  if(release.publishCandidateSha){
+    await UpdateRelease.updateOne({_id:release._id},{$set:{publishStatus:'running',publishPhase:'github-verify',publishPhaseLabel:'Retomando confirmação do commit já enviado',publishProgress:96,publishHeartbeatAt:now,githubStatus:'running',publishError:'',error:''},$inc:{publishAttempts:1}})
+    try{
+      const githubVerification=await verifyGithubReleaseCommit({token,repository,branch,commitSha:release.publishCandidateSha,version:release.version})
+      const renderKick=await maybeTriggerRenderCommit(release.publishCandidateSha)
+      const finished=new Date()
+      const saved=await UpdateRelease.findOneAndUpdate({releaseId},{$set:{
+        status:'deploying',githubStatus:'completed',githubVerified:true,githubVerifiedAt:finished,githubVerification,repository,branch,
+        commitSha:release.publishCandidateSha,commitUrl:release.publishCandidateUrl||'',publishedAt:finished,trackingStartedAt:finished,lastCheckedAt:null,trackingAttempts:0,
+        publishStatus:'completed',publishPhase:'completed',publishPhaseLabel:'GitHub confirmado após retomada',publishProgress:100,publishHeartbeatAt:finished,publishCompletedAt:finished,publishError:'',
+        publishCandidateSha:'',publishCandidateUrl:'',publishCandidateAt:null,stalledAt:null,interruptedAt:null,recovery:{},completedAt:null,error:'',...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{}),
+      }},{new:true})
+      await refreshCloudRelease(saved)
+      return
+    }catch(err){
+      const message=String(err?.message||'Não foi possível confirmar o commit candidato no GitHub.')
+      const retry=managedPublishRetryable(err)&&attempt<CLOUD_PUBLISH_MAX_ATTEMPTS
+      if(retry){
+        const delay=Math.min(30_000,Math.max(4000,Number(err?.retryAfterMs||0)||5000*attempt))
+        await UpdateRelease.updateOne({releaseId},{$set:{
+          status:'publishing',githubStatus:'retrying',publishStatus:'retry-wait',publishPhase:'retry-wait',publishPhaseLabel:`Confirmação do GitHub interrompida · retomando em ${Math.ceil(delay/1000)} s`,publishHeartbeatAt:new Date(),publishError:message,error:'',
+          recovery:{action:'auto-resume-candidate',message:'O SHA já enviado foi preservado. A próxima tentativa confirmará o mesmo commit antes de qualquer nova publicação.',detectedAt:new Date()},
+        }})
+        const resumeTimer=setTimeout(()=>scheduleManagedReleasePublish(releaseId),delay);resumeTimer.unref?.()
+      }else{
+        const recoverable=managedPublishRetryable(err)
+        await UpdateRelease.updateOne({releaseId},{$set:{
+          status:recoverable?'publish-stalled':'failed',githubStatus:'failed',githubVerified:false,publishStatus:recoverable?'stalled':'failed',publishPhase:'github-verify-failed',publishPhaseLabel:'Commit enviado, mas não confirmado na branch',publishProgress:100,publishHeartbeatAt:new Date(),publishCompletedAt:new Date(),publishError:message,error:message,stalledAt:recoverable?new Date():null,completedAt:new Date(),
+          recovery:{action:'reconcile-candidate',message:'O SHA candidato e o ZIP continuam preservados. Reconsulte antes de publicar novamente.',detectedAt:new Date()},
+        }})
+      }
+      return
+    }
+  }
+  await UpdateRelease.updateOne({_id:release._id},{$set:{
+    publishStatus:'running',publishPhase:'r2-download',publishPhaseLabel:'Baixando pacote preservado do R2',publishProgress:5,publishHeartbeatAt:now,
+    publishStartedAt:release.publishStartedAt||now,publishCompletedAt:null,publishError:'',githubStatus:'running',error:'',completedAt:null,
+  },$inc:{publishAttempts:1}})
+  heartbeat=setInterval(()=>{void UpdateRelease.updateOne({releaseId},{$set:{publishHeartbeatAt:new Date()}}).catch(()=>{})},5000);heartbeat.unref?.()
+  try{
+    tempDir=await fs.mkdtemp(path.join(os.tmpdir(),'alsistemas-r2-release-'))
+    const tempZip=path.join(tempDir,release.filename)
+    await downloadUpdatePackage(release,tempZip)
+    await UpdateRelease.updateOne({releaseId},{$set:{publishPhase:'package-validate',publishPhaseLabel:'Validando pacote recuperado do R2',publishProgress:10,publishHeartbeatAt:new Date()}})
+    const meta=await validateAndStage(tempZip,release.filename,{persist:false})
+    packageRoot=meta._packageRoot
+    if(meta.sha256!==release.packageSha256)throw new Error('O SHA-256 do pacote recuperado do R2 não corresponde ao pacote validado originalmente.')
+    const [owner,repo]=repository.split('/')
+    let previousCommitSha=release.previousCommitSha||''
+    if(!previousCommitSha){try{const head=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(branch)}`);previousCommitSha=head.sha||''}catch{}}
+    const jobId=release.publishJobId||`cloudpub_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+    if(!release.publishJobId)await UpdateRelease.updateOne({releaseId},{$set:{publishJobId:jobId}})
+    const job={
+      id:jobId,type:'github-publish',stageId:releaseId,stagePath:packageRoot,fromVersion:release.fromVersion||(await installedVersion()).version,toVersion:release.version,
+      repository,branch,publishMode:release.publishMode||'project',commitMessage:String(release.publishCommitMessage||`Atualiza AL Sistemas para ${release.version}`).slice(0,200),
+      status:'queued',progress:12,createdAt:release.publishStartedAt?.toISOString?.()||new Date().toISOString(),sourceType:'r2',
+    }
+    const finalJob=await runGithubPublish(job,token,{jobFile:null,persistHistory:false,onUpdate:current=>updateManagedPublishProgress(releaseId,current)})
+    await UpdateRelease.updateOne({releaseId},{$set:{publishPhase:'github-verify',publishPhaseLabel:'Confirmando commit e branch no GitHub',publishProgress:96,publishHeartbeatAt:new Date(),publishCandidateSha:finalJob.commitSha||'',publishCandidateUrl:finalJob.commitUrl||'',publishCandidateAt:new Date()}})
+    const githubVerification=await verifyGithubReleaseCommit({token,repository,branch,commitSha:finalJob.commitSha||'',version:release.version})
+    const renderKick=await maybeTriggerRenderCommit(finalJob.commitSha||'')
+    const finished=new Date()
+    const saved=await UpdateRelease.findOneAndUpdate({releaseId},{$set:{
+      status:'deploying',githubStatus:'completed',githubVerified:true,githubVerifiedAt:finished,githubVerification,repository,branch,
+      commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',previousCommitSha,publishedAt:finished,trackingStartedAt:finished,lastCheckedAt:null,trackingAttempts:0,
+      publishStatus:'completed',publishPhase:'completed',publishPhaseLabel:'GitHub confirmado',publishProgress:100,publishHeartbeatAt:finished,publishCompletedAt:finished,publishError:'',publishCandidateSha:'',publishCandidateUrl:'',publishCandidateAt:null,
+      stalledAt:null,interruptedAt:null,recovery:{},completedAt:null,error:'',...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{}),
+    }},{new:true})
+    await refreshCloudRelease(saved)
+  }catch(err){
+    const current=await UpdateRelease.findOne({releaseId}).lean().catch(()=>null)
+    if(current?.status==='interrupted'||err?.code==='UPDATE_PUBLISH_INTERRUPTED')return
+    const attempts=Number(current?.publishAttempts||attempt)
+    const retry=managedPublishRetryable(err)&&attempts<CLOUD_PUBLISH_MAX_ATTEMPTS
+    const message=String(err?.message||'Falha na publicação persistente.')
+    if(retry){
+      const delay=Math.min(30_000,Math.max(4000,Number(err?.retryAfterMs||0)||5000*attempts))
+      await UpdateRelease.updateOne({releaseId},{$set:{
+        status:'publishing',githubStatus:'retrying',publishStatus:'retry-wait',publishPhase:'retry-wait',publishPhaseLabel:`Conexão interrompida · retomando automaticamente em ${Math.ceil(delay/1000)} s`,publishHeartbeatAt:new Date(),publishError:message,error:'',
+        recovery:{action:'auto-resume',message:'A publicação será retomada automaticamente usando o mesmo ZIP do R2 e o mesmo destino congelado.',detectedAt:new Date()},
+      }}).catch(()=>{})
+      const resumeTimer=setTimeout(()=>scheduleManagedReleasePublish(releaseId),delay);resumeTimer.unref?.()
+    }else{
+      const recoverable=managedPublishRetryable(err)
+      await UpdateRelease.updateOne({releaseId},{$set:{
+        status:recoverable?'publish-stalled':'failed',githubStatus:'failed',githubVerified:false,publishStatus:recoverable?'stalled':'failed',publishPhase:'failed',publishPhaseLabel:'Publicação não confirmada',publishProgress:100,publishHeartbeatAt:new Date(),publishCompletedAt:new Date(),publishError:message,
+        error:message,stalledAt:recoverable?new Date():null,completedAt:new Date(),recovery:recoverable?{action:'republish',message:'O ZIP permanece no R2. Publique novamente sem reenviar o arquivo.',detectedAt:new Date()}: {},
+      }}).catch(()=>{})
+    }
+  }finally{
+    if(heartbeat)clearInterval(heartbeat)
+    if(packageRoot)await fs.rm(packageRoot,{recursive:true,force:true}).catch(()=>{})
+    if(tempDir)await fs.rm(tempDir,{recursive:true,force:true}).catch(()=>{})
+  }
+}
+
 router.get('/',async(_req,res,next)=>{try{
   const isTermux=IS_TERMUX
   const processManager=IS_VERCEL?'Vercel Functions':IS_RENDER?'Render Service':process.env.pm_id!==undefined?'PM2':process.env.INVOCATION_ID?'systemd':isTermux?'Termux/manual':'manual'
@@ -393,9 +573,12 @@ router.get('/',async(_req,res,next)=>{try{
 }catch(e){next(e)}})
 
 async function githubApi(token,pathName){
-  const r=await fetch(`https://api.github.com${pathName}`,{headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','User-Agent':'AL-Sistemas','X-GitHub-Api-Version':'2022-11-28'}})
+  let r
+  try{
+    r=await fetch(`https://api.github.com${pathName}`,{headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','User-Agent':'AL-Sistemas','X-GitHub-Api-Version':'2022-11-28'},signal:AbortSignal.timeout(20000)})
+  }catch(err){const e=new Error(`GitHub não respondeu a tempo: ${err.message}`);e.status=504;e.code='GITHUB_TIMEOUT';throw e}
   const data=await r.json().catch(()=>({}))
-  if(!r.ok){const e=new Error(data.message||`GitHub respondeu ${r.status}`);e.status=r.status;throw e}
+  if(!r.ok){const e=new Error(data.message||`GitHub respondeu ${r.status}`);e.status=r.status;const retry=Number(r.headers.get('retry-after')||0);if(retry)e.retryAfterMs=retry*1000;throw e}
   return data
 }
 function vercelApiUrl(pathName,teamId=''){
@@ -819,44 +1002,24 @@ router.post('/:stageId/publish-github',async(req,res,next)=>{let tempZip=null,pa
     const release=await UpdateRelease.findOne({releaseId:stageId})
     if(!release)return res.status(404).json({erro:'Pacote persistente não encontrado no histórico de atualizações.'})
     if(release.packageType==='incremental')return res.status(409).json({erro:'Na produção Vercel/Render use o pacote completo da versão.'})
-    await UpdateRelease.updateOne({_id:release._id},{$set:{status:'publishing',githubStatus:'running',githubVerified:false,githubVerifiedAt:null,githubVerification:{},productionTarget:managedTarget,repository,branch,publishMode,error:'',completedAt:null,stalledAt:null,interruptedAt:null,recovery:{}}})
-    const tempDir=await fs.mkdtemp(path.join(os.tmpdir(),'alsistemas-r2-release-'))
-    tempZip=path.join(tempDir,release.filename)
-    await downloadUpdatePackage(release,tempZip)
-    const meta=await validateAndStage(tempZip,release.filename,{persist:false})
-    packageRoot=meta._packageRoot
-    if(meta.sha256!==release.packageSha256)throw new Error('O SHA-256 do pacote baixado do R2 não corresponde ao pacote validado originalmente.')
-    const [owner,repo]=repository.split('/')
-    let previousCommitSha=''
-    try{const head=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(branch)}`);previousCommitSha=head.sha||''}catch{}
-    const id=`job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
-    const job={
-      id,type:'github-publish',stageId,stagePath:packageRoot,fromVersion:(await installedVersion()).version,toVersion:release.version,
-      repository,branch,publishMode,
-      commitMessage:String(req.body?.commitMessage||`Atualiza AL Sistemas para ${release.version}`).slice(0,200),
-      status:'queued',progress:0,createdAt:new Date().toISOString(),sourceType:'r2',
+    if(release.status==='publishing'&&!release.commitSha){
+      await ensureManagedPublishContinuity(release)
+      const current=await UpdateRelease.findOne({releaseId:stageId})
+      return res.status(202).json({message:'A publicação desta release já está em andamento e continuará a ser retomada automaticamente se o Render reiniciar.',job:{id:`cloud_${stageId}`,type:'cloud-release',releaseId:stageId,status:'running',phase:current.publishPhase||'github-publish',phaseLabel:current.publishPhaseLabel||'Publicando no GitHub',progress:Number(current.publishProgress||25),version:current.version,bucket:current.bucket,objectKey:current.objectKey},release:cloudReleaseView(current)})
     }
-    const finalJob=await runGithubPublishInline(job,token)
-    let githubVerification
-    try{
-      githubVerification=await verifyGithubReleaseCommit({token,repository,branch,commitSha:finalJob.commitSha||'',version:release.version})
-    }catch(verifyError){
-      await UpdateRelease.updateOne({_id:release._id},{$set:{status:'failed',githubStatus:'verification-failed',githubVerified:false,githubVerification:{ok:false,error:verifyError.message,checkedAt:new Date()},commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',error:`O GitHub recebeu uma publicação, mas a verificação falhou: ${verifyError.message}`,completedAt:new Date()}})
-      throw new Error(`Publicação não confirmada no GitHub: ${verifyError.message}`)
-    }
-    const renderKick=await maybeTriggerRenderCommit(finalJob.commitSha||'')
     const now=new Date()
-    const saved=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{
-      status:'deploying',githubStatus:'completed',githubVerified:true,githubVerifiedAt:now,githubVerification,productionTarget:managedTarget,repository,branch,publishMode,
-      commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',previousCommitSha,
-      publishedAt:now,trackingStartedAt:now,lastCheckedAt:null,trackingAttempts:0,stalledAt:null,interruptedAt:null,recovery:{},completedAt:null,error:'',
-      ...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{}),
-    }},{new:true})
-    const refreshed=await refreshCloudRelease(saved)
-    return res.status(200).json({
-      message:`AL Sistemas ${release.version} publicado no GitHub. Vercel e Render estão sendo acompanhados pela Central.`,
-      job:{...finalJob,type:'cloud-release',releaseId:stageId,status:refreshed.productionReady?'completed':'deploying',phase:refreshed.productionReady?'completed':'platform-deploy',phaseLabel:refreshed.productionReady?'Produção atualizada':'Aguardando Vercel e Render',progress:refreshed.productionReady?100:92},
-      release:refreshed,render:renderKick,
+    const publishJobId=`cloudpub_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+    const frozenTarget={...managedTarget,repository:managedTarget.repository,branch:managedTarget.branch||'main',lockedAt:now.toISOString()}
+    const updated=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{
+      status:'publishing',githubStatus:'queued',githubVerified:false,githubVerifiedAt:null,githubVerification:{},productionTarget:frozenTarget,targetLockedAt:now,
+      repository,branch,publishMode,error:'',completedAt:null,stalledAt:null,interruptedAt:null,recovery:{},publishCommitMessage:String(req.body?.commitMessage||`Atualiza AL Sistemas para ${release.version}`).slice(0,200),
+      publishJobId,publishStatus:'queued',publishPhase:'queued',publishPhaseLabel:'Publicação persistente criada',publishProgress:2,publishHeartbeatAt:now,publishStartedAt:now,publishCompletedAt:null,publishAttempts:0,publishError:'',publishCandidateSha:'',publishCandidateUrl:'',publishCandidateAt:null,publishTimeline:[{key:'queued',label:'Destino congelado e job persistido no MongoDB',progress:2,at:now.toISOString()}],
+    },$unset:{commitSha:'',commitUrl:''}},{new:true})
+    scheduleManagedReleasePublish(stageId)
+    return res.status(202).json({
+      message:`Publicação persistente do AL Sistemas ${release.version} iniciada. Você pode fechar a tela; o pacote está no R2 e o estado do job está no MongoDB.`,
+      job:{id:`cloud_${stageId}`,type:'cloud-release',releaseId:stageId,status:'running',phase:'queued',phaseLabel:'Preparando publicação persistente',progress:22,version:release.version,filename:release.filename,bucket:release.bucket,objectKey:release.objectKey},
+      release:cloudReleaseView(updated),productionTarget:frozenTarget,
     })
   }
 
@@ -885,16 +1048,26 @@ router.post('/:stageId/publish-github',async(req,res,next)=>{let tempZip=null,pa
 
 router.get('/cloud-releases/:releaseId/status',async(req,res,next)=>{try{
   if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Acompanhamento cloud é usado somente em Render/Vercel.'})
-  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  let release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
   if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  if(release.status==='publishing'&&!release.commitSha){
+    await ensureManagedPublishContinuity(release)
+    release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+    return res.json({release:cloudReleaseView(release)})
+  }
   const refreshed=await refreshCloudRelease(release)
   res.json({release:refreshed})
 }catch(e){next(e)}})
 
 router.post('/cloud-releases/:releaseId/reconcile',async(req,res,next)=>{try{
   if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Reconciliação cloud é usada somente em Render/Vercel.'})
-  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  let release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
   if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  if(release.status==='publishing'&&!release.commitSha){
+    await ensureManagedPublishContinuity(release)
+    release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+    return res.json({message:'Publicação persistente reconsultada. Se o Render tiver reiniciado, a retomada automática foi solicitada.',release:cloudReleaseView(release),githubVerification:release.githubVerification||{}})
+  }
   const token=await githubToken()
   let verification=release.githubVerification||{}
   if(token&&release.commitSha&&release.repository){
@@ -929,9 +1102,30 @@ router.post('/cloud-releases/:releaseId/interrupt',async(req,res,next)=>{try{
   const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
   if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
   const now=new Date()
-  const updated=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{status:'interrupted',productionReady:false,interruptedAt:now,completedAt:now,error:String(req.body?.reason||'Acompanhamento encerrado manualmente. O ZIP continua preservado no R2.'),recovery:{action:'manual-interrupt',at:now}}},{new:true})
+  const updated=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{status:'interrupted',productionReady:false,interruptedAt:now,completedAt:now,error:String(req.body?.reason||'Acompanhamento encerrado manualmente. O ZIP continua preservado no R2.'),publishStatus:release.status==='publishing'?'cancelled':release.publishStatus,publishPhase:release.status==='publishing'?'cancelled':release.publishPhase,publishPhaseLabel:release.status==='publishing'?'Publicação encerrada pelo usuário':release.publishPhaseLabel,publishCompletedAt:release.status==='publishing'?now:release.publishCompletedAt,recovery:{action:'manual-interrupt',at:now,message:'O pacote permanece no R2 e pode ser publicado novamente sem novo upload.'}}},{new:true})
   res.json({message:'Acompanhamento encerrado. O pacote permanece no R2 e pode ser publicado novamente depois.',release:cloudReleaseView(updated)})
 }catch(e){next(e)}})
 
 router.get('/jobs/:jobId',async(req,res,next)=>{try{if(!/^job_[0-9]+_[a-f0-9]+$/.test(req.params.jobId))return res.status(400).json({erro:'Job inválido.'}); res.json({job:JSON.parse(await fs.readFile(path.join(JOB_DIR,`${req.params.jobId}.json`),'utf8'))})}catch(e){next(e)}})
+
+// Recuperação autônoma: não depende de o navegador permanecer aberto.
+// Em um novo processo Render, o MongoDB informa quais publicações ficaram no meio do caminho.
+async function recoverManagedCloudOperations(){
+  if(!IS_MANAGED_PLATFORM||mongoose.connection.readyState!==1)return
+  try{
+    const publishing=await UpdateRelease.find({status:'publishing',commitSha:''}).sort({updatedAt:1}).limit(5)
+    for(const release of publishing)await ensureManagedPublishContinuity(release)
+    const deploying=await UpdateRelease.find({status:'deploying',commitSha:{$ne:''}}).sort({lastCheckedAt:1,updatedAt:1}).limit(3)
+    for(const release of deploying){
+      const last=new Date(release.lastCheckedAt||0).getTime()
+      if(!last||Date.now()-last>60_000)await refreshCloudRelease(release).catch(()=>{})
+    }
+  }catch{}
+}
+if(IS_MANAGED_PLATFORM&&!globalThis.__AL_UPDATE_CLOUD_RECOVERY_TIMER__){
+  const first=setTimeout(()=>{void recoverManagedCloudOperations()},8_000);first.unref?.()
+  const timer=setInterval(()=>{void recoverManagedCloudOperations()},30_000);timer.unref?.()
+  globalThis.__AL_UPDATE_CLOUD_RECOVERY_TIMER__=timer
+}
+
 export default router

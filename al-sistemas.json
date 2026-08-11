@@ -1,19 +1,20 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.104",
+  "version": "1.0.105",
   "packageFormat": 2,
   "changelog": [
-    "Atualizador cloud corrige a causa do travamento em Aguardando commit: antes de publicar, detecta o repositório e a branch realmente ligados à Vercel/Render e bloqueia qualquer destino diferente.",
-    "Após publicar no GitHub, o AL confirma que o SHA existe no repositório de produção, relê o al-sistemas.json daquele commit e verifica se a versão publicada corresponde ao pacote antes de iniciar Vercel/Render.",
-    "Atualizações não ficam mais presas indefinidamente: publicação interrompida, commit não reconhecido ou deploy sem confirmação entram em estados de atenção com prazo finito e ações Reconsultar, Tentar deploy novamente, Publicar novamente do R2 e Encerrar acompanhamento.",
-    "Pacotes já armazenados no R2 permanecem reutilizáveis na recuperação, evitando novo upload quando a publicação ou o acompanhamento forem interrompidos.",
-    "Central detecta e explica quando uma release foi publicada no repositório errado em vez de continuar esperando Vercel/Render para sempre.",
-    "A publicação gerenciada deixa de usar o repositório padrão global de Integrações como destino implícito; em Vercel/Render o destino de produção fica travado no repositório detectado pelas APIs das plataformas.",
-    "Diagnóstico GitHub diferencia falha real de build de falha transitória no envio de artifact/APK: quando apenas Upload Artifact falha após o build, a Central classifica como aviso e orienta reexecutar o workflow.",
-    "Diagnóstico Render prioriza o serviço principal configurado e evita alertas causados por serviços/deployments antigos desativados.",
-    "Atualizador local/VPS ganha recuperação automática quando npm ci falha apenas porque package-lock está desatualizado, podendo recorrer a npm install sem remover o fluxo tradicional.",
-    "IA corrige incompatibilidade detectada no diagnóstico: configurações antigas em Gemini 2.5 Flash são migradas em tempo de execução para Gemini 3.5 Flash-Lite, e requisições Gemini 3.x deixam de enviar parâmetros de amostragem descontinuados.",
-    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.104."
+    "Atualizador cloud passa a persistir também a fase de publicação GitHub no MongoDB; o POST inicia um job e responde rápido, sem depender de uma única requisição HTTP longa no Render.",
+    "Se o Render reiniciar no meio da publicação, a Central detecta heartbeat expirado e retoma automaticamente o mesmo ZIP preservado no R2, com limite de tentativas e estado de recuperação.",
+    "Se o Render reiniciar depois de o GitHub receber o push mas antes da confirmação, o SHA candidato fica persistido e é revalidado primeiro; o AL não cria um segundo commit automaticamente.",
+    "Um reconciliador cloud roda no backend mesmo sem a tela aberta: retoma publicações com heartbeat expirado e continua consultando deploys ativos em Vercel/Render.",
+    "O destino de produção fica congelado antes do job iniciar: repositório, branch e versão são persistidos e não podem ser trocados por uma preferência global durante a publicação.",
+    "A verificação pós-push ficou mais rígida: além de validar o commit e o al-sistemas.json, o AL confirma que a branch de produção aponta para o SHA publicado ou contém esse commit em sua história.",
+    "O monitor cloud usa o progresso persistido do job GitHub e mostra repositório/branch durante a publicação; fechar a tela não cancela o processamento persistente.",
+    "Encerrar uma operação em publicação agora marca o job como cancelado sem apagar o ZIP do R2, permitindo publicar novamente sem novo upload.",
+    "Núcleo de IA passa a interpretar Retry-After e RetryInfo dos provedores, entrando em cooldown imediatamente em 429/503 e seguindo para o fallback sem repetir chamadas que a API já pediu para aguardar.",
+    "Cotas identificadas como diárias recebem cooldown maior para evitar tentativas inúteis; o diagnóstico de Integrações mostra a pausa automática em segundos ou minutos.",
+    "Mensagens de falha de IA ficam mais curtas e distinguem limite de uso de indisponibilidade temporária, preparando a infraestrutura para uma futura Central de IA dedicada.",
+    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.105."
   ],
   "updatePackages": {
     "full": true,

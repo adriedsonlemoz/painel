@@ -23,7 +23,7 @@ async function copyTreeFiltered(source,dest,skipped){
   await walk(source)
 }
 
-export async function runGithubPublish(initialJob,token,{jobFile=null,persistHistory=true}={}){
+export async function runGithubPublish(initialJob,token,{jobFile=null,persistHistory=true,onUpdate=null}={}){
   if(!token) throw new Error('Token GitHub ausente.')
   let job={...initialJob}
   let heartbeat=null
@@ -36,6 +36,7 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
   async function update(patch){
     job={...job,...patch}
     if(jobFile) await writeJson(jobFile,job)
+    if(onUpdate) await onUpdate(job)
     return job
   }
   async function history(entry){

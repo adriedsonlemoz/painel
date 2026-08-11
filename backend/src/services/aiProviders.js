@@ -23,11 +23,40 @@ function parseRetryAfter(headers) {
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0
 }
 
+
+function parseRetryAfterData(data) {
+  const details = Array.isArray(data?.error?.details) ? data.error.details : []
+  for (const item of details) {
+    const raw = item?.retryDelay || item?.retry_delay
+    if (typeof raw === 'string') {
+      const m = raw.match(/^([0-9.]+)s$/i)
+      if (m) return Math.max(0, Math.round(Number(m[1]) * 1000))
+    }
+    if (raw && typeof raw === 'object') {
+      const sec = Number(raw.seconds || 0), nanos = Number(raw.nanos || 0)
+      if (Number.isFinite(sec) || Number.isFinite(nanos)) return Math.max(0, Math.round((sec || 0) * 1000 + (nanos || 0) / 1e6))
+    }
+  }
+  const msg = String(data?.error?.message || data?.message || '')
+  const m = msg.match(/retry(?:\s+in|\s+after)?\s+([0-9.]+)\s*s/i)
+  return m ? Math.max(0, Math.round(Number(m[1]) * 1000)) : 0
+}
+
+function quotaDetails(data) {
+  const details = Array.isArray(data?.error?.details) ? data.error.details : []
+  const violations=[]
+  for(const item of details){
+    const rows=Array.isArray(item?.violations)?item.violations:[]
+    for(const v of rows)violations.push({metric:v.quotaMetric||v.metric||'',id:v.quotaId||v.id||'',value:v.quotaValue||v.value||'',dimensions:v.quotaDimensions||v.dimensions||{}})
+  }
+  return violations.slice(0,8)
+}
 function makeError(data, status, label, headers) {
   const message = data?.error?.message || data?.message || `${label} respondeu ${status}`
   const e = new Error(message)
   e.status = status
-  e.retryAfterMs = parseRetryAfter(headers)
+  e.retryAfterMs = Math.max(parseRetryAfter(headers), parseRetryAfterData(data))
+  e.quota = quotaDetails(data)
   e.provider = label.toLowerCase()
   return e
 }

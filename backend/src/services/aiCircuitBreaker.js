@@ -1,6 +1,7 @@
 const states = new Map()
 const FAILURE_THRESHOLD = Math.max(2, Number(process.env.AI_CIRCUIT_FAILURES || 3))
 const DEFAULT_COOLDOWN_MS = Math.max(5000, Number(process.env.AI_CIRCUIT_COOLDOWN_MS || 60000))
+const DAILY_QUOTA_COOLDOWN_MS = Math.max(DEFAULT_COOLDOWN_MS, Number(process.env.AI_DAILY_QUOTA_COOLDOWN_MS || 15 * 60_000))
 
 function state(id) {
   if (!states.has(id)) states.set(id, { failures: 0, openUntil: 0, lastError: null, lastSuccessAt: null, lastFailureAt: null })
@@ -26,10 +27,13 @@ export function circuitFailure(id, error = {}) {
   const status = Number(error?.status || 0)
   const explicit = Number(error?.retryAfterMs || 0)
   const authFailure=[401,403].includes(status)
+  const quotaText=JSON.stringify(error?.quota||[])
+  const dailyQuota=/per.?day|requests?_per_day|daily|free_tier_requests/i.test(quotaText)||/per day|daily quota/i.test(String(error?.message||''))
   if (status === 429 || explicit > 0 || authFailure || s.failures >= FAILURE_THRESHOLD) {
     const exponential = DEFAULT_COOLDOWN_MS * Math.min(4, Math.max(1, s.failures - FAILURE_THRESHOLD + 1))
     const authCooldown=authFailure?Math.max(DEFAULT_COOLDOWN_MS,5*60_000):0
-    s.openUntil = Date.now() + Math.max(explicit, status === 429 ? DEFAULT_COOLDOWN_MS : 0, authCooldown, exponential)
+    const quotaCooldown=dailyQuota?DAILY_QUOTA_COOLDOWN_MS:0
+    s.openUntil = Date.now() + Math.max(explicit, status === 429 ? DEFAULT_COOLDOWN_MS : 0, authCooldown, quotaCooldown, exponential)
   }
   return { ...s }
 }

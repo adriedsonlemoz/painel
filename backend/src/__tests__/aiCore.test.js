@@ -25,6 +25,7 @@ describe('Núcleo IA — circuit breaker/contexto', () => {
   beforeEach(()=>resetCircuit())
   test('abre circuito após falhas repetidas',()=>{circuitFailure('gemini',new Error('x'));circuitFailure('gemini',new Error('x'));circuitFailure('gemini',new Error('x'));expect(circuitCanRun('gemini').ok).toBe(false)})
   test('sucesso fecha circuito',()=>{circuitFailure('gemini',Object.assign(new Error('quota'),{status:429}));circuitSuccess('gemini');expect(circuitCanRun('gemini').ok).toBe(true)})
+  test('quota diária abre cooldown prolongado',()=>{const e=Object.assign(new Error('daily quota'),{status:429,quota:[{id:'GenerateRequestsPerDayPerProjectPerModel-FreeTier'}]});circuitFailure('gemini',e);const st=circuitCanRun('gemini');expect(st.ok).toBe(false);expect(st.retryAfterMs).toBeGreaterThan(10*60*1000)})
   test('contexto de logs prioriza linhas de erro',()=>{const t=Array.from({length:100},(_,i)=>i===60?'ERROR falhou build':`linha ${i}`).join('\n');expect(selectRelevantLogContext(t,1000)).toContain('ERROR falhou build')})
   test('estima tokens de forma conservadora',()=>expect(approxTokens('12345678')).toBe(2))
 })

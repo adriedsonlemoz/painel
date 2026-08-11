@@ -160,12 +160,14 @@ export default function AdminAtualizacoes(){
         const rdReady=['live','succeeded','deployed'].includes(rd.toLowerCase())
         const vcWorking=['BUILDING','QUEUED','INITIALIZING','PENDING'].includes(vc)
         const rdWorking=/build|progress|queued|pending|update|create/i.test(rd)
-        const cloudProgress=rel.productionReady?100:(failed||attention)?100:Math.min(96,50+(vcReady?25:vcWorking?12:0)+(rdReady?25:rdWorking?12:0))
+        const publishing=rel.status==='publishing'&&!rel.commitSha
+        const publishProgress=Math.max(0,Math.min(100,Number(rel.publishJob?.progress||0)))
+        const cloudProgress=rel.productionReady?100:(failed||attention)?100:publishing?Math.min(49,25+Math.round(publishProgress*.24)):Math.min(96,50+(vcReady?25:vcWorking?12:0)+(rdReady?25:rdWorking?12:0))
         setJob(j=>({
           ...(j||{}),id:`cloud_${releaseId}`,type:'cloud-release',releaseId,version:rel.version||j?.version,
           status:rel.productionReady?'completed':failed?'failed':attention?'attention':'running',
-          phase:rel.productionReady?'completed':failed?'failed':attention?'attention':'platform-deploy',
-          phaseLabel:rel.productionReady?'Produção atualizada':rel.status==='deploy-target-mismatch'?'Destino de produção incorreto':rel.status==='deploy-stalled'?'Acompanhamento pausado':rel.status==='publish-stalled'?'Publicação interrompida':rel.status==='interrupted'?'Acompanhamento encerrado':rel.status==='deploy-blocked'?'Produção precisa ser vinculada':failed?'Falha em um deploy':'Aguardando Vercel e Render',
+          phase:rel.productionReady?'completed':failed?'failed':attention?'attention':publishing?'github-publish':'platform-deploy',
+          phaseLabel:rel.productionReady?'Produção atualizada':rel.status==='deploy-target-mismatch'?'Destino de produção incorreto':rel.status==='deploy-stalled'?'Acompanhamento pausado':rel.status==='publish-stalled'?'Publicação interrompida':rel.status==='interrupted'?'Acompanhamento encerrado':rel.status==='deploy-blocked'?'Produção precisa ser vinculada':failed?'Falha em um deploy':publishing?(rel.publishJob?.phaseLabel||'Publicando no GitHub'):'Aguardando Vercel e Render',
           progress:cloudProgress,
           commitSha:rel.commitSha,commitUrl:rel.commitUrl,error:rel.error||'',
           cloudRelease:rel,
@@ -877,18 +879,19 @@ function CloudPublishProgress({job}){
   const r2State=hasR2
     ?{tone:'ok',icon:'✓',label:'Pacote preparado',detail:`AL Sistemas ${job.version||rel.version||''} validado e preservado no R2.`,progress:100}
     :{tone:'run',icon:'●',label:'Preparando pacote',detail:'Validando a atualização e salvando o ZIP no armazenamento persistente.',progress:Math.min(95,Number(job.progress||0))}
-  const githubProgress=hasCommit?100:failed?100:Math.max(8,Math.min(94,Math.round(((Number(job.progress||28)-20)/72)*100)))
+  const persistentPublish=rel.publishJob||{}
+  const githubProgress=hasCommit?100:failed?100:Math.max(5,Math.min(98,Number(persistentPublish.progress||Math.round(((Number(job.progress||28)-20)/72)*100))))
   let ghState=hasCommit
     ?{tone:'ok',icon:'✓',label:'Commit publicado',detail:'Código enviado ao GitHub. As plataformas já podem implantar este SHA.',progress:100}
     :failed?{tone:'bad',icon:'✕',label:'Falhou',detail:'A publicação no GitHub não foi concluída.',progress:100}
-    :{tone:'run',icon:'●',label:'Publicando',detail:'Comparando a release, criando o commit e enviando a branch.',progress:githubProgress}
+    :{tone:'run',icon:'●',label:persistentPublish.status==='retry-wait'?'Retomando':'Publicando',detail:persistentPublish.phaseLabel||'Comparando a release, criando o commit e enviando a branch.',progress:githubProgress}
   if(rel.status==='publish-stalled')ghState={tone:'warn',icon:'!',label:'Publicação interrompida',detail:'Nenhum commit foi confirmado. O ZIP continua salvo no R2 e pode ser publicado novamente.',progress:100}
   if(rel.status==='deploy-target-mismatch')ghState={tone:'warn',icon:'!',label:'Destino incorreto',detail:'O commit existe, mas foi publicado em um repositório diferente do usado pela produção.',progress:100}
   if(rel.status==='interrupted')ghState={tone:'warn',icon:'!',label:'Acompanhamento encerrado',detail:'O histórico foi preservado e não ficará mais preso em atualização.',progress:hasCommit?100:0}
 
   const stages=[
     {number:'1',name:'Atualização principal',subtitle:'Pacote e R2',state:r2State,meta:(job.objectKey||rel.objectKey)?<><span>{job.bucket||rel.bucket||'bucket'}</span><code>{job.objectKey||rel.objectKey}</code></>:null},
-    {number:'2',name:'GitHub',subtitle:'Repositório e commit',state:ghState,meta:hasCommit?<><code>{String(job.commitSha||rel.commitSha).slice(0,12)}</code>{(job.commitUrl||rel.commitUrl)&&<a href={job.commitUrl||rel.commitUrl} target="_blank" rel="noreferrer">Abrir commit ↗</a>}</>:null,children:!hasCommit&&Array.isArray(job.timeline)&&job.timeline.length>0?<div className="updates-cloud-mini-steps">{job.timeline.slice(-3).map((x,i)=><span key={`${x.key}-${i}`}>{i===job.timeline.slice(-3).length-1?'●':'✓'} {x.label||STEP_LABELS[x.key]||x.key}</span>)}</div>:null},
+    {number:'2',name:'GitHub',subtitle:'Repositório e commit',state:ghState,meta:hasCommit?<><code>{String(job.commitSha||rel.commitSha).slice(0,12)}</code>{(job.commitUrl||rel.commitUrl)&&<a href={job.commitUrl||rel.commitUrl} target="_blank" rel="noreferrer">Abrir commit ↗</a>}</>:rel.repository?<><span>{rel.repository}</span><code>{rel.branch||'main'}</code></>:null,children:!hasCommit&&Array.isArray(persistentPublish.timeline)&&persistentPublish.timeline.length>0?<div className="updates-cloud-mini-steps">{persistentPublish.timeline.slice(-3).map((x,i)=><span key={`${x.key}-${i}`}>{i===persistentPublish.timeline.slice(-3).length-1?'●':'✓'} {x.label||STEP_LABELS[x.key]||x.key}</span>)}</div>:null},
     {number:'3',name:'Vercel',subtitle:'Frontend',state:vercel,meta:<><span>{rel.vercel?.checkedAt?`Consultado às ${new Date(rel.vercel.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.vercel?.url&&<a href={rel.vercel.url} target="_blank" rel="noreferrer">Abrir produção ↗</a>}</>},
     {number:'4',name:'Render',subtitle:'Backend',state:render,meta:<><span>{rel.render?.checkedAt?`Consultado às ${new Date(rel.render.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.render?.url&&<a href={rel.render.url} target="_blank" rel="noreferrer">Abrir backend ↗</a>}</>},
   ]

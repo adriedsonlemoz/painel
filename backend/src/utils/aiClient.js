@@ -76,7 +76,16 @@ function retryable(err) {
 }
 
 function failureShape(cfg, err) {
-  return { provedor:cfg.id, mensagem:redactAiText(err?.message || 'Falha desconhecida').slice(0,1200), status:err?.status || null, code:err?.code || null, retryAfterMs:Number(err?.retryAfterMs || 0) }
+  const status=Number(err?.status||0)
+  const retryAfterMs=Number(err?.retryAfterMs||0)
+  let mensagem=redactAiText(err?.message || 'Falha desconhecida').slice(0,1200)
+  if(status===429){
+    const wait=retryAfterMs?` Tente novamente em cerca de ${Math.max(1,Math.ceil(retryAfterMs/1000))} s.`:''
+    mensagem=`Limite de uso atingido neste provedor.${wait}`
+  }else if(status===503&&retryAfterMs){
+    mensagem=`Provedor temporariamente sem capacidade. Nova tentativa indicada em ${Math.max(1,Math.ceil(retryAfterMs/1000))} s.`
+  }
+  return { provedor:cfg.id, mensagem, status:err?.status || null, code:err?.code || null, retryAfterMs, quota:Array.isArray(err?.quota)?err.quota:[] }
 }
 
 function recordHealth(id, ok, details = {}) {
@@ -183,9 +192,18 @@ async function tryProvider({ cfg, systemPrompt, question, history, structured, p
         retries += 1
         const status = Number(err?.status || 0)
         const schemaFallback = structured?.schema && mode === 'schema' && [400,404,422,502].includes(status)
+        const rateLimited=status===429||(status===503&&Number(err?.retryAfterMs||0)>0)
+        if(rateLimited){
+          // Se a API já informou que precisa esperar, não desperdiçamos a cota repetindo
+          // imediatamente no mesmo provedor. Abrimos cooldown e seguimos para o fallback.
+          circuitFailure(cfg.id,err)
+          recordHealth(cfg.id,false,{status:status===429?'limite de uso atingido':'provedor temporariamente indisponível',model:cfg.model,errorStatus:status,errorCode:err.code||null,retryAfterMs:Number(err?.retryAfterMs||0)})
+          await recordAiUsage({ task, profile:profile.name, provider:cfg.id, model:cfg.model, status:'error', latencyMs:Date.now()-started, queueWaitMs, retries, errorStatus:err.status, errorCode:err.code, errorMessage:failureShape(cfg,err).mensagem })
+          throw err
+        }
         const canRetry = attempt < maxRetries && retryable(err) && !signal?.aborted
         if (canRetry) {
-          const waitMs = Math.min(Math.max(Number(err?.retryAfterMs || 0), 400 * (2 ** attempt) + Math.floor(Math.random()*250)), Math.max(0, deadlineAt - Date.now() - 1200), 5000)
+          const waitMs = Math.min(Math.max(400 * (2 ** attempt) + Math.floor(Math.random()*250), Number(err?.retryAfterMs || 0)), Math.max(0, deadlineAt - Date.now() - 1200), 8000)
           if (waitMs > 0) await sleep(waitMs, signal)
           continue
         }
@@ -291,8 +309,14 @@ export async function enviarMensagemStream({ systemPrompt, pergunta, historico=[
         }catch(err){
           lastError=err
           if(emitted) throw err
-          if(attempt===0&&retryable(err)){const wait=Math.min(Math.max(Number(err.retryAfterMs||0),500),2500);await sleep(wait,signal);continue}
-          circuitFailure(cfg.id,err);recordHealth(cfg.id,false,{status:redactAiText(err.message),model:cfg.model,errorStatus:err.status||null,errorCode:err.code||null})
+          const status=Number(err?.status||0)
+          if(status===429||(status===503&&Number(err?.retryAfterMs||0)>0)){
+            circuitFailure(cfg.id,err);recordHealth(cfg.id,false,{status:status===429?'limite de uso atingido':'provedor temporariamente indisponível',model:cfg.model,errorStatus:status,errorCode:err.code||null,retryAfterMs:Number(err?.retryAfterMs||0)})
+          }else if(attempt===0&&retryable(err)){
+            const wait=Math.min(Math.max(Number(err.retryAfterMs||0),500),4000);await sleep(wait,signal);continue
+          }else{
+            circuitFailure(cfg.id,err);recordHealth(cfg.id,false,{status:redactAiText(err.message),model:cfg.model,errorStatus:err.status||null,errorCode:err.code||null})
+          }
           await recordAiUsage({task,profile:resolved.name,provider:cfg.id,model:cfg.model,status:signal?.aborted?'cancelled':'error',latencyMs:Date.now()-started,queueWaitMs,retries:attempt,errorStatus:err.status,errorCode:err.code,errorMessage:redactAiText(err.message)})
         }
       }

@@ -81,9 +81,20 @@ AI_CONCURRENCY=2
 AI_MAX_QUEUE=100
 AI_CIRCUIT_FAILURES=3
 AI_CIRCUIT_COOLDOWN_MS=60000
+AI_DAILY_QUOTA_COOLDOWN_MS=900000
 ```
 
 Em Render, os padrões são adequados para começar. Aumente concorrência somente se a cota dos provedores suportar; reduzir concorrência costuma ser melhor para contas gratuitas.
+
+Na 1.0.105+, respostas `429`/`503` com `Retry-After` ou `RetryInfo` abrem cooldown imediatamente e o AL tenta o próximo provedor em vez de repetir a mesma chamada. Cotas identificadas como diárias entram em pausa maior para evitar consumir requisições inúteis.
+
+Para a publicação cloud, o job GitHub fica persistido no MongoDB e pode ser retomado após reinício do Render. Os limites operacionais opcionais são:
+
+```env
+AL_UPDATE_PUBLISH_HEARTBEAT_STALE_MS=35000
+AL_UPDATE_PUBLISH_MAX_ATTEMPTS=3
+AL_UPDATE_GITHUB_PUBLISH_TIMEOUT_MS=1500000
+```
 
 ### 3.3 Health check e auto-deploy
 
@@ -128,7 +139,7 @@ Depois do deploy, abra **Admin → Infraestrutura → Ambientes**. A tela deve m
 
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
-VITE_APP_VERSION=1.0.104
+VITE_APP_VERSION=1.0.105
 VITE_APP_ENV=production
 VITE_MODULE_PORTAL=true
 VITE_MODULE_GITHUB=true
