@@ -11,9 +11,11 @@ import { api, BASE_URL } from './http.js'
 export const githubService = {
   /* ── Originais (preservados) ─────────────────────────── */
   status: () => api('/github/status'),
+  atualizarPerfil: (dados) => api('/github/profile', { method: 'PATCH', body: JSON.stringify(dados) }),
   repos: ({ page = 1, per_page = 30, sort = 'updated', type = 'all' } = {}) =>
     api(`/github/repos?page=${page}&per_page=${per_page}&sort=${sort}&type=${type}`),
   repo: (owner, repo) => api(`/github/repos/${owner}/${repo}`),
+  atualizarRepo: (owner, repo, dados) => api(`/github/repos/${owner}/${repo}`, { method: 'PATCH', body: JSON.stringify(dados) }),
   insight: (owner, repo, branch = 'main') => api(`/github/repos/${owner}/${repo}/insight?branch=${encodeURIComponent(branch)}`),
   contents: (owner, repo, path = '', branch = '') => api(`/github/repos/${owner}/${repo}/contents?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`),
   excluirConteudo: (owner, repo, path, branch = '') => api(`/github/repos/${owner}/${repo}/contents`, { method: 'DELETE', body: JSON.stringify({ path, branch, confirmar: true, confirmarPath: path }) }),

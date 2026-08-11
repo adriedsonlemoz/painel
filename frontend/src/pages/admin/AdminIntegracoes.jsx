@@ -303,8 +303,9 @@ function GitHubConnector({current,form,setForm,github,setGithub,busy,onConnect,o
  return <div>
   <div style={{padding:14,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:16,fontSize:13,lineHeight:1.55}}>
    <strong>Token recomendado para o AL Sistemas</strong>
-   <div style={{marginTop:6,color:'var(--adm-muted)'}}>Como este painel pode publicar arquivos e, futuramente, administrar repositórios, use um <b>Personal Access Token (classic)</b> dedicado ao AL Sistemas.</div>
-   <div style={{marginTop:8}}><b>Para publicar/editar arquivos:</b> marque <b>repo</b> (repositórios privados e públicos) ou <b>public_repo</b> se você trabalhar exclusivamente com repositórios públicos.</div>
+   <div style={{marginTop:6,color:'var(--adm-muted)'}}>Como este painel publica arquivos, administra repositórios e pode editar o perfil conectado, use um <b>Personal Access Token (classic)</b> dedicado ao AL Sistemas.</div>
+   <div style={{marginTop:8}}><b>Para publicar e editar detalhes dos repositórios:</b> marque <b>repo</b> (privados e públicos) ou <b>public_repo</b> se trabalhar exclusivamente com repositórios públicos.</div>
+   <div style={{marginTop:5}}><b>Para editar o perfil pelo AL:</b> marque <b>user</b>. Em token fine-grained, use <b>Profile: write</b> para o perfil e <b>Administration: write</b> nos repositórios que poderão ter descrição/homepage alteradas.</div>
    <div style={{marginTop:5}}><b>Somente se quiser permitir apagar repositórios pelo painel:</b> marque também <b>delete_repo</b>. Essa permissão é poderosa e não é necessária para atualizar o site.</div>
    <div style={{marginTop:5}}><b>Workflows:</b> marque <b>workflow</b> apenas se o AL Sistemas precisar criar ou alterar arquivos em <code>.github/workflows/</code>.</div>
    <a href="https://github.com/settings/tokens/new" target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:10,color:'var(--adm-accent)',fontWeight:700}}>Criar Personal Access Token (classic) ↗</a>

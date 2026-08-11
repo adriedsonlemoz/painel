@@ -200,6 +200,8 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
   const [projetosLocais, setProjetosLocais] = useState([])
   const [loadingAba, setLoadingAba] = useState(false)
   const [erroAba, setErroAba] = useState(null)
+  const [repoDetalhes, setRepoDetalhes] = useState(repo)
+  const [repoAlterado, setRepoAlterado] = useState(false)
 
   const [deleteStep, setDeleteStep] = useState(0)
   const [deleteInput, setDeleteInput] = useState('')
@@ -231,6 +233,9 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
   const pushLogRef                  = useRef(null)
 
   const [owner, repoNome] = (repo.nomeCompleto || `?/${repo.nome}`).split('/')
+
+  const fecharPainel = () => onFechar(repoAlterado)
+  const atualizarRepoLocal = (novoRepo) => { setRepoDetalhes(novoRepo); setRepoAlterado(true) }
 
   useEffect(() => {
     githubService.getMeta(repo.id).then(m => {
@@ -362,9 +367,9 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
       position: 'fixed', inset: 0, zIndex: 1000,
       background: '#000a',
       display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
-    }} onClick={e => e.target === e.currentTarget && onFechar()}>
-      <div style={{
-        width: 'min(640px, 100vw)', height: '100dvh',
+    }} onClick={e => e.target === e.currentTarget && fecharPainel()}>
+      <div className="gh-repo-drawer" style={{
+        width: 'min(720px, 100vw)', height: '100dvh',
         background: C.bg, borderLeft: `1px solid ${C.border}`,
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
       }}>
@@ -374,9 +379,10 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACE.lg,
           position: 'sticky', top: 0, background: C.bg, zIndex: 10,
         }}>
-          <div style={{ minWidth: 0 }}>
+          <div className="gh-repo-identity" style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: FONT.lg, fontWeight: 800, color: C.text, wordBreak: 'break-all' }}>{repo.nomeCompleto}</span>
+              <span className="gh-repo-title" style={{ fontSize: FONT.lg, fontWeight: 800, color: C.text }}>{repoDetalhes.nome || repo.nome}</span>
+              <DSBadge variant={repoDetalhes.privado ? 'gray' : 'green'}>{repoDetalhes.privado ? 'Privado' : 'Público'}</DSBadge>
               {meta?.favorito && <span style={{ fontSize: FONT.lg - 1 }}>⭐</span>}
               {meta?.statusInterno && meta.statusInterno !== 'ativo' && (
                 <DSBadge style={{ color: STATUS_CFG[meta.statusInterno]?.cor, background: `${STATUS_CFG[meta.statusInterno]?.cor}18` }}>
@@ -384,26 +390,25 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
                 </DSBadge>
               )}
             </div>
-            {meta?.alias && <div style={{ fontSize: FONT.sm, color: C.muted, marginTop: 2 }}>alias: {meta.alias}</div>}
+            <div className="gh-repo-path" style={{ fontSize:FONT.sm, color:C.muted, marginTop:3 }}>{owner}/{repoNome}</div>
+            {meta?.alias && <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>alias: {meta.alias}</div>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexShrink: 0 }}>
+          <div className="gh-repo-header-actions" style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexShrink: 0 }}>
             <a
-              href={githubService.downloadZipUrl(owner, repoNome, repo?.default_branch)}
+              href={githubService.downloadZipUrl(owner, repoNome, repoDetalhes?.branch || repoDetalhes?.default_branch)}
               download
               title={`Baixar código-fonte de ${owner}/${repoNome} como ZIP`}
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: SPACE.xs,
+                display: 'inline-flex', alignItems: 'center', justifyContent:'center', gap: SPACE.xs,
                 fontSize: FONT.sm, fontWeight: 600, color: C.muted,
                 background: C.surface2, border: `1px solid ${C.border}`,
-                borderRadius: RADIUS.sm, padding: '5px 10px',
-                textDecoration: 'none', transition: 'all .15s',
-                flexShrink: 0,
+                borderRadius: RADIUS.sm, padding: '6px 10px', minHeight:34,
+                textDecoration: 'none', transition: 'all .15s', flexShrink: 0,
               }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.text }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                width="13" height="13">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
@@ -411,7 +416,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               ZIP
             </a>
             <DSBtn variant="primary" size="sm" onClick={abrirModalSalvar}>📥 Salvar em Projetos</DSBtn>
-            <DSBtn variant="ghost" size="icon" onClick={() => onFechar()}>✕</DSBtn>
+            <DSBtn variant="ghost" size="icon" onClick={fecharPainel} aria-label="Fechar repositório">✕</DSBtn>
           </div>
         </div>
 
@@ -521,6 +526,9 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
             </div>
             <div style={{width:8,height:8,borderRadius:'50%',background:C.greenSolid,boxShadow:`0 0 0 5px ${C.greenSolid}18`}} title="Conectado ao GitHub" />
           </div>
+          <select className="gh-command-select" value={aba} onChange={e => mudarAba(e.target.value)} aria-label="Seção do repositório">
+            {ABAS.map(a => <option key={a.id} value={a.id}>{a.grupo} · {a.label}</option>)}
+          </select>
           <div className="gh-command-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8}}>
             {ABAS.map(a => (
               <button key={a.id} onClick={() => mudarAba(a.id)} className="gh-command-btn" style={{
@@ -534,7 +542,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
               </button>
             ))}
           </div>
-          <style>{`@media(max-width:720px){.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-command-desc{font-size:9px!important}.gh-command-deck{position:relative!important;top:auto!important}.gh-repo-head{position:relative!important;top:auto!important}.gh-file-row{grid-template-columns:minmax(0,1fr)!important}.gh-file-actions{justify-content:flex-end!important}.gh-clean-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}}`}</style>
+          <style>{`@media(max-width:720px){.gh-command-grid{display:none!important}.gh-command-select{display:block!important}.gh-command-deck{position:relative!important;top:auto!important}.gh-repo-head{position:relative!important;top:auto!important}.gh-file-row{grid-template-columns:minmax(0,1fr)!important}.gh-file-actions{justify-content:flex-end!important}.gh-clean-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}}`}</style>
         </div>
 
         {/* Conteúdo */}
@@ -545,7 +553,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
             <div style={{ textAlign: 'center', padding: `${SPACE.xl5}px 0`, color: C.amber, fontSize: FONT.base }}>{erroAba}</div>
           ) : (
             <>
-              {aba === 'visao'     && <AbaVisao repo={repo} readme={readme} />}
+              {aba === 'visao'     && <AbaVisao repo={repoDetalhes} readme={readme} toastShow={toastShow} onRepoAtualizado={atualizarRepoLocal} />}
               {aba === 'meta'      && metaDraft && <AbaMeta metaDraft={metaDraft} setMetaDraft={setMetaDraft} projetosLocais={projetosLocais} salvandoMeta={salvandoMeta} onSalvar={salvarMeta} />}
               {aba === 'commits'   && <AbaCommits commits={commits} owner={owner} repo={repoNome} />}
               {aba === 'releases'  && <AbaReleases releases={releases} showRelease={showRelease} setShowRelease={setShowRelease} novaRelease={novaRelease} setNovaRelease={setNovaRelease} onCriar={criarRelease} criandoRelease={criandoRelease} />}
@@ -687,20 +695,92 @@ function AbaArquivos({ owner, repo, branch, toastShow }) {
   </div>
 }
 
-function AbaVisao({ repo, readme }) {
+function AbaVisao({ repo, readme, toastShow, onRepoAtualizado }) {
+  const [showGitHubEdit, setShowGitHubEdit] = useState(false)
+  const [salvandoGitHub, setSalvandoGitHub] = useState(false)
+  const [draft, setDraft] = useState({ descricao: repo.descricao || '', homepage: repo.homepage || '' })
+  const [owner, repoNome] = (repo.nomeCompleto || `?/${repo.nome}`).split('/')
+
+  useEffect(() => {
+    setDraft({ descricao: repo.descricao || '', homepage: repo.homepage || '' })
+  }, [repo.descricao, repo.homepage])
+
+  async function salvarNoGitHub() {
+    setSalvandoGitHub(true)
+    try {
+      const atualizado = await githubService.atualizarRepo(owner, repoNome, {
+        descricao: draft.descricao,
+        homepage: draft.homepage,
+      })
+      onRepoAtualizado?.({ ...repo, descricao: atualizado.descricao || '', homepage: atualizado.homepage || '' })
+      setShowGitHubEdit(false)
+      toastShow('Descrição e site atualizados no GitHub.')
+    } catch (e) {
+      toastShow(e.message || 'Não foi possível atualizar o repositório.', 'erro')
+    } finally {
+      setSalvandoGitHub(false)
+    }
+  }
+
   return (
     <div>
-      <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Informações do Repositório</DSSectionTitle>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:SPACE.md, marginBottom:SPACE.lg }}>
+        <DSSectionTitle style={{ margin:0 }}>Dados no GitHub</DSSectionTitle>
+        <DSBtn variant="secondary" size="sm" onClick={() => setShowGitHubEdit(true)}>✎ Editar no GitHub</DSBtn>
+      </div>
+
+      <div className="gh-github-summary">
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontSize:FONT.xs, color:C.muted, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em', marginBottom:4 }}>Descrição</div>
+          <div style={{ fontSize:FONT.base, color:repo.descricao ? C.text : C.muted, lineHeight:1.55 }}>
+            {repo.descricao || 'Sem descrição pública.'}
+          </div>
+        </div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontSize:FONT.xs, color:C.muted, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em', marginBottom:4 }}>Site / Homepage</div>
+          {repo.homepage ? (
+            <a href={repo.homepage} target="_blank" rel="noopener noreferrer" style={{ fontSize:FONT.sm, color:C.blue, wordBreak:'break-word' }}>{repo.homepage}</a>
+          ) : <div style={{ fontSize:FONT.sm, color:C.muted }}>Não informado.</div>}
+        </div>
+      </div>
+
+      <DSModal
+        open={showGitHubEdit}
+        onClose={() => !salvandoGitHub && setShowGitHubEdit(false)}
+        title="Editar detalhes no GitHub"
+        size="sm"
+        footer={<>
+          <DSBtn variant="primary" onClick={salvarNoGitHub} loading={salvandoGitHub} disabled={salvandoGitHub}>Salvar no GitHub</DSBtn>
+          <DSBtn onClick={() => setShowGitHubEdit(false)} disabled={salvandoGitHub}>Cancelar</DSBtn>
+        </>}
+      >
+        <div style={{ display:'grid', gap:SPACE.lg }}>
+          <div style={{ fontSize:FONT.sm, color:C.muted, lineHeight:1.5 }}>
+            Usa o mesmo token configurado em <b style={{ color:C.text }}>Integrações e APIs</b>. Se o GitHub negar a alteração, conceda <b style={{ color:C.text }}>Administration: write</b> ao token fine-grained para este repositório.
+          </div>
+          <label>
+            <div style={{ fontSize:FONT.sm, color:C.muted, fontWeight:700, marginBottom:SPACE.xs }}>Descrição</div>
+            <textarea value={draft.descricao} onChange={e => setDraft(p => ({ ...p, descricao:e.target.value }))} maxLength={350} rows={4} style={{ ...inp(), resize:'vertical', minHeight:90 }} placeholder="Descreva o projeto" />
+            <div style={{ fontSize:FONT.xs, color:C.muted, textAlign:'right', marginTop:3 }}>{draft.descricao.length}/350</div>
+          </label>
+          <label>
+            <div style={{ fontSize:FONT.sm, color:C.muted, fontWeight:700, marginBottom:SPACE.xs }}>Homepage</div>
+            <input value={draft.homepage} onChange={e => setDraft(p => ({ ...p, homepage:e.target.value }))} style={inp()} placeholder="https://..." inputMode="url" />
+          </label>
+        </div>
+      </DSModal>
+
+      <DSSectionTitle style={{ marginTop:SPACE.xl2, marginBottom: SPACE.lg }}>Informações do repositório</DSSectionTitle>
       <div className="gh-detail-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: SPACE.md + 2, marginBottom: SPACE.xl2 }}>
         {[
           { label: 'Linguagem',  val: repo.linguagem || '—' },
           { label: 'Branch',     val: repo.branch    || '—' },
-          { label: 'Stars',      val: `★ ${repo.stars}` },
-          { label: 'Forks',      val: `⑂ ${repo.forks}` },
-          { label: 'Issues',     val: `● ${repo.issues}` },
+          { label: 'Stars',      val: `★ ${repo.stars || 0}` },
+          { label: 'Forks',      val: `⑂ ${repo.forks || 0}` },
+          { label: 'Issues',     val: `● ${repo.issues || 0}` },
           { label: 'Criado em',  val: repo.criadoEm ? new Date(repo.criadoEm).toLocaleDateString('pt-BR') : '—' },
           { label: 'Atualizado', val: relTime(repo.ultimaAtualizacao) },
-          { label: 'Tamanho',    val: repo.tamanho ? `${repo.tamanho} KB` : '—' },
+          { label: 'Tamanho',    val: fmtRepoSize(repo.tamanho) },
         ].map(item => (
           <div key={item.label} style={{
             background: C.surface, borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px 14px`, border: `1px solid ${C.border}`,
@@ -710,7 +790,6 @@ function AbaVisao({ repo, readme }) {
           </div>
         ))}
       </div>
-      {repo.descricao && <div style={{ fontSize: FONT.base, color: C.muted, lineHeight: 1.6, marginBottom: SPACE.lg }}>{repo.descricao}</div>}
       {repo.temas?.length > 0 && (
         <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap', marginBottom: SPACE.lg }}>
           {repo.temas.map(t => <DSBadge key={t} variant="blue">{t}</DSBadge>)}
@@ -723,19 +802,17 @@ function AbaVisao({ repo, readme }) {
       <DSSectionTitle style={{ marginTop: SPACE.xl3, marginBottom: SPACE.lg }}>README</DSSectionTitle>
       {readme === null ? (
         <div style={{ fontSize: FONT.base, color: C.muted }}>Sem README.</div>
+      ) : readme?.html ? (
+        <article className="gh-readme" dangerouslySetInnerHTML={{ __html: readme.html }} />
       ) : readme?.conteudo ? (
-        <pre style={{
-          background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.md,
-          padding: `14px`, fontSize: FONT.sm, color: C.text,
-          lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          maxHeight: 320, overflowY: 'auto',
-        }}>{readme.conteudo.slice(0, 4000)}{readme.conteudo.length > 4000 ? '\n\n[...truncado]' : ''}</pre>
+        <pre className="gh-readme-fallback">{readme.conteudo}</pre>
       ) : (
         <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando README...</div>
       )}
     </div>
   )
 }
+
 
 /* ── ABA: Metadados ──────────────────────────────────────── */
 function AbaMeta({ metaDraft, setMetaDraft, projetosLocais, salvandoMeta, onSalvar }) {
@@ -1748,7 +1825,6 @@ function RepoCard({ repo, meta, insight, onAbrir }) {
           <span title="Issues abertas">● <b>{repo.issues || 0}</b></span>
           {repo.watchers > 0 && <span title="Watchers">◉ <b>{repo.watchers}</b></span>}
         </div>
-        <span title={`Criado em ${shortDate(repo.criadoEm)}`}>Atualizado {relTime(repo.ultimaAtualizacao)}</span>
       </div>
 
       {meta?.tags?.length > 0 && (
@@ -1778,12 +1854,72 @@ const FILTRO_STATUS = [
   { value: 'arquivado', label: 'Arquivados'  },
 ]
 
+function PerfilGitHubModal({ open, status, onClose, onSaved, toastShow }) {
+  const [draft, setDraft] = useState({})
+  const [salvando, setSalvando] = useState(false)
+
+  useEffect(() => {
+    if (!open || !status) return
+    setDraft({
+      name: status.nome || '', email: status.email || '', blog: status.blog || '',
+      company: status.empresa || '', location: status.localizacao || '',
+      hireable: !!status.contratavel, bio: status.bio || '', twitter_username: status.twitter || '',
+    })
+  }, [open, status])
+
+  const upd = (k, v) => setDraft(prev => ({ ...prev, [k]: v }))
+  async function salvar() {
+    setSalvando(true)
+    try {
+      const atualizado = await githubService.atualizarPerfil(draft)
+      toastShow(atualizado.mensagem || 'Perfil atualizado no GitHub.')
+      onSaved?.(atualizado)
+      onClose()
+    } catch (e) {
+      toastShow(e.message || 'Não foi possível atualizar o perfil.', 'erro')
+    } finally { setSalvando(false) }
+  }
+
+  return (
+    <DSModal open={open} onClose={() => !salvando && onClose()} title="Editar perfil do GitHub" size="md"
+      footer={<><DSBtn variant="primary" onClick={salvar} loading={salvando} disabled={salvando}>Salvar no GitHub</DSBtn><DSBtn onClick={onClose} disabled={salvando}>Cancelar</DSBtn></>}>
+      <div style={{ display:'grid', gap:SPACE.lg }}>
+        <div className="gh-profile-edit-head">
+          {status?.avatar && <img src={status.avatar} alt={status.login} className="gh-profile-edit-avatar" />}
+          <div style={{ minWidth:0, flex:1 }}>
+            <b style={{ display:'block', color:C.text, fontSize:FONT.md }}>{status?.nome || status?.login}</b>
+            <span style={{ color:C.muted, fontSize:FONT.sm }}>@{status?.login}</span>
+            <div style={{ fontSize:FONT.xs, color:C.muted, marginTop:5, lineHeight:1.4 }}>
+              A API do GitHub não oferece upload de avatar neste endpoint. A foto pode ser alterada nas configurações do perfil.
+            </div>
+          </div>
+          <a href="https://github.com/settings/profile" target="_blank" rel="noopener noreferrer" className="gh-external-btn">Alterar foto ↗</a>
+        </div>
+        <div style={{ fontSize:FONT.sm, color:C.muted, lineHeight:1.5 }}>
+          Esta edição usa exclusivamente o token salvo em <b style={{ color:C.text }}>Integrações e APIs</b>. Token fine-grained precisa de <b style={{ color:C.text }}>Profile: write</b>; token classic precisa do escopo <b style={{ color:C.text }}>user</b>.
+        </div>
+        <div className="gh-profile-form-grid">
+          <label><span>Nome</span><input value={draft.name || ''} onChange={e=>upd('name',e.target.value)} style={inp()} /></label>
+          <label><span>E-mail público</span><input type="email" value={draft.email || ''} onChange={e=>upd('email',e.target.value)} style={inp()} /></label>
+          <label><span>Empresa</span><input value={draft.company || ''} onChange={e=>upd('company',e.target.value)} style={inp()} /></label>
+          <label><span>Localização</span><input value={draft.location || ''} onChange={e=>upd('location',e.target.value)} style={inp()} /></label>
+          <label className="gh-profile-wide"><span>Site / blog</span><input value={draft.blog || ''} onChange={e=>upd('blog',e.target.value)} style={inp()} inputMode="url" placeholder="https://..." /></label>
+          <label className="gh-profile-wide"><span>Twitter / X</span><input value={draft.twitter_username || ''} onChange={e=>upd('twitter_username',e.target.value)} style={inp()} placeholder="usuário sem @" /></label>
+          <label className="gh-profile-wide"><span>Bio</span><textarea value={draft.bio || ''} onChange={e=>upd('bio',e.target.value)} style={{...inp(),minHeight:92,resize:'vertical'}} maxLength={160} /></label>
+          <label className="gh-profile-wide gh-profile-check"><input type="checkbox" checked={!!draft.hireable} onChange={e=>upd('hireable',e.target.checked)} /> Disponível para contratação</label>
+        </div>
+      </div>
+    </DSModal>
+  )
+}
+
 export default function AdminGitHub() {
   const [sort,         setSort]         = useState('updated')
   const [busca,        setBusca]        = useState('')
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [filtroVis,    setFiltroVis]    = useState('todos')
   const [repoAberto,   setRepoAberto]   = useState(null)
+  const [showPerfil,    setShowPerfil]    = useState(false)
   const [metas,        setMetas]        = useState({})
   const [insights,     setInsights]     = useState({})
 
@@ -1822,7 +1958,7 @@ export default function AdminGitHub() {
       filtroStatus === 'favoritos' ? !!meta?.favorito :
       filtroStatus === 'arquivado' ? !!r.arquivado :
       (meta?.statusInterno || 'ativo') === filtroStatus
-    const matchVis = filtroVis === 'todos' ? true : filtroVis === 'privados' ? !!repo.privado : !repo.privado
+    const matchVis = filtroVis === 'todos' ? true : filtroVis === 'privados' ? !!r.privado : !r.privado
     return matchBusca && matchStatus && matchVis
   })
 
@@ -1835,54 +1971,81 @@ export default function AdminGitHub() {
     <div style={{ maxWidth: 1180, margin: '0 auto' }}>
       <Toast toast={toast} />
       <style>{`
-        .gh-account-hero{background:linear-gradient(135deg,var(--adm-surface,#fff),var(--adm-surface2,#f7f5f2));border:1px solid var(--adm-border,#e8e3dc);border-radius:14px;padding:18px;margin-bottom:18px;position:relative;overflow:hidden}
-        .gh-account-hero:after{content:'';position:absolute;right:-48px;top:-62px;width:180px;height:180px;border-radius:50%;border:1px solid color-mix(in srgb,var(--adm-accent) 14%,transparent);box-shadow:0 0 0 28px color-mix(in srgb,var(--adm-accent) 5%,transparent)}
-        .gh-account-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
-        .gh-account-stat{background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:10px;padding:10px 12px;min-width:0}
-        .gh-account-stat span,.gh-repo-facts span{display:block;font-size:9px;letter-spacing:.10em;color:var(--adm-muted);font-weight:800}
-        .gh-account-stat b{display:block;margin-top:4px;font-size:15px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis}
+        .gh-account-hero{background:linear-gradient(135deg,var(--adm-surface,#fff),var(--adm-surface2,#f7f5f2));border:1px solid var(--adm-border,#e8e3dc);border-radius:14px;padding:16px;margin-bottom:18px;position:relative;overflow:hidden}
+        .gh-account-hero:after{content:'';position:absolute;right:-48px;top:-62px;width:180px;height:180px;border-radius:50%;border:1px solid color-mix(in srgb,var(--adm-accent) 14%,transparent);box-shadow:0 0 0 28px color-mix(in srgb,var(--adm-accent) 5%,transparent);pointer-events:none}
+        .gh-profile-row{position:relative;z-index:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px}
+        .gh-profile-avatar{width:46px;height:46px;border-radius:50%;object-fit:cover;border:1px solid var(--adm-border)}
+        .gh-profile-meta{min-width:0}.gh-profile-meta h1{margin:0;font-size:17px;line-height:1.2}.gh-profile-meta p{margin:4px 0 0;color:var(--adm-muted);font-size:11px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .gh-profile-actions{display:flex;align-items:center;gap:7px}
+        .gh-account-stats{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:14px;border:1px solid var(--adm-border);border-radius:10px;overflow:hidden;background:var(--adm-bg)}
+        .gh-account-stat{padding:9px 10px;min-width:0;border-right:1px solid var(--adm-border)}.gh-account-stat:last-child{border-right:0}
+        .gh-account-stat span,.gh-repo-facts span{display:block;font-size:8px;line-height:1.25;letter-spacing:.07em;color:var(--adm-muted);font-weight:800}
+        .gh-account-stat b{display:block;margin-top:3px;font-size:13px;line-height:1.2;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .gh-repo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-        .gh-repo-card{position:relative;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;overflow:hidden;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+        .gh-repo-card{position:relative;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;overflow:hidden;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;min-width:0}
         .gh-repo-card:hover{border-color:var(--adm-accent);transform:translateY(-1px);box-shadow:0 10px 30px rgba(20,30,24,.06)}
         .gh-card-topline{position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--adm-accent),transparent 72%);opacity:.75}
         .gh-repo-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
-        .gh-repo-facts>div{background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:8px;padding:8px 9px;min-width:0}
-        .gh-repo-facts b{display:block;margin-top:3px;font-size:11px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .gh-repo-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}
+        .gh-repo-facts>div{background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:8px;padding:8px 7px;min-width:0}
+        .gh-repo-facts b{display:block;margin-top:3px;font-size:10px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .gh-repo-footer{display:flex;align-items:center;gap:10px;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}
         .gh-repo-counters{display:flex;align-items:center;gap:12px}.gh-repo-counters b{color:var(--adm-text)}
         .gh-filter-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:8px}
+        .gh-command-select{display:none;width:100%;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:9px;padding:10px 11px;color:var(--adm-text);font-size:12px;font-weight:700;outline:none}
+        .gh-repo-title{word-break:normal;overflow-wrap:anywhere;line-height:1.2}.gh-repo-path{overflow-wrap:anywhere}
+        .gh-github-summary{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:10px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:12px}
+        .gh-readme{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:16px;max-width:100%;overflow:auto;color:var(--adm-text);font-size:12px;line-height:1.65;word-wrap:break-word}
+        .gh-readme>*:first-child{margin-top:0}.gh-readme>*:last-child{margin-bottom:0}.gh-readme h1{font-size:20px}.gh-readme h2{font-size:17px}.gh-readme h3{font-size:15px}.gh-readme h1,.gh-readme h2{padding-bottom:6px;border-bottom:1px solid var(--adm-border)}
+        .gh-readme pre{max-width:100%;overflow:auto;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:11px}.gh-readme code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}.gh-readme :not(pre)>code{background:var(--adm-bg);padding:2px 5px;border-radius:5px}
+        .gh-readme table{display:block;width:max-content;max-width:100%;overflow:auto;border-collapse:collapse}.gh-readme th,.gh-readme td{border:1px solid var(--adm-border);padding:6px 9px}.gh-readme img{max-width:100%;height:auto}.gh-readme a{color:var(--adm-blue,var(--adm-accent));overflow-wrap:anywhere}.gh-readme blockquote{margin-left:0;padding-left:12px;border-left:3px solid var(--adm-border);color:var(--adm-muted)}
+        .gh-readme-fallback{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:14px;font-size:11px;color:var(--adm-text);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
+        .gh-profile-edit-head{display:flex;align-items:center;gap:12px;padding:10px;background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:10px}.gh-profile-edit-avatar{width:54px;height:54px;border-radius:50%;object-fit:cover}.gh-external-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 9px;border:1px solid var(--adm-border);border-radius:8px;color:var(--adm-text);font-size:10px;font-weight:700;text-decoration:none;background:var(--adm-surface)}
+        .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-account-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-90px;top:-80px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}}
-        @media(max-width:420px){.gh-repo-facts{grid-template-columns:1fr 1fr}.gh-repo-facts>div:last-child{grid-column:1/-1}.gh-repo-footer{align-items:flex-start;flex-direction:column}.gh-account-stat b{font-size:13px}}
+        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>button:nth-of-type(1){width:100%}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}}
       `}</style>
 
+      <PerfilGitHubModal
+        open={showPerfil}
+        status={status}
+        onClose={() => setShowPerfil(false)}
+        onSaved={() => recarregar()}
+        toastShow={toastShow}
+      />
+
       <section className="gh-account-hero">
-        <div style={{ position:'relative', zIndex:1, display:'flex', justifyContent:'space-between', gap:SPACE.lg, alignItems:'flex-start' }}>
-          <div style={{ minWidth:0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:SPACE.md, marginBottom:SPACE.xs }}>
-              <span style={{ color:C.accent }}><AdminIcon name="git" size={19} /></span>
-              <h1 className="adm-page-title" style={{ margin:0 }}>Central GitHub</h1>
-              {status?.ok && <DSBadge variant="green">conectado</DSBadge>}
-            </div>
-            {status?.ok ? (
-              <div style={{ display:'flex', alignItems:'center', gap:SPACE.sm, color:C.muted, fontSize:FONT.md, flexWrap:'wrap' }}>
-                {status.avatar && <img src={status.avatar} alt={status.login} style={{ width:24, height:24, borderRadius:'50%', border:`1px solid ${C.border}` }} />}
-                <b style={{ color:C.text }}>{status.nome || status.login}</b>
-                <span>@{status.login}</span>
-                {status.empresa && <span>· {status.empresa}</span>}
+        {status?.ok ? (
+          <>
+            <div className="gh-profile-row">
+              {status.avatar ? <img src={status.avatar} alt={status.login} className="gh-profile-avatar" /> : <span style={{ color:C.accent }}><AdminIcon name="git" size={28} /></span>}
+              <div className="gh-profile-meta">
+                <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0, flexWrap:'wrap' }}>
+                  <h1>{status.nome || status.login}</h1>
+                  <DSBadge variant="green">conectado</DSBadge>
+                </div>
+                <p>@{status.login}{status.empresa ? ` · ${status.empresa}` : ''}{status.localizacao ? ` · ${status.localizacao}` : ''}</p>
+                {status.bio && <p title={status.bio}>{status.bio}</p>}
               </div>
-            ) : <span className="adm-page-sub">Código, publicação, automações e manutenção em uma única central.</span>}
-          </div>
-          <DSBtn variant="secondary" size="sm" onClick={recarregar} loading={loading}>
-            <AdminIcon name="refresh" size={12} /> Atualizar
-          </DSBtn>
-        </div>
-        {status?.ok && (
-          <div className="gh-account-stats" style={{ position:'relative', zIndex:1 }}>
-            <div className="gh-account-stat"><span>REPOSITÓRIOS VISÍVEIS</span><b>{total}</b></div>
-            <div className="gh-account-stat"><span>PÚBLICOS</span><b>{repos.filter(r => !r.privado).length}</b></div>
-            <div className="gh-account-stat"><span>PRIVADOS</span><b>{repos.filter(r => r.privado).length}</b></div>
-            <div className="gh-account-stat"><span>ATIVIDADE</span><b>{repos[0]?.ultimaAtualizacao ? relTime(repos[0].ultimaAtualizacao) : '—'}</b></div>
+              <div className="gh-profile-actions">
+                <DSBtn variant="secondary" size="sm" onClick={() => setShowPerfil(true)}>✎ Editar perfil</DSBtn>
+                <DSBtn variant="secondary" size="sm" onClick={recarregar} loading={loading}><AdminIcon name="refresh" size={12} /> Atualizar</DSBtn>
+              </div>
+            </div>
+            <div className="gh-account-stats">
+              <div className="gh-account-stat"><span>REPOSITÓRIOS VISÍVEIS</span><b>{total}</b></div>
+              <div className="gh-account-stat"><span>PÚBLICOS</span><b>{repos.filter(r => !r.privado).length}</b></div>
+              <div className="gh-account-stat"><span>PRIVADOS</span><b>{repos.filter(r => r.privado).length}</b></div>
+              <div className="gh-account-stat"><span>ATIVIDADE</span><b>{repos[0]?.ultimaAtualizacao ? relTime(repos[0].ultimaAtualizacao) : '—'}</b></div>
+            </div>
+          </>
+        ) : (
+          <div style={{ position:'relative', zIndex:1, display:'flex', justifyContent:'space-between', alignItems:'center', gap:SPACE.lg }}>
+            <div>
+              <div style={{ display:'flex', alignItems:'center', gap:SPACE.md }}><span style={{ color:C.accent }}><AdminIcon name="git" size={19} /></span><h1 className="adm-page-title" style={{ margin:0 }}>Central GitHub</h1></div>
+              <span className="adm-page-sub">Código, publicação, automações e manutenção em uma única central.</span>
+            </div>
+            <DSBtn variant="secondary" size="sm" onClick={recarregar} loading={loading}><AdminIcon name="refresh" size={12} /> Atualizar</DSBtn>
           </div>
         )}
       </section>

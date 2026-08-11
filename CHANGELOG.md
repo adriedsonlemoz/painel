@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.88
+- Central de Plataformas corrige a distinção entre domínio público da Vercel e URL única de deployment. O portal passa a usar exclusivamente um domínio associado ao projeto, preferindo o `<projeto>.vercel.app` estável ou domínio de produção verificado.
+- A URL técnica do deployment atual continua visível para diagnóstico, mas não é mais usada em `site_url`, botão Abrir portal ou origem pública.
+- Ao abrir/sincronizar a Central, configurações antigas de `productionOrigin` que apontavam para deployment são autocorrigidas e `site_url` é atualizado com o domínio canônico.
+- `Sincronizar URLs` reconstrói as origens CORS em memória, evitando que uma URL antiga permaneça autorizada até reiniciar o backend.
+- Domínios Vercel vinculados a branch não entram automaticamente no CORS de produção; previews continuam disponíveis somente quando `ALLOW_VERCEL_PREVIEWS=true`.
+- Atualizador de produção gerenciada migra de ZIP temporário/request para fluxo persistente `R2 → GitHub → Vercel + Render`.
+- O ZIP é validado uma única vez no upload e armazenado no bucket R2 configurado em Integrações e APIs em `updates/<versão>/<sha>-<arquivo>`.
+- Novo registro persistente de releases cloud no MongoDB guarda SHA-256, objeto R2, changelog, repositório, branch, commit GitHub, estado Vercel/Render e conclusão da produção.
+- Publicação baixa o ZIP do R2 para diretório temporário, revalida o pacote e confere o SHA-256 antes de qualquer alteração no GitHub.
+- GitHub continua usando exclusivamente `GITHUB_TOKEN` do cofre de Integrações e APIs; não foi criado token paralelo no atualizador.
+- Vercel e Render também reutilizam as credenciais e recursos principais selecionados em Integrações/Central de Plataformas.
+- Após o push, o AL acompanha o commit exato nas duas plataformas e só marca a release como concluída quando Vercel está Ready e Render está Live/implantada.
+- Quando o serviço Render não usa auto deploy, o atualizador pode solicitar um deploy do SHA exato publicado no GitHub.
+- Falta de vínculo de projeto Vercel ou serviço Render passa a aparecer como `deploy-blocked`, sem perder o ZIP já armazenado no R2.
+- Tela de Atualizações permite retomar e publicar versões que já estão no R2, sem exigir que o navegador mantenha o arquivo selecionado ou faça um segundo upload.
+- Teste do armazenamento R2 agora realiza uma operação S3 real de listagem no bucket, em vez de considerar conectado apenas porque os campos estão preenchidos.
+- Instalação local, snapshots de arquivos, watchdog e rollback físico permanecem disponíveis apenas como modo legado para VPS/servidor persistente.
+- Pacote completo 1.0.88 inclui integralmente as mudanças GitHub 1.0.87, reforma visual 1.0.86 e R2/Cloudflare 1.0.85.
+
+## 1.0.87
+- GitHub: corrigido o drawer de detalhes no celular. O nome e o caminho do repositório não são mais comprimidos pelos botões de ação.
+- ZIP, Salvar em Projetos e Fechar passam a ocupar uma linha de ações própria no mobile.
+- Cards mantêm Branch, Tamanho e Último push na mesma linha em telas pequenas; removido o “Atualizado …” redundante do rodapé.
+- A ponte de comando do repositório vira seletor compacto no celular, evitando uma grade alta antes do conteúdo.
+- Nova edição de descrição e homepage diretamente no GitHub via API oficial, sem criar um segundo token: a credencial vem do cofre de Integrações e APIs.
+- Perfil GitHub conectado pode editar nome, e-mail público, empresa, localização, site/blog, bio, disponibilidade para contratação e Twitter/X.
+- Avatar do perfil é exibido no painel; como a API REST de perfil não oferece upload de avatar, a ação Alterar foto abre a configuração oficial do GitHub.
+- README deixa de ser texto cru/truncado e passa a usar HTML renderizado pelo GitHub Markup/GFM, com estilo responsivo para tabelas, imagens, código, listas e links.
+- Cabeçalho da conta foi compactado e os quatro indicadores (repositórios visíveis, públicos, privados e atividade) permanecem lado a lado no celular.
+- Integrações e APIs passa a explicar as permissões `Profile: write` e `Administration: write` para tokens fine-grained, além dos escopos equivalentes em token classic.
+- Cliente central GitHub atualizado para REST API `2026-03-10`; token continua exclusivamente no backend e é carregado primeiro do cofre de Integrações.
+- Pacote completo mantém integralmente R2 Storage/Cloudflare e a reforma visual das versões 1.0.85/1.0.86.
+
 ## 1.0.86
 - Revisão visual ampla do painel e do portal público, sem alterar as regras de negócio: tipografia compactada, grids responsivos e contenção de largura para telas pequenas.
 - Design System administrativo passa a usar uma escala tipográfica menor e o modal padrão se adapta ao celular como bottom-sheet/tela compacta, preservando os temas existentes.
@@ -30,7 +64,6 @@
 - Visão Geral Cloudflare mostra endpoint S3, chaves mascaradas, validação S3 e quantidade de buckets acessíveis.
 - O painel não tenta administrar API Tokens/identidade da conta, evitando revogar a própria credencial administrativa por engano.
 
-# Changelog
 
 ## 1.0.83
 - Render/Docker/GitHub Actions deixam de usar npm ci porque o pacote distribuído não contém package-lock; passam a usar npm install sem audit/fund.
@@ -46,7 +79,6 @@
 - Atualizações em Render/Vercel usam ZIP temporário no navegador → GitHub → deploy, sem staging ou instalação local persistente.
 - Diagnóstico Termux deixa de registrar CHANGELOG/documentação como se fossem logs de erro.
 
-# Changelog
 
 ## 1.0.82
 - Publicação GitHub em Termux/VPS agora prefere Git nativo, enviando o diff compactado em vez de criar um blob HTTP para cada arquivo.
@@ -56,7 +88,6 @@
 - Corrigido workflow Android: capacitor.config.ts agora existe e pode receber a URL da Vercel antes do npx cap sync.
 - Confirmado pelo novo log que npm ci está saudável: 418 pacotes instalados em cerca de 5 segundos; o erro atual do APK era exclusivamente a ausência de capacitor.config.ts.
 
-# Changelog
 
 ## 1.0.81
 - Dashboard administrativo redesenhado do zero como Central Editorial do Portal de Notícias.
@@ -79,7 +110,6 @@
 - Não foi adicionado nenhum comando global para matar processos Node; timeouts continuam encerrando somente subprocessos criados pelo próprio atualizador.
 - Base preparada para instalação limpa da versão 1.0.80.
 
-# Changelog
 
 ## 1.0.79
 - Pacotes preparados agora possuem ação `Excluir versão`, com confirmação antes de remover o staging.
@@ -90,7 +120,6 @@
 - Adicionado manifesto de propriedade em `~/.al-sistemas/updates/managed-files.json`; futuras remoções de pacote completo ficam limitadas aos arquivos realmente gerenciados pelo AL Sistemas.
 - Snapshots futuros preservam o manifesto de propriedade para rollback/recovery coerentes.
 
-# Changelog
 
 ## 1.0.78
 - Corrigido `Cannot read properties of null (reading 'useContext')` observado após atualização com Vite ainda ativo no Termux.
@@ -100,7 +129,6 @@
 - O parâmetro técnico de recuperação é removido da URL após o boot.
 - O redesign em popups da Central de Atualizações foi preservado sem alterações nas regras de instalação.
 
-# Changelog
 
 ## 1.0.77
 - Módulo Atualizações redesenhado como uma central compacta de comandos.
@@ -154,7 +182,6 @@
 - Pré-check de publicação rejeita dependências alpha, beta, RC, canary, nightly, experimental e next.
 - Sincronização GitHub remove lockfiles antigos que já tenham sido publicados.
 
-# Changelog
 
 ## 1.0.70
 - Removido o `frontend/package-lock.json` obsoleto que prendia o deploy da Vercel a `typed-array-byte-offset@1.0.5` indisponível.
@@ -239,7 +266,6 @@
 - Verifica backend, MongoDB, sincronização de versões, arquivos essenciais, permissões de gravação, health check, RSS, portal e integrações GitHub/Vercel quando configuradas.
 - Diagnóstico completo pode ser copiado pelo painel para facilitar análise de falhas.
 
-# Changelog
 
 ## 1.0.57
 
@@ -332,7 +358,6 @@
 - O overlay nativo só é removido depois do primeiro commit bem-sucedido do React.
 - Mantém todas as melhorias de Vercel/Render e do atualizador da 1.0.45.
 
-# Changelog
 
 ## 1.0.45
 
@@ -351,7 +376,6 @@
 - Cloudinary: identificação pelo Cloud Name; APIs de IA sem endpoint de identidade passam a indicar essa limitação.
 - Exportação `.env`: adicionada assinatura UTF-8 BOM e máscara ASCII para evitar mojibake (`IntegraÃ§Ãµes`, `â€¢`) em leitores que ignoram o charset HTTP.
 
-# Changelog
 
 ## 1.0.43 — Atualizações incrementais com fallback para pacote completo
 
@@ -611,7 +635,6 @@
 - Tela de usuários mostra último acesso, última alteração de senha e indicador de quem nunca acessou.
 - Corrigida a ordenação por último login para usar o campo real `ultimo_acesso`.
 
-# Changelog
 
 ## 1.0.18 — 09/08/2026
 
@@ -634,7 +657,6 @@
 - Admin de notícias passa a exibir contagem/filtro de matérias agendadas e controles de plantão.
 - Mantida compatibilidade com notícias e configurações já existentes.
 
-# Changelog
 
 ## 1.0.16 — 2026-08-09
 
@@ -706,7 +728,6 @@
 - O fluxo de publicação de projeto agora devolve ao React apenas uma função de cleanup válida para fechar o EventSource.
 - Revisão preventiva dos `useEffect` do frontend para evitar cleanup inválido.
 
-# Changelog
 
 ## 1.0.8 — Atlas sem porta e setup claro
 
@@ -765,7 +786,6 @@
 - Organização e nome do site são persistidos mesmo quando o usuário opta por não importar dados de exemplo.
 - Senha e confirmação ficam visíveis inicialmente no setup, com botão para ocultar/mostrar.
 
-# Changelog
 
 Todas as mudanças notáveis deste projeto são documentadas aqui.
 

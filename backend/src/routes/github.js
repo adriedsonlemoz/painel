@@ -30,7 +30,8 @@ import AuditLog         from '../models/AuditLog.js'
 import GitHubMeta       from '../models/GitHubMeta.js'
 import fs               from 'fs'
 import path             from 'path'
-import { githubFetch, GITHUB_API }  from '../utils/githubClient.js'
+import sanitizeHtml     from 'sanitize-html'
+import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient.js'
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
 
 const router = Router()
@@ -159,10 +160,40 @@ router.get('/status', autenticar, async (req, res) => {
       seguindo: user.following || 0,
       criadoEm: user.created_at || null,
       empresa: user.company, url: user.html_url,
+      bio: user.bio || '', localizacao: user.location || '', blog: user.blog || '',
+      email: user.email || '', contratavel: !!user.hireable, twitter: user.twitter_username || '',
     })
   } catch (err) {
     if (err.message.includes('GITHUB_TOKEN')) return res.status(503).json({ ok: false, erro: err.message })
     res.status(err.status || 500).json({ ok: false, erro: err.message })
+  }
+})
+
+/* PATCH /api/github/profile — usa a credencial central de Integrações e APIs */
+router.patch('/profile', autenticar, async (req, res) => {
+  const permitido = ['name', 'email', 'blog', 'company', 'location', 'hireable', 'bio', 'twitter_username']
+  const payload = {}
+  for (const chave of permitido) {
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, chave)) payload[chave] = req.body[chave]
+  }
+  if (!Object.keys(payload).length) return res.status(400).json({ erro: 'Nenhum campo de perfil foi informado.' })
+  try {
+    const user = await githubFetch('/user', { method: 'PATCH', body: JSON.stringify(payload) })
+    await AuditLog.create({
+      admin_id: req.usuario._id, admin_email: req.usuario.email, acao: 'editar', recurso: 'github_perfil',
+      recurso_id: user.login, payload: { campos: Object.keys(payload) }, ip: req.ip, request_id: req.requestId || null,
+    }).catch(() => {})
+    res.json({
+      ok: true, login: user.login, nome: user.name, avatar: user.avatar_url, url: user.html_url,
+      empresa: user.company, bio: user.bio || '', localizacao: user.location || '', blog: user.blog || '',
+      email: user.email || '', contratavel: !!user.hireable, twitter: user.twitter_username || '',
+      mensagem: 'Perfil atualizado no GitHub.'
+    })
+  } catch (err) {
+    const msg = err.status === 403
+      ? 'O token salvo em Integrações e APIs não tem permissão para editar o perfil. Em token fine-grained, habilite Profile: write; em token classic, use o escopo user.'
+      : err.message
+    res.status(err.status || 500).json({ erro: msg })
   }
 })
 
@@ -215,13 +246,13 @@ router.get('/repos/:owner/:repo', autenticar, async (req, res) => {
     ])
     res.json({
       id: repoData.id, nome: repoData.name, nomeCompleto: repoData.full_name,
-      descricao: repoData.description, privado: repoData.private, url: repoData.html_url,
+      descricao: repoData.description, homepage: repoData.homepage || null, privado: repoData.private, url: repoData.html_url,
       linguagem: repoData.language, linguagens: Object.keys(languages),
       stars: repoData.stargazers_count, forks: repoData.forks_count,
       issues: repoData.open_issues_count, branch: repoData.default_branch,
       temas: repoData.topics || [], arquivado: repoData.archived,
-      ultimaAtualizacao: repoData.updated_at, criadoEm: repoData.created_at,
-      license: repoData.license?.name || null, tamanho: repoData.size,
+      ultimaAtualizacao: repoData.updated_at, ultimoPush: repoData.pushed_at || null, criadoEm: repoData.created_at,
+      license: repoData.license?.name || null, tamanho: repoData.size, permissoes: repoData.permissions || null,
     })
   } catch (err) {
     res.status(err.status || 500).json({ erro: err.message })
@@ -231,6 +262,35 @@ router.get('/repos/:owner/:repo', autenticar, async (req, res) => {
 /* ═══════════════════════════════════════════════════════════
    ROTAS NOVAS — Sprint 3 Extensão
 ═══════════════════════════════════════════════════════════ */
+
+/* PATCH /api/github/repos/:owner/:repo — descrição/homepage oficiais do GitHub */
+router.patch('/repos/:owner/:repo', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  const payload = {}
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'descricao')) payload.description = String(req.body.descricao ?? '').slice(0, 350)
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'homepage')) payload.homepage = String(req.body.homepage ?? '').trim().slice(0, 500)
+  if (!Object.keys(payload).length) return res.status(400).json({ erro: 'Informe descrição e/ou homepage.' })
+  try {
+    const atualizado = await githubFetch(`/repos/${owner}/${repo}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    repoInsightCache.delete(`${owner}/${repo}@${atualizado.default_branch || 'main'}`)
+    await AuditLog.create({
+      admin_id: req.usuario._id, admin_email: req.usuario.email, acao: 'editar', recurso: 'github_repo_detalhes',
+      recurso_id: `${owner}/${repo}`, payload: { campos: Object.keys(payload) }, ip: req.ip, request_id: req.requestId || null,
+    }).catch(() => {})
+    res.json({
+      ok: true, id: atualizado.id, nome: atualizado.name, nomeCompleto: atualizado.full_name,
+      descricao: atualizado.description || '', homepage: atualizado.homepage || '', url: atualizado.html_url,
+      branch: atualizado.default_branch, permissoes: atualizado.permissions || null,
+      mensagem: 'Detalhes do repositório atualizados no GitHub.'
+    })
+  } catch (err) {
+    const msg = err.status === 403
+      ? 'O token salvo em Integrações e APIs não tem permissão para editar este repositório. Em token fine-grained, habilite Administration: write para o repositório.'
+      : err.message
+    res.status(err.status || 500).json({ erro: msg })
+  }
+})
 
 /* DELETE /api/github/repos/:owner/:repo */
 router.delete('/repos/:owner/:repo', autenticar, async (req, res) => {
@@ -387,19 +447,42 @@ router.post('/repos/:owner/:repo/cleanup', autenticar, async (req,res) => {
   }catch(err){res.status(err.status||500).json({erro:err.message})}
 })
 
-/* GET /api/github/repos/:owner/:repo/readme */
+/* GET /api/github/repos/:owner/:repo/readme
+   Retorna Markdown bruto + HTML GFM renderizado oficialmente pelo GitHub.
+   O token continua vindo exclusivamente do cofre de Integrações e APIs. */
 router.get('/repos/:owner/:repo/readme', autenticar, async (req, res) => {
   const { owner, repo } = req.params
   if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
   try {
-    const data = await githubFetch(`/repos/${owner}/${repo}/readme`)
+    const [data, rendered, repoInfo] = await Promise.all([
+      githubFetch(`/repos/${owner}/${repo}/readme`),
+      githubFetchText(`/repos/${owner}/${repo}/readme`, { headers: { 'Accept': 'application/vnd.github.html+json' } }),
+      githubFetch(`/repos/${owner}/${repo}`).catch(() => null),
+    ])
+    const conteudo = Buffer.from(data.content || '', 'base64').toString('utf8')
+    let html = ''
+    if (conteudo && rendered) {
+      html = sanitizeHtml(rendered, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'details', 'summary', 'picture', 'source', 'kbd', 's', 'del']),
+        allowedAttributes: {
+          ...sanitizeHtml.defaults.allowedAttributes,
+          a: ['href', 'title', 'target', 'rel'],
+          img: ['src', 'alt', 'title', 'width', 'height'],
+          source: ['src', 'srcset', 'type'],
+          '*': ['class', 'id', 'align'],
+        },
+        allowedSchemes: ['http', 'https', 'mailto'],
+        transformTags: {
+          a: (tagName, attribs) => ({ tagName, attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer' } }),
+        },
+      })
+    }
     res.json({
-      nome: data.name,
-      conteudo: Buffer.from(data.content || '', 'base64').toString('utf8'),
-      sha: data.sha, tamanho: data.size,
+      nome: data.name, conteudo, html, sha: data.sha, tamanho: data.size,
+      branch: repoInfo?.default_branch || 'main', url: data.html_url || `https://github.com/${owner}/${repo}`,
     })
   } catch (err) {
-    if (err.status === 404) return res.json({ conteudo: null })
+    if (err.status === 404) return res.json({ conteudo: null, html: null })
     res.status(err.status || 500).json({ erro: err.message })
   }
 })

@@ -54,6 +54,9 @@ export async function hydratePlatformOrigins({ remote=true, force=false } = {}) 
 
   hydrating=(async()=>{
     try {
+      // Em uma sincronização forçada reconstrói a lista em memória; assim uma
+      // URL antiga de deployment não continua autorizada até o próximo restart.
+      if(force)runtimeOrigins.clear()
       const docs=await ConfiguracaoHome.find({chave:{$in:['site_url','frontend_url']}}).lean().catch(()=>[])
       for(const d of docs) registerPlatformOrigin(d.valor)
 
@@ -62,21 +65,18 @@ export async function hydratePlatformOrigins({ remote=true, force=false } = {}) 
       registerPlatformOrigin(meta.productionOrigin)
       for(const d of Array.isArray(meta.domains)?meta.domains:[]) registerPlatformOrigin(d)
 
-      // Se a conta Vercel já está conectada, as URLs dos projetos da própria
-      // conta podem ser autorizadas automaticamente sem depender de FRONTEND_URL.
-      if(remote && vercel?.value) {
-        const url=new URL('https://api.vercel.com/v9/projects')
-        url.searchParams.set('limit','30')
+      // Em produção autoriza os domínios associados ao projeto principal,
+      // não a URL única de cada deployment/preview. Previews só entram quando
+      // ALLOW_VERCEL_PREVIEWS=true na validação de CORS.
+      if(remote && vercel?.value && meta.primaryProjectId) {
+        const url=new URL(`https://api.vercel.com/v9/projects/${encodeURIComponent(meta.primaryProjectId)}/domains`)
+        url.searchParams.set('limit','100')
         if(meta.teamId) url.searchParams.set('teamId',meta.teamId)
         const r=await fetch(url,{headers:{Authorization:`Bearer ${vercel.value}`,Accept:'application/json'}})
         if(r.ok) {
           const data=await r.json()
-          const domains=[]
-          for(const p of data.projects||[]) {
-            for(const alias of Array.isArray(p.alias)?p.alias:[]) {
-              const origin=registerPlatformOrigin(`https://${alias}`)
-              if(origin)domains.push(origin)
-            }
+          for(const d of data.domains||[]) {
+            if(d?.name&&!d.gitBranch)registerPlatformOrigin(`https://${d.name}`)
           }
         }
       }

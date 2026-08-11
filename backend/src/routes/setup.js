@@ -571,7 +571,7 @@ router.post('/', async (req, res, next) => {
     writeBootstrap({
       INSTALL_COMPLETED: true,
       INSTALL_COMPLETED_AT: new Date().toISOString(),
-      INSTALL_VERSION: '1.0.86',
+      INSTALL_VERSION: '1.0.88',
     })
     await markInstallationCompleted().catch(()=>null)
 

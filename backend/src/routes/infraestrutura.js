@@ -903,13 +903,42 @@ async function smartVercelProjects(token,teamId='') {
   const r=await fetch(vercelUrl('/v9/projects?limit=30',teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
   if(!r.ok)throw new Error(`Vercel API retornou ${r.status}`)
   const data=await r.json()
-  return (data.projects||[]).map(p=>({
-    id:p.id,nome:p.name,framework:p.framework||'—',
-    dominios:(Array.isArray(p.alias)?p.alias:[]).map(a=>String(a)),
-    dominio:(Array.isArray(p.alias)?p.alias[0]:null)||null,
-    atualizado:p.updatedAt,
-    git:p.link?{tipo:p.link.type,repositorio:p.link.repo,repoId:p.link.repoId||null}:null,
-  }))
+  return (data.projects||[]).map(p=>{
+    const aliases=(Array.isArray(p.alias)?p.alias:[]).map(a=>String(a))
+    const stable=aliases.find(a=>a.toLowerCase()===`${String(p.name||'').toLowerCase()}.vercel.app`)||null
+    return {
+      id:p.id,nome:p.name,framework:p.framework||'—',
+      dominios:aliases,dominio:stable,
+      atualizado:p.updatedAt,
+      git:p.link?{tipo:p.link.type,repositorio:p.link.repo,repoId:p.link.repoId||null}:null,
+    }
+  })
+}
+
+async function smartVercelProjectDomains(token,teamId='',projectId='') {
+  if(!token||!projectId)return []
+  const r=await fetch(vercelUrl(`/v9/projects/${encodeURIComponent(projectId)}/domains?limit=100`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const data=await r.json().catch(()=>({}))
+  if(!r.ok)throw new Error(data.error?.message||`Vercel Domains API retornou ${r.status}`)
+  return (data.domains||[]).map(d=>({
+    name:String(d.name||''),verified:d.verified!==false,gitBranch:d.gitBranch||null,redirect:d.redirect||null,
+    createdAt:d.createdAt||null,updatedAt:d.updatedAt||null,
+  })).filter(d=>d.name)
+}
+function chooseCanonicalVercelDomain(project,domains=[],storedOrigin='') {
+  const productionDomains=domains.filter(d=>!d.gitBranch)
+  const names=productionDomains.map(d=>String(d.name||'').toLowerCase()).filter(Boolean)
+  let storedHost=''
+  try{storedHost=new URL(storedOrigin).hostname.toLowerCase()}catch{}
+  if(storedHost&&names.includes(storedHost))return storedHost
+  const exact=`${String(project?.nome||'').toLowerCase()}.vercel.app`
+  if(names.includes(exact))return exact
+  const verifiedRoot=productionDomains.find(d=>d.verified!==false&&!d.redirect)?.name
+  if(verifiedRoot)return String(verifiedRoot)
+  const root=productionDomains[0]?.name
+  if(root)return String(root)
+  if(project?.dominio&&(!names.length||names.includes(String(project.dominio).toLowerCase())))return project.dominio
+  return ''
 }
 async function smartVercelDeploys(token,teamId,projectId) {
   if(!token||!projectId)return []
@@ -1057,20 +1086,40 @@ router.get('/plataformas/central', async (_req,res,next)=>{
       try { result.render.deploys=await smartRenderDeploys(renderCred.value,result.render.selecionado.id) } catch(err){ result.render.deployError=err.message }
     }
     if(result.vercel.selecionado) {
+      try {
+        const domains=await smartVercelProjectDomains(vercelCred.value,vercelCred.metadata?.teamId||'',result.vercel.selecionado.id)
+        const canonical=chooseCanonicalVercelDomain(result.vercel.selecionado,domains,vercelCred.metadata?.productionOrigin||'')
+        result.vercel.selecionado={...result.vercel.selecionado,domains,dominios:domains.map(d=>d.name),dominio:canonical||result.vercel.selecionado.dominio||null}
+      } catch(err){ result.vercel.domainError=err.message }
       try { result.vercel.deploys=await smartVercelDeploys(vercelCred.value,vercelCred.metadata?.teamId||'',result.vercel.selecionado.id) } catch(err){ result.vercel.deployError=err.message }
     }
 
-    let frontendOrigin=normalizeOrigin(vercelCred.metadata?.productionOrigin||'')
+    const canonicalDomain=result.vercel.selecionado
+      ? chooseCanonicalVercelDomain(result.vercel.selecionado,result.vercel.selecionado.domains||[],vercelCred.metadata?.productionOrigin||'')
+      : ''
+    let frontendOrigin=canonicalDomain?normalizeOrigin(`https://${canonicalDomain}`):''
+    // Nunca usa a URL única de um deployment como origem pública. A URL longa
+    // continua visível no histórico de deploys somente para diagnóstico.
     if(!frontendOrigin&&result.vercel.selecionado?.dominio)frontendOrigin=normalizeOrigin(`https://${result.vercel.selecionado.dominio}`)
-    if(!frontendOrigin) {
-      const prod=result.vercel.deploys.find(d=>d.ambiente==='production'&&d.url)||result.vercel.deploys.find(d=>d.url)
-      frontendOrigin=normalizeOrigin(prod?.url||'')
-    }
     const backendUrl=normalizeOrigin(result.render.selecionado?.url||renderCred.metadata?.backendUrl||'')
-    if(frontendOrigin)registerPlatformOrigin(frontendOrigin)
+    if(frontendOrigin){
+      registerPlatformOrigin(frontendOrigin)
+      // Autocura dados antigos que gravaram uma URL única de deployment como URL pública.
+      // A URL canônica vem exclusivamente dos domínios associados ao projeto Vercel.
+      if(normalizeOrigin(vercelCred.metadata?.productionOrigin||'')!==frontendOrigin){
+        await Promise.all([
+          setCredential('vercel',vercelCred.value,{...(vercelCred.metadata||{}),primaryProjectId:result.vercel.selecionado?.id||vercelId,productionOrigin:frontendOrigin,domains:(result.vercel.selecionado?.domains||[]).filter(d=>!d.gitBranch).map(d=>d.name)}),
+          ConfiguracaoHome.findOneAndUpdate({chave:'site_url'},{$set:{valor:frontendOrigin,descricao:'URL pública canônica do portal em produção'}},{upsert:true}),
+        ]).catch(()=>null)
+        await hydratePlatformOrigins({remote:true,force:true}).catch(()=>null)
+      }
+    }
 
+    const currentVercelDeployment=result.vercel.deploys.find(d=>d.ambiente==='production')||result.vercel.deploys[0]||null
     result.producao={
       frontendOrigin,backendUrl,
+      productionDomain:frontendOrigin,
+      currentDeploymentUrl:currentVercelDeployment?.url||'',
       corsOk:Boolean(frontendOrigin&&isPlatformOriginAllowed(frontendOrigin)),
       ligada:Boolean(frontendOrigin&&backendUrl),
       renderServiceId:result.render.selecionado?.id||'',
@@ -1122,14 +1171,18 @@ router.put('/plataformas/producao', async (req,res,next)=>{
     const project=projetos.find(x=>x.id===vercelProjectId)
     if(!service||!project)return res.status(404).json({erro:'Serviço ou projeto não encontrado na conta conectada.'})
 
-    const frontendOrigin=originInformada||normalizeOrigin(project.dominio?`https://${project.dominio}`:'')
-    if(!frontendOrigin)return res.status(400).json({erro:'Não foi possível determinar a URL pública do frontend. Informe a origem manualmente.'})
+    const domains=await smartVercelProjectDomains(vercelCred.value,vercelCred.metadata?.teamId||'',project.id).catch(()=>[])
+    const canonicalDomain=chooseCanonicalVercelDomain(project,domains,originInformada||vercelCred.metadata?.productionOrigin||'')
+    const frontendOrigin=originInformada
+      ? (()=>{try{const host=new URL(originInformada).hostname.toLowerCase();return domains.some(d=>d.name.toLowerCase()===host)?normalizeOrigin(originInformada):canonicalDomain?normalizeOrigin(`https://${canonicalDomain}`):''}catch{return ''}})()
+      : canonicalDomain?normalizeOrigin(`https://${canonicalDomain}`):''
+    if(!frontendOrigin)return res.status(400).json({erro:'Não foi possível determinar um domínio público associado ao projeto Vercel. Sincronize os domínios e tente novamente.'})
     const backendUrl=normalizeOrigin(service.url||'')
 
     await Promise.all([
       setCredential('render',renderCred.value,{...(renderCred.metadata||{}),primaryServiceId:service.id,backendUrl}),
-      setCredential('vercel',vercelCred.value,{...(vercelCred.metadata||{}),primaryProjectId:project.id,productionOrigin:frontendOrigin,domains:project.dominios||[]}),
-      ConfiguracaoHome.findOneAndUpdate({chave:'site_url'},{$set:{valor:frontendOrigin,descricao:'URL pública do portal em produção'}},{upsert:true}),
+      setCredential('vercel',vercelCred.value,{...(vercelCred.metadata||{}),primaryProjectId:project.id,productionOrigin:frontendOrigin,domains:domains.filter(d=>!d.gitBranch).map(d=>d.name)}),
+      ConfiguracaoHome.findOneAndUpdate({chave:'site_url'},{$set:{valor:frontendOrigin,descricao:'URL pública canônica do portal em produção'}},{upsert:true}),
     ])
     registerPlatformOrigin(frontendOrigin)
     await hydratePlatformOrigins({remote:false,force:true}).catch(()=>null)
@@ -1144,8 +1197,27 @@ router.put('/plataformas/producao', async (req,res,next)=>{
 
 router.post('/plataformas/recarregar-origens', async (_req,res,next)=>{
   try {
+    const vercelCred=await getCredential('vercel','VERCEL_TOKEN')
+    let correctedOrigin=''
+    let domains=[]
+    if(vercelCred.value&&vercelCred.metadata?.primaryProjectId){
+      const projects=await smartVercelProjects(vercelCred.value,vercelCred.metadata?.teamId||'')
+      const project=projects.find(p=>p.id===vercelCred.metadata.primaryProjectId)
+      if(project){
+        domains=await smartVercelProjectDomains(vercelCred.value,vercelCred.metadata?.teamId||'',project.id).catch(()=>[])
+        const canonical=chooseCanonicalVercelDomain(project,domains,vercelCred.metadata?.productionOrigin||'')
+        correctedOrigin=canonical?normalizeOrigin(`https://${canonical}`):''
+        if(correctedOrigin){
+          await Promise.all([
+            setCredential('vercel',vercelCred.value,{...(vercelCred.metadata||{}),productionOrigin:correctedOrigin,domains:domains.filter(d=>!d.gitBranch).map(d=>d.name)}),
+            ConfiguracaoHome.findOneAndUpdate({chave:'site_url'},{$set:{valor:correctedOrigin,descricao:'URL pública canônica do portal em produção'}},{upsert:true}),
+          ])
+          registerPlatformOrigin(correctedOrigin)
+        }
+      }
+    }
     const origins=await hydratePlatformOrigins({remote:true,force:true})
-    res.json({ok:true,origins,total:origins.length})
+    res.json({ok:true,origins,total:origins.length,correctedOrigin,domains:domains.map(d=>d.name),message:correctedOrigin?`URL pública sincronizada: ${correctedOrigin}`:'Origens recarregadas; nenhum domínio canônico novo foi encontrado.'})
   } catch(err){next(err)}
 })
 

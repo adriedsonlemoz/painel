@@ -17,7 +17,8 @@ export const updatesService = {
   recoverActive(){ return api('/admin/updates/recover-active',{method:'POST',timeoutMs:20000}) },
   githubRepos(){ return api('/admin/integracoes/github/repositories',{timeoutMs:20000}) },
   deploymentCheck(repository,branch='main'){ return api(`/admin/updates/deployment-check?repository=${encodeURIComponent(repository)}&branch=${encodeURIComponent(branch)}`,{timeoutMs:30000}) },
-  publicarGitHub(id,config={}){ return api(`/admin/updates/${id}/publish-github`,{method:'POST',body:JSON.stringify(config),timeoutMs:20000}) },
+  publicarGitHub(id,config={}){ return api(`/admin/updates/${id}/publish-github`,{method:'POST',body:JSON.stringify(config),timeoutMs:240000}) },
+  cloudReleaseStatus(id){ return api(`/admin/updates/cloud-releases/${encodeURIComponent(id)}/status`,{timeoutMs:30000}) },
   publicarAtualGitHub(config={}){ return api('/admin/updates/publish-current-github',{method:'POST',body:JSON.stringify(config),timeoutMs:20000}) },
   async publicarGitHubDireto(file,config={}){
     const form=new FormData()

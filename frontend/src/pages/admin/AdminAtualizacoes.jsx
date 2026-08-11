@@ -47,6 +47,11 @@ export default function AdminAtualizacoes(){
     if(active&&!job&&/^job_[0-9]+_[a-f0-9]+$/.test(active))watch(active)
   },[data?.activeOperation?.jobId])
   useEffect(()=>{
+    const managed=['vercel','render'].includes(data?.updateCapabilities?.environment)
+    const pending=(data?.staged||[]).find(x=>x.status==='deploying'&&x.commitSha)
+    if(managed&&pending&&!job)watchCloudRelease(pending.id)
+  },[data?.updateCapabilities?.environment,data?.staged?.[0]?.id,data?.staged?.[0]?.status])
+  useEffect(()=>{
     if(!data)return
     const params=new URLSearchParams(window.location.search)
     const acao=params.get('acao')
@@ -64,9 +69,10 @@ export default function AdminAtualizacoes(){
     const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
     if(r.ephemeral||managedHost){
       if(r.ephemeral)setEphemeralStage(prepared)
-      else { setEphemeralStage(null); await load({silent:true}) }
+      else { setEphemeralStage(null); setFile(null); await load({silent:true}) }
       setUiPanel(null)
-      // Em Render/Vercel a próxima etapa correta é publicar no GitHub.
+      if(prepared.cloudStored)toast.success('ZIP guardado no R2; você pode fechar o navegador sem perder a versão preparada.')
+      // Em Render/Vercel a próxima etapa publica o pacote persistido no R2.
       await openGithubPublish(prepared)
     }else{
       setFile(null)
@@ -107,6 +113,43 @@ export default function AdminAtualizacoes(){
     }
     pollOnce()
   }
+  function watchCloudRelease(releaseId){
+    clearTimeout(poll.current)
+    const seq=++watchSeq.current
+    const pollOnce=async()=>{
+      if(!mounted.current||seq!==watchSeq.current)return
+      try{
+        const r=await updatesService.cloudReleaseStatus(releaseId)
+        const rel=r.release
+        if(!mounted.current||seq!==watchSeq.current)return
+        const vc=String(rel.vercel?.status||'waiting')
+        const rd=String(rel.render?.status||'waiting')
+        const failed=['deploy-failed','deploy-blocked','failed'].includes(rel.status)
+        setJob(j=>({
+          ...(j||{}),id:`cloud_${releaseId}`,type:'cloud-release',releaseId,
+          status:rel.productionReady?'completed':failed?'failed':'running',
+          phase:rel.productionReady?'completed':failed?'failed':'platform-deploy',
+          phaseLabel:rel.productionReady?'Vercel e Render atualizados':rel.status==='deploy-blocked'?'Produção precisa ser vinculada':failed?'Falha em um deploy':`Vercel ${vc} · Render ${rd}`,
+          progress:rel.productionReady?100:failed?100:94,
+          commitSha:rel.commitSha,commitUrl:rel.commitUrl,error:rel.error||'',
+          cloudRelease:rel,
+        }))
+        if(rel.productionReady){
+          toast.success(`AL Sistemas ${rel.version} está em produção na Vercel e Render.`)
+          await load({silent:true})
+          return
+        }
+        if(failed){
+          toast.error(rel.status==='deploy-blocked'?'O código chegou ao GitHub, mas falta vincular Vercel ou Render na Central de Plataformas.':'A publicação chegou ao GitHub, mas um dos deploys falhou. Abra Plataformas para ver os detalhes.')
+          await load({silent:true})
+          return
+        }
+      }catch{/* tenta novamente enquanto as plataformas convergem */}
+      if(mounted.current&&seq===watchSeq.current)poll.current=setTimeout(pollOnce,5000)
+    }
+    pollOnce()
+  }
+
   async function install(s){
     setConfirmAction({type:'install',item:s,title:`Analisando AL Sistemas ${s.version}…`,loading:true,message:'Executando pré-check antes de permitir a instalação.'})
     try{
@@ -122,7 +165,7 @@ export default function AdminAtualizacoes(){
     }
   }
   function rollback(s){ setConfirmAction({type:'rollback',item:s,title:`Voltar para a versão ${s.version}?`,message:'O AL Sistemas restaurará o snapshot selecionado e verificará o funcionamento depois.'}) }
-  function deletePrepared(s){ setConfirmAction({type:'delete-stage',item:s,title:`Excluir pacote ${s.version}?`,message:'Remove somente esta versão preparada do staging. A instalação atual não será alterada.'}) }
+  function deletePrepared(s){ setConfirmAction({type:'delete-stage',item:s,title:`Excluir pacote ${s.version}?`,message:s.cloudStored?'Remove o ZIP desta versão do R2 e o registro de preparação. A produção atual não será alterada.':'Remove somente esta versão preparada do staging. A instalação atual não será alterada.'}) }
   function deleteSnapshotItem(s){ setConfirmAction({type:'delete-snapshot',item:s,title:`Excluir snapshot ${s.version}?`,message:'Este ponto de retorno será apagado definitivamente. Isso não altera a versão instalada agora.'}) }
   async function handoffToExternalMonitor(monitorUrl,jobId){
     if(!monitorUrl)return false
@@ -277,18 +320,34 @@ export default function AdminAtualizacoes(){
     try{
       const directManaged=['vercel','render'].includes(data?.updateCapabilities?.environment)
       if(directManaged){
-        if(!file) throw new Error('O ZIP selecionado não está mais disponível no navegador. Selecione o pacote novamente.')
+        if(!stage?.id)throw new Error('Envie o pacote em Nova versão primeiro.')
+        // Compatibilidade de rolling deploy: se o frontend 1.0.88 entrar no ar
+        // alguns instantes antes do backend 1.0.88, o backend antigo ainda
+        // devolve estágio efêmero. Assim a migração para R2 não fica travada.
+        if(!stage.cloudStored&&file){
+          const r=await updatesService.publicarGitHubDireto(file,cfg)
+          setGithubPublish(null)
+          setJob(r.job)
+          setEphemeralStage(null)
+          setFile(null)
+          toast.success('Publicação de transição concluída no GitHub. As próximas versões usarão o R2 persistente.')
+          await load({silent:true})
+          return
+        }
+        if(!stage.cloudStored)throw new Error('Este pacote não está persistido no R2. Reenvie o ZIP depois que o backend 1.0.88 estiver ativo.')
         setGithubPublish(null)
         setJob({
-          id:'vercel-request',type:'github-publish',status:'running',
-          phase:'upload-temp',phaseLabel:'Enviando pacote para processamento temporário',progress:8,
-          timeline:[{key:'upload-temp',label:'Enviando pacote para processamento temporário',progress:8,at:new Date().toISOString()}],
+          id:`cloud_${stage.id}`,type:'cloud-release',releaseId:stage.id,status:'running',
+          phase:'r2-download',phaseLabel:'Baixando pacote persistido do R2',progress:18,
+          timeline:[{key:'r2-download',label:'Baixando pacote persistido do R2',progress:18,at:new Date().toISOString()}],
         })
-        const r=await updatesService.publicarGitHubDireto(file,cfg)
+        const r=await updatesService.publicarGitHub(stage.id,cfg)
         setJob(r.job)
         setEphemeralStage(null)
         setFile(null)
-        toast.success('Publicação no GitHub concluída.')
+        toast.success('Commit publicado no GitHub. Acompanhando Vercel e Render…')
+        if(r.release?.productionReady)await load({silent:true})
+        else watchCloudRelease(stage.id)
       }else{
         const r=sourceType==='installed'
           ? await updatesService.publicarAtualGitHub(cfg)
@@ -309,6 +368,7 @@ export default function AdminAtualizacoes(){
   const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
   const activeOperation=data?.activeOperation||null
   const stagedPackages=ephemeralStage?[ephemeralStage,...(data?.staged||[])]:data?.staged||[]
+  const publishablePackage=stagedPackages.find(s=>['ready','failed','deploy-failed','deploy-blocked'].includes(s.status||'ready'))||null
   if(loading)return <div className="adm-page" style={{color:C.muted}}>Carregando atualizações…</div>
   return <div className="adm-page updates-hub" style={{display:'grid',gap:14}}>
     <div className="updates-hero">
@@ -324,7 +384,7 @@ export default function AdminAtualizacoes(){
       <div><b>🔒 Atualizador ocupado</b><span>Job {activeOperation.jobId}</span></div>
       {!managedHost&&<button onClick={recoverActive}>Recuperar</button>}
     </div>}
-    {managedHost&&<div className="updates-alert updates-alert-info"><div><b>☁️ {data?.runtime?.environment} detectada</b><span>Produção gerenciada: envie o ZIP e publique no GitHub; a plataforma cria a nova release sem substituir arquivos locais.</span></div></div>}
+    {managedHost&&<div className={`updates-alert ${data?.cloudStorage?.ok?'updates-alert-info':'updates-alert-warn'}`}><div><b>☁️ {data?.runtime?.environment} · {data?.cloudStorage?.ok?'R2 conectado':'R2 precisa de configuração'}</b><span>{data?.cloudStorage?.ok?`Produção cloud: ZIP → R2 (${data.cloudStorage.bucket}) → GitHub → Vercel + Render.`:(data?.cloudStorage?.error||'Configure o R2 em Integrações e APIs antes de enviar uma nova versão.')}</span></div></div>}
 
     <div className="updates-command-grid">
       <button className="updates-command updates-command-primary" onClick={()=>setUiPanel('upload')}>
@@ -333,8 +393,8 @@ export default function AdminAtualizacoes(){
       {!managedHost&&<button className="updates-command updates-command-install" disabled={Boolean(activeOperation)} onClick={()=>setUiPanel('packages')}>
         <span className="updates-command-icon">▶</span><span><b>Instalar</b><small>{stagedPackages.length?`${stagedPackages.length} versão(ões) pronta(s)`:'nenhuma versão preparada'}</small></span>
       </button>}
-      <button className="updates-command" disabled={Boolean(activeOperation)} onClick={()=>openGithubPublish(managedHost?(stagedPackages[0]||null):null)}>
-        <span className="updates-command-icon">⌁</span><span><b>Publicar</b><small>{managedHost&&stagedPackages.length?'pacote preparado → GitHub':'GitHub / deploy'}</small></span>
+      <button className="updates-command" disabled={Boolean(activeOperation)} onClick={()=>managedHost&&!stagedPackages.length?setUiPanel('upload'):managedHost&&!publishablePackage?setUiPanel('packages'):openGithubPublish(managedHost?publishablePackage:null)}>
+        <span className="updates-command-icon">⌁</span><span><b>Publicar</b><small>{managedHost&&publishablePackage?'R2 → GitHub → produção':managedHost&&stagedPackages.length?'deploy em acompanhamento':'GitHub / deploy'}</small></span>
       </button>
       <button className="updates-command" onClick={()=>setUiPanel('environment')}>
         <span className="updates-command-icon">◉</span><span><b>Ambiente</b><small>{data?.runtime?.environment||'Servidor'} · {diagnostics?.loading?'verificando':diagnostics?.ok?'pronto':'atenção'}</small></span>
@@ -364,8 +424,8 @@ export default function AdminAtualizacoes(){
       <div><span>Mongoose</span><b>{data?.runtime?.stack?.mongoose?.version||'—'}</b></div>
     </div>
 
-    {job&&job.type!=='github-publish'&&<UpdateProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}}/>}
-    {job&&job.type==='github-publish'&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}}/>}
+    {job&&!['github-publish','cloud-release'].includes(job.type)&&<UpdateProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}}/>}
+    {job&&['github-publish','cloud-release'].includes(job.type)&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}}/>}
 
     {uiPanel==='upload'&&<PanelModal kicker="NOVA VERSÃO" title="Validar e preparar pacote" onClose={()=>setUiPanel(null)}>
       <p className="updates-panel-copy">{managedHost?'Em produção gerenciada, o ZIP é validado e a próxima etapa será Publicar no GitHub. Render/Vercel criam uma nova release; nenhum arquivo da instância atual é atualizado por cima.':'O ZIP é validado e extraído em staging. Nenhum arquivo da instalação é substituído nesta etapa.'}</p>
@@ -407,8 +467,8 @@ export default function AdminAtualizacoes(){
       </div>}
     </PanelModal>}
 
-    {uiPanel==='packages'&&<PanelModal kicker="VERSÕES PRONTAS" title={`Preparadas para instalar · ${stagedPackages.length}`} onClose={()=>setUiPanel(null)} wide>
-      <p className="updates-panel-copy">Cada versão fica isolada até você decidir instalar ou excluir. Publicação para GitHub/Vercel continua no módulo <b>Publicar</b>, sem duplicar ações aqui.</p>
+    {uiPanel==='packages'&&<PanelModal kicker="VERSÕES PRONTAS" title={`${managedHost?'Pacotes no R2':'Preparadas para instalar'} · ${stagedPackages.length}`} onClose={()=>setUiPanel(null)} wide>
+      <p className="updates-panel-copy">{managedHost?'Cada ZIP validado fica persistido no R2. Você pode publicar qualquer versão preparada no GitHub e acompanhar Vercel + Render sem manter o navegador aberto.':'Cada versão fica isolada até você decidir instalar ou excluir.'}</p>
       {!stagedPackages.length?<div className="updates-empty">Nenhuma versão preparada. Envie um ZIP em <b>Nova versão</b>; quando a validação terminar, a simulação da instalação abrirá automaticamente.</div>:stagedPackages.map((s,index)=>{
         const notes=releaseNotes(s.changelog)
         const dependencyState=[
@@ -418,7 +478,7 @@ export default function AdminAtualizacoes(){
         return <article key={s.id} className={`updates-release-card ${index===0?'latest':''}`}>
           <div className="updates-release-top">
             <div className="updates-release-version"><span>AL</span><div><small>{index===0?'MAIS RECENTE':'VERSÃO PREPARADA'}</small><strong>v{s.version}</strong></div></div>
-            <span className="updates-release-ready">● PRONTA</span>
+            <span className="updates-release-ready">● {s.status==='deploying'?'EM DEPLOY':s.status==='publishing'?'PUBLICANDO':s.status==='deploy-blocked'?'AGUARDANDO VÍNCULO':s.status==='deploy-failed'||s.status==='failed'?'REQUER ATENÇÃO':managedHost?'NO R2':'PRONTA'}</span>
           </div>
           <div className="updates-release-meta">
             <span>{s.packageType==='incremental'?`⚡ Incremental · base ${s.baseVersion}`:'▣ Completo · aplicação diferencial'}</span>
@@ -437,6 +497,7 @@ export default function AdminAtualizacoes(){
           </div>
           <div className="updates-release-actions">
             {!managedHost&&<button className="updates-install-action" disabled={Boolean(activeOperation)} onClick={()=>install(s)}>Simular e instalar</button>}
+            {managedHost&&(s.status==='deploying'||s.status==='publishing'?<button className="updates-install-action" onClick={()=>watchCloudRelease(s.id)}>Acompanhar produção</button>:<button className="updates-install-action" onClick={()=>openGithubPublish(s)}>Publicar no GitHub</button>)}
             <button className="updates-delete-action" disabled={Boolean(activeOperation)} onClick={()=>deletePrepared(s)}>Excluir versão</button>
           </div>
         </article>
@@ -449,7 +510,7 @@ export default function AdminAtualizacoes(){
     </PanelModal>}
 
     {uiPanel==='history'&&<PanelModal kicker="HISTÓRICO" title="Operações recentes" onClose={()=>setUiPanel(null)} wide>
-      {!data?.history?.length?<div className="updates-empty">Sem atualizações registradas.</div>:data.history.map(h=><div key={h.id} className="updates-history-row"><div><b>{h.type==='rollback'?'Rollback':h.type==='github-publish'?'GitHub':h.type==='recovery'?'Recuperação':'Atualização'} {h.fromVersion} → {h.toVersion}</b>{h.repository&&<span>{h.repository}{h.branch?` @ ${h.branch}`:''}</span>}<small>{fmt(h.createdAt)}</small></div><span className={`updates-history-status ${h.status==='success'?'ok':h.status==='rolled-back'?'bad':''}`}>{h.status}</span></div>)}
+      {!data?.history?.length?<div className="updates-empty">Sem atualizações registradas.</div>:data.history.map(h=><div key={h.id} className="updates-history-row"><div><b>{h.type==='rollback'?'Rollback':h.type==='github-publish'?'GitHub':h.type==='cloud-release'?'Cloud':h.type==='recovery'?'Recuperação':'Atualização'} {h.fromVersion} → {h.toVersion}</b>{h.repository&&<span>{h.repository}{h.branch?` @ ${h.branch}`:''}</span>}<small>{fmt(h.createdAt)}</small></div><span className={`updates-history-status ${['success','completed'].includes(h.status)?'ok':['rolled-back','deploy-failed','failed'].includes(h.status)?'bad':''}`}>{h.status}</span></div>)}
     </PanelModal>}
 
     {uiPanel==='recovery'&&!managedHost&&<PanelModal kicker="RECUPERAÇÃO" title="Reinício e emergência" onClose={()=>setUiPanel(null)}>
@@ -461,16 +522,16 @@ export default function AdminAtualizacoes(){
     {githubPublish&&<div className="updates-modal-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setGithubPublish(null)}}>
       <div className="updates-modal updates-github-modal" role="dialog" aria-modal="true" aria-labelledby="github-publish-title">
         <div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>MÓDULO DE PUBLICAÇÃO · {githubPublish.sourceType==='installed'?'INSTALAÇÃO ATUAL':'PACOTE PREPARADO'}</div>
-        <h2 id="github-publish-title" style={{margin:'7px 0 4px',color:C.text,fontSize:20}}>GitHub / Vercel</h2>
-        <p style={{margin:'0 0 16px',color:C.muted,fontSize:13,lineHeight:1.55}}>O AL Sistemas publica {githubPublish.sourceType==='installed'?<><b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>o pacote como <b>commit no GitHub</b>.</>} {serverless?'O arquivo será processado temporariamente nesta requisição e descartado ao final. ':''}{managedHost?'Em produção, o GitHub vira a origem da nova release. ':''}A Vercel/Render recebem a mudança pelo repositório conectado; o ZIP não vira armazenamento da plataforma.</p>
+        <h2 id="github-publish-title" style={{margin:'7px 0 4px',color:C.text,fontSize:20}}>{managedHost?'R2 → GitHub → Produção':'GitHub / Deploy'}</h2>
+        <p style={{margin:'0 0 16px',color:C.muted,fontSize:13,lineHeight:1.55}}>O AL Sistemas publica {githubPublish.sourceType==='installed'?<><b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>o pacote como <b>commit no GitHub</b>.</>} {managedHost?'O ZIP validado fica persistido no R2 e não depende mais do navegador. Em produção, o GitHub vira a origem do código e a Central acompanha Vercel + Render. ':''}A publicação reutiliza as credenciais de Integrações e APIs.</p>
         {githubPublish.loading?<div style={{padding:'16px 0',color:C.muted}}>Consultando repositórios autorizados…</div>:<>
           {githubPublish.error&&<div style={{padding:11,borderRadius:9,border:`1px solid ${C.red}`,color:C.red,background:'var(--adm-surface2)',fontSize:12,marginBottom:12}}>{githubPublish.error}</div>}
           {(githubPublish.repositories||[]).length>0&&<>
             <label className="updates-modal-field">Repositório<select value={githubPublish.repository} onChange={e=>{const repo=(githubPublish.repositories||[]).find(r=>r.fullName===e.target.value);setGithubPublish(g=>({...g,repository:e.target.value,branch:repo?.defaultBranch||'main',deploymentCheck:null}))}}>{(githubPublish.repositories||[]).map(r=><option key={r.id} value={r.fullName}>{r.fullName}{r.private?' • privado':''}</option>)}</select></label>
             <label className="updates-modal-field">Branch<input value={githubPublish.branch} onChange={e=>setGithubPublish(g=>({...g,branch:e.target.value,deploymentCheck:null}))} placeholder="main"/></label>
             <div className="updates-panel-actions"><button onClick={()=>checkDeployment(true)} disabled={githubPublish.checking}>{githubPublish.checking?'Verificando…':'Verificar GitHub / Vercel'}</button>{githubPublish.deploymentCheck&&<span className={githubPublish.deploymentCheck.ok?'good':'bad-text'}>{githubPublish.deploymentCheck.ok?'✓ GitHub pronto':'⚠ GitHub precisa de atenção'}</span>}</div>
-            {githubPublish.deploymentCheck&&<div className="updates-deploy-check"><div><b>GitHub:</b> {githubPublish.deploymentCheck.github?.writable?'escrita autorizada':'sem permissão de escrita'} · branch {githubPublish.deploymentCheck.github?.branchExists?'encontrada':githubPublish.deploymentCheck.github?.branchWillBeCreated?'será criada':'indisponível'}.</div><div><b>Vercel:</b> {githubPublish.deploymentCheck.vercel?.configured?githubPublish.deploymentCheck.vercel.message:'não configurada; a publicação continuará somente no GitHub.'}</div>{githubPublish.deploymentCheck.vercel?.projects?.map(pr=><div key={pr.id}>▲ <b>{pr.name}</b>{pr.rootDirectory?` · raiz: ${pr.rootDirectory}`:''}{pr.productionBranch?` · produção: ${pr.productionBranch}`:''}</div>)}</div>}
-            <label className="updates-modal-field">{githubPublish.sourceType==='installed'?'O que publicar':'Onde aplicar os arquivos do ZIP'}<select value={githubPublish.publishMode} onChange={e=>setGithubPublish(g=>({...g,publishMode:e.target.value}))}><option value="project">Projeto completo — /backend + /frontend</option><option value="frontend-folder">Somente frontend — pasta /frontend</option><option value="frontend-root">Somente frontend — raiz do repositório (Vercel)</option><option value="backend-folder">Somente backend — pasta /backend</option></select></label>
+            {githubPublish.deploymentCheck&&<div className="updates-deploy-check"><div><b>GitHub:</b> {githubPublish.deploymentCheck.github?.writable?'escrita autorizada':'sem permissão de escrita'} · branch {githubPublish.deploymentCheck.github?.branchExists?'encontrada':githubPublish.deploymentCheck.github?.branchWillBeCreated?'será criada':'indisponível'}.</div><div><b>Vercel:</b> {githubPublish.deploymentCheck.vercel?.configured?githubPublish.deploymentCheck.vercel.message:'não configurada; a publicação continuará somente no GitHub.'}</div>{githubPublish.deploymentCheck.vercel?.projects?.map(pr=><div key={pr.id}>▲ <b>{pr.name}</b>{pr.rootDirectory?` · raiz: ${pr.rootDirectory}`:''}{pr.productionBranch?` · produção: ${pr.productionBranch}`:''}</div>)}{managedHost&&<div><b>Render:</b> {githubPublish.deploymentCheck.render?.message||'serviço principal ainda não verificado.'}</div>}</div>}
+            <label className="updates-modal-field">{managedHost?'Publicação da versão':'Onde aplicar os arquivos do ZIP'}<select disabled={managedHost} value={managedHost?'project':githubPublish.publishMode} onChange={e=>setGithubPublish(g=>({...g,publishMode:e.target.value}))}><option value="project">Projeto completo — /backend + /frontend</option>{!managedHost&&<><option value="frontend-folder">Somente frontend — pasta /frontend</option><option value="frontend-root">Somente frontend — raiz do repositório (Vercel)</option><option value="backend-folder">Somente backend — pasta /backend</option></>}</select>{managedHost&&<small>Na produção cloud o AL mantém frontend e backend no mesmo commit para acompanhar Vercel e Render juntos.</small>}</label>
           </>}
         </>}
         <div className="updates-modal-footer"><button onClick={()=>setGithubPublish(null)}>Cancelar</button><button className="primary-blue" disabled={githubPublish.loading||githubPublish.submitting||!githubPublish.repository} onClick={publishGithub}>{githubPublish.submitting?'Publicando…':githubPublish.sourceType==='installed'?'Publicar versão atual':'Publicar atualização'}</button></div>
@@ -595,6 +656,8 @@ function UpdateFinalReport({report}){
 
 
 const STEP_LABELS={
+  'r2-download':'Baixando pacote do R2',
+  'platform-deploy':'Aguardando Vercel e Render',
   'upload-temp':'Enviando pacote temporário',
   starting:'Iniciando',
   integrity:'Verificando staging',
@@ -669,14 +732,14 @@ function PublishProgressModal({job,onClose}){
       <div className="updates-progress-head">
         <div>
           <div style={{fontSize:11,fontWeight:900,color:C.muted,letterSpacing:'.08em'}}>PUBLICAÇÃO</div>
-          <h2 id="publish-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>GitHub / Vercel</h2>
-          <div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>Acompanhe o envio sem sair da tela. Quando o commit terminar, a Vercel assume o deploy se o projeto estiver conectado.</div>
+          <h2 id="publish-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>R2 → GitHub → Produção</h2>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>O pacote vem do R2, vira commit no GitHub e depois a Central acompanha os deploys de Vercel e Render.</div>
         </div>
         {canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}
       </div>
       <UpdateProgress job={job} embedded/>
       <div className="updates-progress-footer">
-        {!canClose?<span>Não feche esta aba enquanto os arquivos estiverem sendo enviados.</span>:<span>{job.status==='completed'?'Publicação concluída.':job.status==='failed'?'A publicação terminou com erro.':'Operação finalizada.'}</span>}
+        {!canClose?<span>Você pode fechar depois que o pacote estiver no R2; durante a publicação, mantenha esta tela aberta para acompanhar o resultado em tempo real.</span>:<span>{job.status==='completed'?'Publicação concluída.':job.status==='failed'?'A publicação terminou com erro.':'Operação finalizada.'}</span>}
         {canClose&&<button onClick={onClose} style={{...btn,background:C.blue,color:'#fff'}}>Fechar</button>}
       </div>
     </div>
@@ -693,9 +756,9 @@ function UpdateProgress({job,embedded=false}){
   return <section className={embedded?'updates-progress-embedded':''} style={embedded?{borderTop:'1px solid var(--adm-border)',paddingTop:16}:{...card,borderColor:failed?C.red:done?C.greenSolid:C.blue}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}>
       <div>
-        {!embedded&&<div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>{job.type==='github-publish'?'PUBLICAÇÃO GITHUB / VERCEL':'PROGRESSO DA ATUALIZAÇÃO'}</div>}
+        {!embedded&&<div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>{['github-publish','cloud-release'].includes(job.type)?'PUBLICAÇÃO CLOUD':'PROGRESSO DA ATUALIZAÇÃO'}</div>}
         <h2 style={{margin:'5px 0 2px',fontSize:19,color:C.text}}>{currentLabel}</h2>
-        {!embedded&&<div style={{fontSize:12,color:C.muted}}>{job.type==='github-publish'?'O commit é criado no GitHub; a Vercel assume o deployment se o repositório estiver conectado.':'Acompanhe esta caixa até a operação terminar.'}</div>}
+        {!embedded&&<div style={{fontSize:12,color:C.muted}}>{['github-publish','cloud-release'].includes(job.type)?'R2 preserva o pacote; GitHub distribui o código; Vercel e Render concluem a produção.':'Acompanhe esta caixa até a operação terminar.'}</div>}
       </div>
       <strong style={{fontSize:22,color:failed?C.red:done?C.greenSolid:C.blue}}>{progress}%</strong>
     </div>

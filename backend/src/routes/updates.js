@@ -11,6 +11,8 @@ import { getCredential } from '../utils/credentialStore.js'
 import mongoose from 'mongoose'
 import { statusRssJob } from '../jobs/rssJob.js'
 import { runGithubPublish } from '../update/githubPublishWorker.js'
+import UpdateRelease from '../models/UpdateRelease.js'
+import { storeUpdatePackage, downloadUpdatePackage, deleteUpdatePackage, testR2UpdateStorage } from '../services/cloudUpdateStorage.js'
 import { runUpdateSelfTest } from '../update/updateSelfTest.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, deleteStaged, deleteSnapshot, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL, IS_RENDER, IS_MANAGED_PLATFORM, IS_TERMUX } from '../services/systemUpdateService.js'
@@ -115,13 +117,118 @@ async function runGithubPublishInline(job,token){
   // destacado nem de arquivos persistentes entre invocações.
   return runGithubPublish(job,token,{jobFile:null,persistHistory:false})
 }
+
+function cloudReleaseView(doc){
+  const d=doc?.toObject?doc.toObject():doc
+  if(!d)return null
+  return {
+    id:d.releaseId,releaseId:d.releaseId,type:'cloud-release',version:d.version,fromVersion:d.fromVersion||'',toVersion:d.version,filename:d.filename,
+    packageType:d.packageType||'full',createdAt:d.createdAt,changelog:d.changelog||'',
+    sha256:d.packageSha256,integrity:d.integrity||{},status:d.status||'ready',
+    cloudStored:true,storage:d.storage||'r2',bucket:d.bucket,objectKey:d.objectKey,
+    packageBytes:d.packageBytes||0,repository:d.repository||'',branch:d.branch||'main',
+    publishMode:d.publishMode||'project',commitSha:d.commitSha||'',commitUrl:d.commitUrl||'',
+    githubStatus:d.githubStatus||'pending',vercel:d.vercel||{},render:d.render||{},
+    productionReady:Boolean(d.productionReady),error:d.error||'',publishedAt:d.publishedAt||null,
+    completedAt:d.completedAt||null,
+  }
+}
+async function listCloudReleases(limit=20){
+  if(mongoose.connection.readyState!==1)return []
+  const docs=await UpdateRelease.find({}).sort({createdAt:-1}).limit(limit).lean()
+  return docs.map(cloudReleaseView)
+}
+async function cloudStorageStatus(){
+  try{return await testR2UpdateStorage()}
+  catch(e){return {ok:false,error:e.message,code:e.code||null}}
+}
+async function platformDeployState(release){
+  const [vercelCred,renderCred]=await Promise.all([
+    getCredential('vercel','VERCEL_TOKEN'),
+    getCredential('render','RENDER_API_KEY'),
+  ])
+  const commitSha=String(release.commitSha||'')
+  const out={
+    vercel:{id:'',status:vercelCred.value?'waiting':'not-configured',url:vercelCred.metadata?.productionOrigin||'',message:'',checkedAt:new Date()},
+    render:{id:'',status:renderCred.value?'waiting':'not-configured',url:renderCred.metadata?.backendUrl||'',message:'',checkedAt:new Date()},
+  }
+  if(vercelCred.value&&vercelCred.metadata?.primaryProjectId&&commitSha){
+    try{
+      const teamId=vercelCred.metadata?.teamId||process.env.VERCEL_TEAM_ID||''
+      const r=await fetch(vercelApiUrl(`/v6/deployments?projectId=${encodeURIComponent(vercelCred.metadata.primaryProjectId)}&limit=20`,teamId),{headers:{Authorization:`Bearer ${vercelCred.value}`,Accept:'application/json'}})
+      const body=await r.json().catch(()=>({}))
+      if(!r.ok)throw new Error(body.error?.message||`Vercel respondeu ${r.status}`)
+      const found=(body.deployments||[]).find(d=>String(d.meta?.githubCommitSha||'').toLowerCase()===commitSha.toLowerCase() && String(d.target||'').toLowerCase()==='production')
+        ||(body.deployments||[]).find(d=>String(d.meta?.githubCommitSha||'').toLowerCase()===commitSha.toLowerCase())
+      if(found){
+        out.vercel={id:found.uid||'',status:String(found.state||'').toUpperCase()||'UNKNOWN',url:vercelCred.metadata?.productionOrigin||(found.url?`https://${found.url}`:''),message:found.meta?.githubCommitMessage||'',checkedAt:new Date()}
+      }
+    }catch(e){out.vercel={...out.vercel,status:'error',message:e.message}}
+  }else if(vercelCred.value&&!vercelCred.metadata?.primaryProjectId){out.vercel={...out.vercel,status:'not-linked',message:'Selecione o projeto Vercel principal na Central de Plataformas.'}}
+
+  if(renderCred.value&&renderCred.metadata?.primaryServiceId&&commitSha){
+    try{
+      const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(renderCred.metadata.primaryServiceId)}/deploys?limit=20`,{headers:{Authorization:`Bearer ${renderCred.value}`,Accept:'application/json'}})
+      const body=await r.json().catch(()=>[])
+      if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
+      const rows=Array.isArray(body)?body:[]
+      const found=rows.map(x=>x?.deploy||x||{}).find(d=>String(d.commit?.id||'').toLowerCase()===commitSha.toLowerCase())
+      if(found){out.render={id:found.id||'',status:String(found.status||'').toLowerCase()||'unknown',url:renderCred.metadata?.backendUrl||'',message:found.commit?.message||'',checkedAt:new Date()}}
+    }catch(e){out.render={...out.render,status:'error',message:e.message}}
+  }else if(renderCred.value&&!renderCred.metadata?.primaryServiceId){out.render={...out.render,status:'not-linked',message:'Selecione o serviço Render principal na Central de Plataformas.'}}
+  return out
+}
+function deploymentReady(state){
+  const vc=String(state.vercel?.status||'').toUpperCase()==='READY'
+  const rd=['live','succeeded','deployed'].includes(String(state.render?.status||'').toLowerCase())
+  return vc&&rd
+}
+async function refreshCloudRelease(release){
+  if(!release?.commitSha)return cloudReleaseView(release)
+  const platform=await platformDeployState(release)
+  const ready=deploymentReady(platform)
+  const failed=String(platform.vercel?.status||'').toUpperCase()==='ERROR'||/fail|error|cancel/i.test(String(platform.render?.status||''))
+  const blocked=['not-configured','not-linked'].includes(String(platform.vercel?.status||''))||['not-configured','not-linked'].includes(String(platform.render?.status||''))
+  const status=ready?'completed':failed?'deploy-failed':blocked?'deploy-blocked':'deploying'
+  const error=blocked
+    ? [platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Vincule Vercel e Render na Central de Plataformas.'
+    : failed?[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Um dos deploys falhou.':''
+  const updated=await UpdateRelease.findOneAndUpdate({releaseId:release.releaseId},{
+    $set:{vercel:platform.vercel,render:platform.render,productionReady:ready,status,error,completedAt:ready?new Date():null},
+  },{new:true})
+  return cloudReleaseView(updated)
+}
+async function maybeTriggerRenderCommit(commitSha){
+  const cred=await getCredential('render','RENDER_API_KEY')
+  const serviceId=cred.metadata?.primaryServiceId||''
+  if(!cred.value||!serviceId||!commitSha)return {triggered:false,reason:'not-configured'}
+  try{
+    const serviceResp=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`,{headers:{Authorization:`Bearer ${cred.value}`,Accept:'application/json'}})
+    const serviceBody=await serviceResp.json().catch(()=>({}))
+    const service=serviceBody?.service||serviceBody||{}
+    const auto=String(service.autoDeploy??'').toLowerCase()
+    if(['yes','true','on_commit','on-commit'].includes(auto)||service.autoDeploy===true)return {triggered:false,reason:'auto-deploy'}
+    const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys`,{
+      method:'POST',headers:{Authorization:`Bearer ${cred.value}`,Accept:'application/json','Content-Type':'application/json'},
+      body:JSON.stringify({commitId:commitSha,clearCache:'do_not_clear'}),
+    })
+    const body=await r.json().catch(()=>({}))
+    if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
+    const deploy=body?.deploy||body||{}
+    return {triggered:true,deployId:deploy.id||''}
+  }catch(e){return {triggered:false,reason:'error',error:e.message}}
+}
 router.get('/',async(_req,res,next)=>{try{
   const isTermux=IS_TERMUX
   const processManager=IS_VERCEL?'Vercel Functions':IS_RENDER?'Render Service':process.env.pm_id!==undefined?'PM2':process.env.INVOCATION_ID?'systemd':isTermux?'Termux/manual':'manual'
   const activeOperation=IS_MANAGED_PLATFORM?null:await readUpdateLock()
   const stack=await runtimeStack()
+  const cloudReleases=IS_MANAGED_PLATFORM?await listCloudReleases():[]
+  const cloudStorage=IS_MANAGED_PLATFORM?await cloudStorageStatus():null
+  const cloudReady=cloudReleases.filter(x=>['ready','publishing','deploying','deploy-failed','deploy-blocked','failed'].includes(x.status))
+  const cloudHistory=cloudReleases.filter(x=>['completed','deploy-failed','deploy-blocked','failed'].includes(x.status))
   res.json({
-    installed:await installedVersion(),staged:IS_MANAGED_PLATFORM?[]:await listStaged(),history:IS_MANAGED_PLATFORM?[]:await readHistory(),snapshots:IS_MANAGED_PLATFORM?[]:await listSnapshots(),activeOperation,
+    installed:await installedVersion(),staged:IS_MANAGED_PLATFORM?cloudReady:await listStaged(),history:IS_MANAGED_PLATFORM?cloudHistory:await readHistory(),snapshots:IS_MANAGED_PLATFORM?[]:await listSnapshots(),activeOperation,cloudStorage,
     runtime:{
       environment:IS_VERCEL?'Vercel':IS_RENDER?'Render':isTermux?'Termux':process.platform==='linux'?'Linux/VPS':process.platform,
       node:process.version,npm:npmRuntimeVersion(),arch:process.arch,platform:process.platform,processManager,
@@ -136,9 +243,9 @@ router.get('/',async(_req,res,next)=>{try{
       githubPublish:true,
       incrementalPackages:!IS_MANAGED_PLATFORM,
       fullPackages:true,
-      packageStorage:IS_MANAGED_PLATFORM?'request-tmp':'external-staging',
+      packageStorage:IS_MANAGED_PLATFORM?'r2':'external-staging',
       detachedMonitor:!IS_MANAGED_PLATFORM,
-      stateStorage:IS_MANAGED_PLATFORM?'temporary':'outside-project',
+      stateStorage:IS_MANAGED_PLATFORM?'mongodb':'outside-project',
       preflight:!IS_MANAGED_PLATFORM,
       maintenanceMode:!IS_MANAGED_PLATFORM,
       snapshotRetention:IS_MANAGED_PLATFORM?0:Number(process.env.AL_UPDATE_SNAPSHOT_KEEP||3),
@@ -152,7 +259,7 @@ router.get('/',async(_req,res,next)=>{try{
       engineSelfTest:!IS_MANAGED_PLATFORM,
       stageRetention:Number(process.env.AL_UPDATE_STAGE_KEEP||5),
       emergencyRecoveryCommand:IS_MANAGED_PLATFORM?null:`node "${path.join(STATE_DIR,'runtime','recoverPending.cjs')}" "${STATE_DIR}"`,
-      productionFlow:IS_MANAGED_PLATFORM?'github-deploy':'local-install',
+      productionFlow:IS_MANAGED_PLATFORM?'r2-github-vercel-render':'local-install',
     }
   })
 }catch(e){next(e)}})
@@ -204,7 +311,22 @@ router.get('/deployment-check',async(req,res,next)=>{try{
       vercel={configured:true,ok:true,projects:matches,message:matches.length?`${matches.length} projeto(s) Vercel vinculado(s) encontrado(s).`:'Vercel conectada, mas nenhum projeto vinculado a este repositório foi identificado.'}
     }catch(e){vercel={configured:true,ok:false,projects:[],message:e.message}}
   }
-  res.json({ok:github.writable,github,vercel})
+  const rd=await getCredential('render','RENDER_API_KEY')
+  let render={configured:Boolean(rd.value),ok:null,serviceId:rd.metadata?.primaryServiceId||'',repo:'',branch:'',message:rd.value?'Verificando serviço principal…':'Render não configurada.'}
+  if(rd.value&&rd.metadata?.primaryServiceId){
+    try{
+      const rr=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(rd.metadata.primaryServiceId)}`,{headers:{Authorization:`Bearer ${rd.value}`,Accept:'application/json'}})
+      const rb=await rr.json().catch(()=>({}))
+      if(!rr.ok)throw new Error(rb?.message||rb?.error||`Render respondeu ${rr.status}`)
+      const svc=rb?.service||rb||{}
+      const repoUrl=String(svc.repo||'')
+      const normalizedRepo=repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i,'').replace(/\.git$/i,'').replace(/^git@github\.com:/i,'').toLowerCase()
+      const sameRepo=!normalizedRepo||normalizedRepo===repository.toLowerCase()
+      const sameBranch=!svc.branch||String(svc.branch).toLowerCase()===branch.toLowerCase()
+      render={configured:true,ok:sameRepo&&sameBranch,serviceId:svc.id||rd.metadata.primaryServiceId,repo:repoUrl,branch:svc.branch||'',message:sameRepo&&sameBranch?'Serviço Render principal acompanha este repositório/branch.':`Render principal aponta para ${repoUrl||'outro repositório'}${svc.branch?` @ ${svc.branch}`:''}.`}
+    }catch(e){render={...render,ok:false,message:e.message}}
+  }else if(rd.value){render={...render,ok:false,message:'Selecione o serviço Render principal na Central de Plataformas.'}}
+  res.json({ok:github.writable,github,vercel,render})
 }catch(e){next(e)}})
 
 router.post('/self-test',async(_req,res,next)=>{try{
@@ -337,18 +459,37 @@ router.post('/post-install-self-test',async(req,res,next)=>{try{
 router.post('/prepare',upload.single('package'),async(req,res,next)=>{try{
   if(!req.file)return res.status(400).json({erro:'Envie o pacote no campo package.'})
   const meta=await validateAndStage(req.file.path,req.file.originalname,{persist:!IS_MANAGED_PLATFORM})
+  if(IS_MANAGED_PLATFORM){
+    if(meta.packageType==='incremental')throw new Error('Na produção Vercel/Render use o pacote completo da versão.')
+    const storage=await storeUpdatePackage(req.file.path,{version:meta.version,filename:req.file.originalname,sha256:meta.sha256})
+    const release=await UpdateRelease.findOneAndUpdate(
+      {releaseId:meta.id},
+      {$set:{
+        releaseId:meta.id,version:meta.version,fromVersion:(await installedVersion()).version,filename:req.file.originalname,packageType:meta.packageType||'full',
+        packageSha256:meta.sha256,packageBytes:storage.bytes,bucket:storage.bucket,objectKey:storage.objectKey,storage:'r2',
+        changelog:meta.changelog||'',integrity:meta.integrity||{},status:'ready',githubStatus:'pending',error:'',
+        vercel:{status:'pending'},render:{status:'pending'},productionReady:false,
+      }},
+      {upsert:true,new:true,setDefaultsOnInsert:true},
+    )
+    if(meta._packageRoot)await fs.rm(meta._packageRoot,{recursive:true,force:true}).catch(()=>{})
+    return res.status(201).json({
+      message:`Pacote ${meta.version} validado e armazenado no R2. Ele permanece disponível mesmo se o navegador ou a Render reiniciar.`,
+      update:cloudReleaseView(release),ephemeral:false,cloudStored:true,
+    })
+  }
   if(meta._packageRoot) await fs.rm(meta._packageRoot,{recursive:true,force:true}).catch(()=>{})
   const clean={...meta}; delete clean._packageRoot
-  res.status(201).json({
-    message:IS_MANAGED_PLATFORM
-      ? 'Pacote validado. Em produção gerenciada ele não fica no disco do servidor; o navegador mantém o ZIP até a publicação.'
-      : 'Pacote validado e preparado.',
-    update:clean,
-    ephemeral:IS_MANAGED_PLATFORM,
-  })
+  res.status(201).json({message:'Pacote validado e preparado.',update:clean,ephemeral:false})
 }catch(e){next(e)}finally{if(req.file)await fs.rm(req.file.path,{force:true}).catch(()=>{})}})
 router.delete('/staged/:stageId',async(req,res,next)=>{try{
-  if(IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Staging persistente não é usado em Render/Vercel.'})
+  if(IS_MANAGED_PLATFORM){
+    const release=await UpdateRelease.findOne({releaseId:req.params.stageId})
+    if(!release)return res.status(404).json({erro:'Pacote armazenado não encontrado.'})
+    if(release.objectKey)await deleteUpdatePackage(release).catch(e=>{throw new Error(`Não foi possível remover o ZIP do R2: ${e.message}`)})
+    await release.deleteOne()
+    return res.json({message:`Pacote ${release.version} removido do R2 e do histórico de preparação.`,removed:cloudReleaseView(release)})
+  }
   const active=await readUpdateLock()
   if(active)return res.status(409).json({erro:'Não é possível excluir pacotes enquanto existe uma atualização/rollback em andamento.'})
   const removed=await deleteStaged(req.params.stageId)
@@ -491,19 +632,58 @@ router.post('/publish-current-github',async(req,res,next)=>{try{
   next(e)
 }})
 
-router.post('/:stageId/publish-github',async(req,res,next)=>{try{
+router.post('/:stageId/publish-github',async(req,res,next)=>{let tempZip=null,packageRoot=null;try{
   const stageId=req.params.stageId
-  const staged=await listStaged()
-  const stage=staged.find(s=>s.id===stageId)
-  if(!stage)return res.status(404).json({erro:'Pacote preparado não encontrado.'})
-  if(stage.packageType==='incremental')return res.status(409).json({erro:'Pacotes incrementais são destinados à instalação local. Para GitHub/Vercel, use o pacote completo da versão.'})
   const repository=String(req.body?.repository||'').trim()
   const branch=String(req.body?.branch||'main').trim()||'main'
   const publishMode=String(req.body?.publishMode||'project')
   if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))return res.status(400).json({erro:'Selecione um repositório GitHub válido.'})
   if(!['project','frontend-folder','frontend-root','backend-folder'].includes(publishMode))return res.status(400).json({erro:'Destino de publicação inválido.'})
+  if(IS_MANAGED_PLATFORM&&publishMode!=='project')return res.status(400).json({erro:'Em produção Vercel + Render, atualizações do AL Sistemas devem publicar o projeto completo para manter frontend e backend no mesmo commit.'})
   const token=await githubToken()
   if(!token)return res.status(400).json({erro:'GitHub não conectado. Configure-o em Integrações e APIs.'})
+
+  if(IS_MANAGED_PLATFORM){
+    const release=await UpdateRelease.findOne({releaseId:stageId})
+    if(!release)return res.status(404).json({erro:'Pacote persistente não encontrado no histórico de atualizações.'})
+    if(release.packageType==='incremental')return res.status(409).json({erro:'Na produção Vercel/Render use o pacote completo da versão.'})
+    await UpdateRelease.updateOne({_id:release._id},{$set:{status:'publishing',githubStatus:'running',repository,branch,publishMode,error:''}})
+    const tempDir=await fs.mkdtemp(path.join(os.tmpdir(),'alsistemas-r2-release-'))
+    tempZip=path.join(tempDir,release.filename)
+    await downloadUpdatePackage(release,tempZip)
+    const meta=await validateAndStage(tempZip,release.filename,{persist:false})
+    packageRoot=meta._packageRoot
+    if(meta.sha256!==release.packageSha256)throw new Error('O SHA-256 do pacote baixado do R2 não corresponde ao pacote validado originalmente.')
+    const [owner,repo]=repository.split('/')
+    let previousCommitSha=''
+    try{const head=await githubApi(token,`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(branch)}`);previousCommitSha=head.sha||''}catch{}
+    const id=`job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
+    const job={
+      id,type:'github-publish',stageId,stagePath:packageRoot,fromVersion:(await installedVersion()).version,toVersion:release.version,
+      repository,branch,publishMode,
+      commitMessage:String(req.body?.commitMessage||`Atualiza AL Sistemas para ${release.version}`).slice(0,200),
+      status:'queued',progress:0,createdAt:new Date().toISOString(),sourceType:'r2',
+    }
+    const finalJob=await runGithubPublishInline(job,token)
+    const renderKick=await maybeTriggerRenderCommit(finalJob.commitSha||'')
+    const saved=await UpdateRelease.findOneAndUpdate({_id:release._id},{$set:{
+      status:'deploying',githubStatus:'completed',repository,branch,publishMode,
+      commitSha:finalJob.commitSha||'',commitUrl:finalJob.commitUrl||'',previousCommitSha,
+      publishedAt:new Date(),error:'',
+      ...(renderKick?.deployId?{'render.id':renderKick.deployId,'render.status':'queued'}:{}),
+    }},{new:true})
+    const refreshed=await refreshCloudRelease(saved)
+    return res.status(200).json({
+      message:`AL Sistemas ${release.version} publicado no GitHub. Vercel e Render estão sendo acompanhados pela Central.`,
+      job:{...finalJob,type:'cloud-release',releaseId:stageId,status:refreshed.productionReady?'completed':'deploying',phase:refreshed.productionReady?'completed':'platform-deploy',phaseLabel:refreshed.productionReady?'Produção atualizada':'Aguardando Vercel e Render',progress:refreshed.productionReady?100:92},
+      release:refreshed,render:renderKick,
+    })
+  }
+
+  const staged=await listStaged()
+  const stage=staged.find(s=>s.id===stageId)
+  if(!stage)return res.status(404).json({erro:'Pacote preparado não encontrado.'})
+  if(stage.packageType==='incremental')return res.status(409).json({erro:'Pacotes incrementais são destinados à instalação local. Para GitHub/Vercel, use o pacote completo da versão.'})
   const id=`job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
   const job={
     id,type:'github-publish',stageId,fromVersion:(await installedVersion()).version,toVersion:stage.version,
@@ -515,9 +695,21 @@ router.post('/:stageId/publish-github',async(req,res,next)=>{try{
   try{await launchGithubPublish(job,token)}catch(e){await releaseUpdateLock(job.id);throw e}
   res.status(202).json({message:'Publicação no GitHub iniciada.',job})
 }catch(e){
+  if(IS_MANAGED_PLATFORM&&req.params.stageId)await UpdateRelease.updateOne({releaseId:req.params.stageId},{$set:{status:'failed',githubStatus:'failed',error:e.message}}).catch(()=>{})
   if(e.code==='UPDATE_BUSY')return res.status(409).json({erro:e.message,codigo:e.code,active:e.active})
   next(e)
+}finally{
+  if(packageRoot)await fs.rm(packageRoot,{recursive:true,force:true}).catch(()=>{})
+  if(tempZip)await fs.rm(path.dirname(tempZip),{recursive:true,force:true}).catch(()=>{})
 }})
+
+router.get('/cloud-releases/:releaseId/status',async(req,res,next)=>{try{
+  if(!IS_MANAGED_PLATFORM)return res.status(409).json({erro:'Acompanhamento cloud é usado somente em Render/Vercel.'})
+  const release=await UpdateRelease.findOne({releaseId:req.params.releaseId})
+  if(!release)return res.status(404).json({erro:'Release cloud não encontrada.'})
+  const refreshed=await refreshCloudRelease(release)
+  res.json({release:refreshed})
+}catch(e){next(e)}})
 
 router.get('/jobs/:jobId',async(req,res,next)=>{try{if(!/^job_[0-9]+_[a-f0-9]+$/.test(req.params.jobId))return res.status(400).json({erro:'Job inválido.'}); res.json({job:JSON.parse(await fs.readFile(path.join(JOB_DIR,`${req.params.jobId}.json`),'utf8'))})}catch(e){next(e)}})
 export default router
