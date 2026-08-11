@@ -1,743 +1,143 @@
-/**
- * AdminErros.jsx — Monitor de Erros
- *
- * MIGRADO: DS Sprint
- *   - TipoBadge   → DSBadge (variant mapeado de TIPO_META)
- *   - StatusBadge → DSBadge (variant mapeado de STATUS_META)
- *   - StatsBar    → usa DSBadge em vez de spans inline
- *   - BulkToolbar → usa T.blue como background ao invés de hex
- *   - Cores hex   → tokens T.*
- *   - SPACE/RADIUS/FONT em todos os espaçamentos inline remanescentes
- */
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { errosService } from '../../services/api'
-import ConfirmModal from '../../components/ConfirmModal'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { formatarDataRelativa } from '../../utils/formatters'
-import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
+import ConfirmModal from '../../components/ConfirmModal'
+import { errosService } from '../../services/api'
 import { DSBadge, DSModal } from '../../components/admin/ui/DS'
+import { T, SPACE, RADIUS, FONT } from '../../themes/tokens'
+import { formatarDataRelativa } from '../../utils/formatters'
 
-// ─── Constantes ──────────────────────────────────────────────
-const TIPO_META = {
-  render:              { label: 'Render',  variant: 'red'    },
-  js_error:            { label: 'JS',      variant: 'amber'  },
-  unhandled_rejection: { label: 'Promise', variant: 'purple' },
-  api:                 { label: 'API',     variant: 'blue'   },
-  backend:             { label: 'Backend', variant: 'red'    },
-  update:              { label: 'Atualização', variant: 'amber' },
-  worker:              { label: 'Worker',  variant: 'purple' },
-  rss:                 { label: 'RSS',     variant: 'green'  },
-  github:              { label: 'GitHub',  variant: 'blue'   },
-  termux:              { label: 'Termux',  variant: 'green'  },
-}
-const STATUS_META = {
-  novo:         { label: 'Novo',         variant: 'red'   },
-  investigando: { label: 'Investigando', variant: 'amber' },
-  resolvido:    { label: 'Resolvido',    variant: 'green' },
-  ignorado:     { label: 'Ignorado',     variant: 'gray'  },
-}
-const TIPOS_FILTRO = [
-  { key: '', label: 'Todos' },
-  { key: 'render',              label: 'Render'  },
-  { key: 'js_error',            label: 'JS'      },
-  { key: 'unhandled_rejection', label: 'Promise' },
-  { key: 'api',                 label: 'API'     },
-  { key: 'backend',             label: 'Backend' },
-  { key: 'update',              label: 'Atualização' },
-  { key: 'worker',              label: 'Worker' },
-  { key: 'rss',                 label: 'RSS' },
-  { key: 'github',              label: 'GitHub' },
-  { key: 'termux',              label: 'Termux' },
+const SOURCES=[
+  {key:'',label:'Todos'}, {key:'al',label:'AL'}, {key:'github',label:'GitHub'},
+  {key:'vercel',label:'Vercel'}, {key:'render',label:'Render'}, {key:'mongo',label:'MongoDB'},
 ]
-const PERIODOS = [
-  { value: '',    label: 'Todo período'     },
-  { value: '24h', label: 'Últimas 24h'     },
-  { value: '7d',  label: 'Últimos 7 dias'  },
-  { value: '30d', label: 'Últimos 30 dias' },
-]
+const STATUS={novo:'Novo',investigando:'Investigando',resolvido:'Resolvido',ignorado:'Ignorado'}
+const sourceLabel={al:'AL Sistemas',github:'GitHub Actions',vercel:'Vercel',render:'Render',mongo:'MongoDB'}
+const sourceIcon={al:'◆',github:'◈',vercel:'▲',render:'R',mongo:'DB'}
+const severityColor={critical:T.red,warning:T.amberSolid||'#d97706',info:T.blue,ok:T.greenSolid}
 
-// ─── ID helper ────────────────────────────────────────────────
-const eid = (e) => String(e._id)
-
-// ─── Badges — agora usa DSBadge ──────────────────────────────
-function TipoBadge({ tipo }) {
-  const m = TIPO_META[tipo] || { label: tipo, variant: 'gray' }
-  return <DSBadge variant={m.variant}>{m.label}</DSBadge>
-}
-function StatusBadge({ status }) {
-  const m = STATUS_META[status] || STATUS_META.novo
-  return <DSBadge variant={m.variant}>{m.label}</DSBadge>
+function SourceSummary({item}){
+  const state=item.configured===false?'Não configurado':item.ok===true?'Saudável':item.ok===false?'Atenção':'—'
+  const variant=item.configured===false?'gray':item.ok===true?'green':item.ok===false?'red':'gray'
+  return <div className="adm-card" style={{padding:SPACE.md,minWidth:0}}>
+    <div style={{display:'flex',justifyContent:'space-between',gap:SPACE.sm,alignItems:'center'}}>
+      <strong style={{fontSize:FONT.base,minWidth:0}}>{item.label}</strong><DSBadge variant={variant}>{state}</DSBadge>
+    </div>
+    <div style={{fontSize:FONT.sm,color:'var(--adm-muted)',marginTop:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{item.summary}</div>
+  </div>
 }
 
-// ─── Parse User-Agent ─────────────────────────────────────────
-function parsearUA(ua) {
-  if (!ua) return { browser: '—', os: '—', icone: '🌐' }
-  const browsers = [
-    { re: /Edg\/[\d.]+/,     nome: 'Edge',    icone: '🔷' },
-    { re: /OPR\/[\d.]+/,     nome: 'Opera',   icone: '🔴' },
-    { re: /Chrome\/[\d.]+/,  nome: 'Chrome',  icone: '🟡' },
-    { re: /Firefox\/[\d.]+/, nome: 'Firefox', icone: '🦊' },
-    { re: /Safari\/[\d.]+/,  nome: 'Safari',  icone: '🧭' },
-  ]
-  const sistemas = [
-    { re: /Windows NT [\d.]+/, nome: 'Windows' },
-    { re: /Mac OS X [\d_.]+/,  nome: 'macOS'   },
-    { re: /Android [\d.]+/,    nome: 'Android' },
-    { re: /iPhone OS [\d_]+/,  nome: 'iOS'     },
-    { re: /Linux/,             nome: 'Linux'   },
-  ]
-  const b = browsers.find(b => b.re.test(ua))
-  const s = sistemas.find(s => s.re.test(ua))
-  return { browser: b?.nome || ua.slice(0, 40), os: s?.nome || '—', icone: b?.icone || '🌐' }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────
-function extrairFramePrincipal(stack) {
-  if (!stack) return null
-  const linha = stack.split('\n').find(l => l.includes('/src/'))
-  if (!linha) return null
-  const m = linha.match(/\((.+):(\d+):(\d+)\)/) || linha.match(/at (.+):(\d+):(\d+)/)
-  return m ? { arquivo: m[1], linha: m[2], coluna: m[3] } : null
-}
-function gerarFingerprint(erro) {
-  const frame = extrairFramePrincipal(erro.stack)
-  const arquivo = frame?.arquivo?.split('/').pop() || 'desconhecido'
-  return `${erro.mensagem}::${arquivo}`
-}
-
-// ─── Stack Trace ──────────────────────────────────────────────
-function StackTrace({ stack }) {
-  if (!stack) return <p style={{ color: C.muted }}>Sem stack trace</p>
-  const linhas = stack.split('\n')
-  return (
-    <div style={{
-      fontFamily: '"JetBrains Mono","Fira Code",monospace',
-      fontSize: FONT.sm,
-      lineHeight: 1.7,
-      background: `${C.red}0d`,
-      border: `1px solid ${C.redBorder}`,
-      borderRadius: RADIUS.md,
-      overflow: 'auto',
-      maxHeight: 300,
-    }}>
-      <div style={{
-        padding: `${SPACE.md}px 14px`,
-        background: C.redBg,
-        borderBottom: `1px solid ${C.redBorder}`,
-        color: '#fca5a5',
-        fontWeight: 700,
-        wordBreak: 'break-word',
-      }}>
-        {linhas[0]}
+function EventCard({event,selected,onSelect,onOpen}){
+  const color=severityColor[event.severity]||T.blue
+  return <article className="adm-card" style={{padding:SPACE.lg,display:'grid',gridTemplateColumns:'auto 1fr auto',gap:SPACE.md,alignItems:'start',minWidth:0}}>
+    <input type="checkbox" checked={selected} onChange={()=>onSelect(event)} style={{marginTop:4,width:16,height:16}} />
+    <button onClick={()=>onOpen(event)} style={{border:0,background:'transparent',padding:0,textAlign:'left',cursor:'pointer',minWidth:0,color:'inherit'}}>
+      <div style={{display:'flex',alignItems:'center',gap:SPACE.sm,flexWrap:'wrap'}}>
+        <span style={{width:28,height:28,borderRadius:9,display:'inline-grid',placeItems:'center',background:`${color}18`,color,fontWeight:900,fontSize:FONT.sm}}>{sourceIcon[event.source]||'!'}</span>
+        <strong style={{fontSize:FONT.md,color:'var(--adm-text)',minWidth:0,overflowWrap:'anywhere'}}>{event.title}</strong>
+        <DSBadge variant={event.severity==='critical'?'red':event.severity==='warning'?'amber':'blue'}>{sourceLabel[event.source]||event.source}</DSBadge>
       </div>
-      <div style={{ padding: `${SPACE.md}px 0` }}>
-        {linhas.slice(1).map((linha, i) => {
-          const isSrc = linha.includes('/src/')
-          const m = linha.match(/\((.+):(\d+):(\d+)\)$/) || linha.match(/at (.+):(\d+):(\d+)$/)
-          return (
-            <div key={i} style={{
-              padding: `1px 14px`,
-              color: isSrc ? '#fcd34d' : 'rgba(252,165,165,.5)',
-              background: isSrc ? 'rgba(252,211,77,.08)' : 'transparent',
-              display: 'flex', gap: SPACE.md, alignItems: 'baseline',
-            }}>
-              <span style={{ color: 'rgba(255,255,255,.2)', flexShrink: 0 }}>{i + 1}</span>
-              {isSrc && m
-                ? <span style={{ wordBreak: 'break-all' }}>
-                    <span style={{ opacity: .6 }}>at </span>
-                    <span style={{ color: '#86efac' }}>{m[1].split('/').pop()}</span>
-                    <span style={{ opacity: .5 }}>:{m[2]}:{m[3]}</span>
-                  </span>
-                : <span style={{ opacity: .4, wordBreak: 'break-all' }}>{linha.replace(/^\s*at\s*/, '')}</span>
-              }
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
+      <div style={{marginTop:7,color:'var(--adm-muted)',fontSize:FONT.base,lineHeight:1.45,overflowWrap:'anywhere'}}>{event.message}</div>
+      <div style={{marginTop:7,color:'var(--adm-muted)',fontSize:FONT.sm}}>{event.createdAt?formatarDataRelativa(event.createdAt):'agora'}</div>
+    </button>
+    <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={()=>onOpen(event)}>Detalhes</button>
+  </article>
 }
 
-function MetaItem({ label, value }) {
-  return (
-    <div style={{ background: 'var(--adm-surface)', borderRadius: RADIUS.md, padding: `${SPACE.md}px ${SPACE.lg}px`, border: '1px solid var(--adm-border)' }}>
-      <div style={{ fontSize: FONT.xs, color: 'var(--adm-muted)', marginBottom: 3, fontWeight: 600, textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: FONT.base, color: 'var(--adm-text)', wordBreak: 'break-all' }}>{value}</div>
-    </div>
-  )
-}
+export default function AdminErros(){
+  const [local,setLocal]=useState({erros:[],total:0})
+  const [central,setCentral]=useState({sources:[],events:[],vps:null})
+  const [loading,setLoading]=useState(true)
+  const [source,setSource]=useState('')
+  const [query,setQuery]=useState('')
+  const [filtersOpen,setFiltersOpen]=useState(false)
+  const [settingsOpen,setSettingsOpen]=useState(false)
+  const [status,setStatus]=useState('')
+  const [period,setPeriod]=useState('7d')
+  const [selected,setSelected]=useState(new Map())
+  const [detail,setDetail]=useState(null)
+  const [details,setDetails]=useState(null)
+  const [detailsLoading,setDetailsLoading]=useState(false)
+  const [analysis,setAnalysis]=useState('')
+  const [aiLoading,setAiLoading]=useState(false)
+  const [diagOpen,setDiagOpen]=useState(false)
+  const [diagMode,setDiagMode]=useState('cloud')
+  const [diagnostic,setDiagnostic]=useState(null)
+  const [confirm,setConfirm]=useState({aberto:false,titulo:'',msg:'',fn:null,carregando:false})
 
-// ─── Barra de estatísticas — usa DSBadge ──────────────────────
-function StatsBar({ erros }) {
-  if (!erros.length) return null
-  const byTipo   = Object.fromEntries(Object.keys(TIPO_META).map(k => [k, 0]))
-  const byStatus = Object.fromEntries(Object.keys(STATUS_META).map(k => [k, 0]))
-  erros.forEach(e => {
-    if (byTipo[e.tipo]     !== undefined) byTipo[e.tipo]++
-    if (byStatus[e.status] !== undefined) byStatus[e.status]++
-    else byStatus.novo++
-  })
-  return (
-    <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap', marginBottom: SPACE.lg }}>
-      {Object.entries(TIPO_META).map(([k, m]) => byTipo[k] > 0 && (
-        <DSBadge key={k} variant={m.variant}>
-          {m.label} {byTipo[k]}
-        </DSBadge>
-      ))}
-      <span style={{ width: 1, background: 'var(--adm-border)', margin: `0 ${SPACE.xs}px` }} />
-      {Object.entries(STATUS_META).map(([k, m]) => byStatus[k] > 0 && (
-        <DSBadge key={k} variant={m.variant}>
-          {m.label} {byStatus[k]}
-        </DSBadge>
-      ))}
-    </div>
-  )
-}
-
-// ─── Toolbar de seleção bulk ──────────────────────────────────
-function BulkToolbar({ selected, onBulkStatus, onBulkDelete, onClear }) {
-  if (selected.size === 0) return null
-  return (
-    <div style={{
-      position: 'sticky', top: 0, zIndex: 10,
-      background: C.blue,
-      color: '#fff',
-      padding: `${SPACE.md + 2}px ${SPACE.xl}px`,
-      display: 'flex', alignItems: 'center', gap: SPACE.md + 2,
-      flexWrap: 'wrap',
-      borderRadius: RADIUS.md,
-      marginBottom: SPACE.md,
-    }}>
-      <span style={{ fontWeight: 700, fontSize: FONT.md }}>{selected.size} selecionado(s)</span>
-      <div style={{ display: 'flex', gap: SPACE.sm, marginLeft: 'auto' }}>
-        {Object.entries(STATUS_META).map(([k, m]) => (
-          <button key={k} onClick={() => onBulkStatus(k)}
-            style={{ padding: `${SPACE.xs}px ${SPACE.md + 2}px`, borderRadius: RADIUS.sm, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.12)', color: '#fff', cursor: 'pointer', fontSize: FONT.base, fontWeight: 600 }}>
-            → {m.label}
-          </button>
-        ))}
-        <button onClick={onBulkDelete}
-          style={{ padding: `${SPACE.xs}px ${SPACE.md + 2}px`, borderRadius: RADIUS.sm, border: 'none', background: C.red, color: '#fff', cursor: 'pointer', fontSize: FONT.base, fontWeight: 700 }}>
-          🗑 Excluir
-        </button>
-        <button onClick={onClear}
-          style={{ padding: `${SPACE.xs}px ${SPACE.md + 2}px`, borderRadius: RADIUS.sm, border: '1px solid rgba(255,255,255,.3)', background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: FONT.base }}>
-          ✕ Limpar seleção
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Row expandível ───────────────────────────────────────────
-function ErroRow({ erro, onAtualizarStatus, onExcluir, selected, onToggleSelect }) {
-  const [expandido, setExpandido] = useState(false)
-  const ua    = parsearUA(erro.user_agent)
-  const frame = extrairFramePrincipal(erro.stack)
-  const id    = eid(erro)
-
-  async function copiarMarkdown() {
-    const md = [
-      `## Bug Report — ${new Date(erro.criado_em).toLocaleString('pt-BR')}`,
-      `**Tipo:** ${erro.tipo}`,
-      `**Mensagem:** ${erro.mensagem}`,
-      `**URL:** ${erro.url || '—'}`,
-      `**Rota:** ${erro.rota || '—'}`,
-      `**Navegador:** ${ua.browser} — ${ua.os}`,
-      `**Status:** ${STATUS_META[erro.status]?.label || 'Novo'}`,
-      '', '### Stack Trace', '```', erro.stack || '(sem stack)', '```',
-      ...(erro.dados ? ['', '### Contexto', '```json', JSON.stringify(erro.dados, null, 2), '```'] : []),
-    ].join('\n')
-    await navigator.clipboard.writeText(md)
-    toast.success('Relatório copiado!')
-  }
-
-  return (
-    <>
-      <tr style={{ opacity: erro.status === 'resolvido' ? .55 : 1, background: selected ? `${C.blue}14` : 'transparent' }}>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.md}px`, width: 16 }} onClick={e => e.stopPropagation()}>
-          <input type="checkbox" checked={selected} onChange={() => onToggleSelect(id)} style={{ width: 14, height: 14, cursor: 'pointer' }} />
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xs}px`, width: 12 }} onClick={() => setExpandido(e => !e)}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: erro.status === 'novo' ? C.red : 'transparent', border: erro.status !== 'novo' ? `1.5px solid var(--adm-border2)` : 'none' }} />
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.md}px` }} onClick={() => setExpandido(e => !e)}>
-          <TipoBadge tipo={erro.tipo} />
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.md}px` }} onClick={() => setExpandido(e => !e)}>
-          <StatusBadge status={erro.status || 'novo'} />
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xl}px`, maxWidth: 300, cursor: 'pointer' }} onClick={() => setExpandido(e => !e)}>
-          <div style={{ fontSize: FONT.md, fontWeight: 500, color: 'var(--adm-text)', wordBreak: 'break-word' }}>{erro.mensagem}</div>
-          <div style={{ display: 'flex', gap: SPACE.md, marginTop: 2, flexWrap: 'wrap' }}>
-            {frame && <span style={{ fontSize: FONT.sm, color: '#fcd34d', opacity: .8 }}>{frame.arquivo.split('/').pop()}:{frame.linha}</span>}
-            <span style={{ fontSize: FONT.sm, color: 'var(--adm-muted)' }}>{formatarDataRelativa(erro.criado_em)}</span>
-            {erro.rota && <span style={{ fontSize: FONT.sm, color: 'var(--adm-muted)' }}>{erro.rota}</span>}
-            {Number(erro.ocorrencias || 1) > 1 && <span style={{ fontSize: FONT.sm, color: '#f59e0b', fontWeight: 700 }}>×{erro.ocorrencias} ocorrências</span>}
-          </div>
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xl}px` }}>
-          <div style={{ display: 'flex', gap: SPACE.xs, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-            <button onClick={copiarMarkdown} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Copiar Markdown">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            </button>
-            <select value={erro.status || 'novo'} onChange={e => onAtualizarStatus(id, e.target.value)} className="adm-filter-select" style={{ fontSize: FONT.sm, padding: `2px ${SPACE.xs}px` }}>
-              {Object.entries(STATUS_META).map(([val, m]) => <option key={val} value={val}>{m.label}</option>)}
-            </select>
-            <button onClick={() => onExcluir(id)} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Excluir">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
-            </button>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12" style={{ color: 'var(--adm-muted)', transform: expandido ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} onClick={() => setExpandido(e => !e)}><path d="M6 9l6 6 6-6"/></svg>
-          </div>
-        </td>
-      </tr>
-      {expandido && (
-        <DSModal open={expandido} onClose={() => setExpandido(false)} title={`Detalhes do erro — ${erro.tipo || 'erro'}`} size="lg">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.lg }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: SPACE.md }}>
-                <MetaItem label="🕐 Primeira ocorrência" value={new Date(erro.criado_em).toLocaleString('pt-BR')} />
-                <MetaItem label="↻ Última ocorrência" value={new Date(erro.ultima_ocorrencia || erro.criado_em).toLocaleString('pt-BR')} />
-                <MetaItem label="# Ocorrências" value={String(erro.ocorrencias || 1)} />
-                <MetaItem label="🔗 URL"              value={erro.url || '—'} />
-                <MetaItem label="👤 Usuário"          value={erro.usuario_email || '(não logado)'} />
-                <MetaItem label={`${ua.icone} Navegador`} value={`${ua.browser} / ${ua.os}`} />
-              </div>
-              {erro.user_agent && (
-                <div>
-                  <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginBottom: SPACE.sm, fontWeight: 600, textTransform: 'uppercase' }}>User-Agent completo</div>
-                  <pre style={{ margin: 0, fontSize: FONT.xs, color: 'var(--adm-muted)', background: 'var(--adm-surface)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.sm, padding: SPACE.sm, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{erro.user_agent}</pre>
-                </div>
-              )}
-              <div>
-                <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginBottom: SPACE.sm, fontWeight: 600, textTransform: 'uppercase' }}>Stack Trace</div>
-                <StackTrace stack={erro.stack} />
-              </div>
-              {erro.dados && Object.keys(erro.dados).length > 0 && (
-                <div>
-                  <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginBottom: SPACE.sm, fontWeight: 600, textTransform: 'uppercase' }}>Contexto</div>
-                  <pre style={{ fontSize: FONT.sm, color: 'var(--adm-text)', background: 'var(--adm-surface)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.md, padding: SPACE.md + 2, overflow: 'auto', maxHeight: 160, whiteSpace: 'pre-wrap' }}>
-                    {JSON.stringify(erro.dados, null, 2)}
-                  </pre>
-                </div>
-              )}
-          </div>
-        </DSModal>
-      )}
-    </>
-  )
-}
-
-// ─── GrupoRow ─────────────────────────────────────────────────
-function GrupoRow({ grupo }) {
-  const [expandido, setExpandido] = useState(false)
-  const primeiro = grupo.exemplos[0]
-  const frame    = extrairFramePrincipal(primeiro.stack)
-  const ua       = parsearUA(primeiro.user_agent)
-
-  return (
-    <>
-      <tr style={{ cursor: 'pointer' }} onClick={() => setExpandido(e => !e)}>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.md}px`, width: 40 }}>
-          <DSBadge variant="red">{grupo.count}</DSBadge>
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.md}px` }}><TipoBadge tipo={primeiro.tipo} /></td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xl}px`, maxWidth: 400 }}>
-          <div style={{ fontSize: FONT.md, fontWeight: 500, color: 'var(--adm-text)' }}>{primeiro.mensagem}</div>
-          <div style={{ display: 'flex', gap: SPACE.md, marginTop: 2, flexWrap: 'wrap' }}>
-            {frame && <span style={{ fontSize: FONT.sm, color: '#fcd34d' }}>{frame.arquivo.split('/').pop()}:{frame.linha}</span>}
-            <span style={{ fontSize: FONT.sm, color: 'var(--adm-muted)' }}>Última: {formatarDataRelativa(grupo.lastOccurrence)}</span>
-          </div>
-        </td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xl}px`, fontSize: FONT.sm, color: 'var(--adm-muted)' }}>{ua.browser} / {ua.os}</td>
-        <td style={{ padding: `${SPACE.md + 2}px ${SPACE.xl}px` }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"
-            style={{ color: 'var(--adm-muted)', transform: expandido ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
-        </td>
-      </tr>
-      {expandido && (
-        <DSModal open={expandido} onClose={() => setExpandido(false)} title={`Ocorrências agrupadas — ${grupo.count}`} size="lg">
-          <div className="adm-table-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    {['Data', 'Navegador', 'Usuário', 'Status'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: SPACE.md, fontSize: FONT.sm, color: 'var(--adm-muted)' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {grupo.exemplos.map(e => (
-                    <tr key={eid(e)}>
-                      <td style={{ padding: SPACE.sm, fontSize: FONT.base }}>{new Date(e.criado_em).toLocaleString('pt-BR')}</td>
-                      <td style={{ padding: SPACE.sm, fontSize: FONT.base }}>{parsearUA(e.user_agent).browser}</td>
-                      <td style={{ padding: SPACE.sm, fontSize: FONT.base }}>{e.usuario_email || '—'}</td>
-                      <td style={{ padding: SPACE.sm }}><StatusBadge status={e.status || 'novo'} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-            </table>
-          </div>
-        </DSModal>
-      )}
-    </>
-  )
-}
-
-// ─── Página Principal ─────────────────────────────────────────
-export default function AdminErros() {
-  const [erros,         setErros]         = useState([])
-  const [total,         setTotal]         = useState(0)
-  const [naoLidos,      setNaoLidos]      = useState(0)
-  const [loading,       setLoading]       = useState(true)
-  const [modoAgrupado,  setModoAgrupado]  = useState(true)
-  const [filtroTipo,    setFiltroTipo]    = useState('')
-  const [filtroStatus,  setFiltroStatus]  = useState('')
-  const [filtroPeriodo, setFiltroPeriodo] = useState('')
-  const [filtroOrigem,  setFiltroOrigem]  = useState('')
-  const [filtroMsg,     setFiltroMsg]     = useState('')
-  const [pagina,        setPagina]        = useState(1)
-  const [selected,      setSelected]      = useState(new Set())
-  const [diagnostico,   setDiagnostico]   = useState(null)
-  const [diagLoading,   setDiagLoading]   = useState(false)
-  const [confirm, setConfirm] = useState({ aberto: false, titulo: '', msg: '', fn: null, carregando: false })
-
-  const errosFiltrados = useMemo(() => {
-    let lista = erros
-    if (filtroPeriodo) {
-      const ms = { '24h': 86400000, '7d': 7 * 86400000, '30d': 30 * 86400000 }[filtroPeriodo]
-      const limite = Date.now() - ms
-      lista = lista.filter(e => new Date(e.criado_em).getTime() >= limite)
-    }
-    if (filtroOrigem.trim()) {
-      const q = filtroOrigem.toLowerCase()
-      lista = lista.filter(e => e.rota?.toLowerCase().includes(q) || e.url?.toLowerCase().includes(q))
-    }
-    if (filtroMsg.trim()) {
-      const q = filtroMsg.toLowerCase()
-      lista = lista.filter(e => e.mensagem?.toLowerCase().includes(q))
-    }
-    return lista
-  }, [erros, filtroPeriodo, filtroOrigem, filtroMsg])
-
-  const grupos = useMemo(() => {
-    if (!modoAgrupado) return []
-    const map = new Map()
-    errosFiltrados.forEach(e => {
-      const fp = gerarFingerprint(e)
-      if (!map.has(fp)) map.set(fp, { fingerprint: fp, count: 0, exemplos: [], lastOccurrence: e.criado_em, firstOccurrence: e.criado_em })
-      const g = map.get(fp)
-      g.count++
-      if (g.exemplos.length < 10) g.exemplos.push(e)
-      if (new Date(e.criado_em) > new Date(g.lastOccurrence)) g.lastOccurrence = e.criado_em
-    })
-    return Array.from(map.values()).sort((a, b) => new Date(b.lastOccurrence) - new Date(a.lastOccurrence))
-  }, [errosFiltrados, modoAgrupado])
-
-  const carregar = useCallback(async () => {
+  const load=useCallback(async()=>{
     setLoading(true)
-    try {
-      const params = { page: pagina, limit: 50 }
-      if (filtroTipo)   params.tipo   = filtroTipo
-      if (filtroStatus) params.status = filtroStatus
-      const [res, cnt] = await Promise.all([errosService.listar(params), errosService.contagem()])
-      setErros(res.erros ?? [])
-      setTotal(res.total ?? 0)
-      setNaoLidos(cnt.nao_lidos ?? 0)
-    } catch (err) { toast.error(err.message) }
-    finally      { setLoading(false) }
-  }, [filtroTipo, filtroStatus, pagina])
+    try{
+      const [l,c]=await Promise.all([errosService.listar({limit:50,status:status||undefined}),errosService.central()])
+      setLocal({erros:l.erros||[],total:l.total||0}); setCentral(c||{sources:[],events:[]})
+    }catch(e){toast.error(e.message)} finally{setLoading(false)}
+  },[status])
+  useEffect(()=>{load()},[load])
 
-  useEffect(() => { carregar() }, [carregar])
+  const events=useMemo(()=>{
+    const since=period?Date.now()-({'24h':86400000,'7d':604800000,'30d':2592000000}[period]||0):0
+    return (central.events||[]).filter(e=>(!source||e.source===source)&&(!since||!e.createdAt||new Date(e.createdAt).getTime()>=since)&&(!query||`${e.title} ${e.message} ${sourceLabel[e.source]||''}`.toLowerCase().includes(query.toLowerCase())))
+  },[central.events,source,query,period])
+  const counts=useMemo(()=>{
+    const rows=local.erros||[]; return {novo:rows.filter(e=>(e.status||'novo')==='novo').length,investigando:rows.filter(e=>e.status==='investigando').length,resolvido:rows.filter(e=>e.status==='resolvido').length}
+  },[local.erros])
 
-  async function handleAtualizarStatus(id, novoStatus) {
-    try {
-      await errosService.atualizarStatus(id, novoStatus)
-      setErros(es => es.map(e => eid(e) === id ? { ...e, status: novoStatus } : e))
-      toast.success('Status atualizado')
-    } catch (err) { toast.error(err.message) }
+  async function openEvent(event){
+    setDetail(event); setDetails(null); setAnalysis(''); setDetailsLoading(true)
+    try{const r=await errosService.detalhesCentral(event);setDetails(r.details)}catch(e){setDetails({erro:e.message})}finally{setDetailsLoading(false)}
+  }
+  async function analyze(){
+    if(!detail)return; setAiLoading(true); setAnalysis('')
+    try{const r=await errosService.analisarCentral(detail);setAnalysis(r.analysis||'Sem análise retornada.')}catch(e){toast.error(e.message)}finally{setAiLoading(false)}
+  }
+  function selectEvent(event){setSelected(m=>{const n=new Map(m);n.has(event.id)?n.delete(event.id):n.set(event.id,event);return n})}
+  function ask(titulo,msg,fn){setConfirm({aberto:true,titulo,msg,fn,carregando:false})}
+  async function runConfirm(){setConfirm(c=>({...c,carregando:true}));try{await confirm.fn();setConfirm({aberto:false,titulo:'',msg:'',fn:null,carregando:false});setSelected(new Map());load()}catch(e){toast.error(e.message);setConfirm(c=>({...c,carregando:false}))}}
+  async function bulkStatus(next){
+    const ids=[...selected.values()].filter(e=>e.source==='al'&&e.meta?.erroId).map(e=>e.meta.erroId)
+    if(!ids.length)return toast.error('Ações de status valem apenas para ocorrências salvas pelo AL.')
+    ask(`Marcar ${ids.length} como ${STATUS[next]}?`,'',async()=>errosService.bulkStatus(ids,next))
+  }
+  async function runDiagnostic(){
+    if(diagMode==='cloud'){setDiagnostic(central);return}
+    if(diagMode==='vps'){setDiagnostic({vps:central.vps,note:'Suporte preparado. Ative AL_ENABLE_VPS_DIAGNOSTICS quando houver um servidor VPS para monitorar.'});return}
+    try{setDiagnostic(await errosService.diagnostico(true))}catch(e){toast.error(e.message)}
   }
 
-  function confirmar(titulo, msg, fn) {
-    setConfirm({ aberto: true, titulo, msg, fn, carregando: false })
-  }
-  async function executarConfirm() {
-    setConfirm(c => ({ ...c, carregando: true }))
-    try {
-      await confirm.fn()
-      setConfirm({ aberto: false, titulo: '', msg: '', fn: null, carregando: false })
-      setSelected(new Set())
-      carregar()
-    } catch (err) {
-      toast.error(err.message)
-      setConfirm(c => ({ ...c, carregando: false }))
-    }
-  }
+  const critical=events.filter(e=>e.severity==='critical').length
+  const healthy=(central.sources||[]).filter(s=>s.ok===true).length
+  return <>
+    <ConfirmModal aberto={confirm.aberto} titulo={confirm.titulo} mensagem={confirm.msg} carregando={confirm.carregando} labelConfirmar="Confirmar" onConfirmar={runConfirm} onCancelar={()=>setConfirm({aberto:false,titulo:'',msg:'',fn:null,carregando:false})}/>
 
-  function handleExcluir(id) {
-    confirmar('Excluir erro?', 'O registro será removido permanentemente.', async () => {
-      await errosService.excluir(id)
-      toast.success('Removido!')
-    })
-  }
-  function handleLimpar(titulo, params) {
-    confirmar(titulo, 'Essa ação não pode ser desfeita.', async () => {
-      const r = await errosService.limpar(params)
-      toast.success(`${r.removidos} erro(s) removido(s)!`)
-    })
-  }
+    <div className="adm-page-header" style={{marginBottom:SPACE.lg}}>
+      <div><div className="adm-page-title">Erros e logs</div><div className="adm-page-sub">Central online de diagnóstico e produção</div></div>
+      <div className="adm-page-actions"><button className="adm-btn adm-btn-secondary" onClick={()=>setDiagOpen(true)}>Diagnóstico</button><button className="adm-btn adm-btn-ghost adm-btn-icon" onClick={()=>setSettingsOpen(true)} title="Configurações">⚙</button></div>
+    </div>
 
-  function handleToggleSelect(id) {
-    setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  }
-  function handleToggleAll() {
-    if (selected.size === errosFiltrados.length) setSelected(new Set())
-    else setSelected(new Set(errosFiltrados.map(eid)))
-  }
-  function handleBulkStatus(status) {
-    const ids = [...selected]
-    confirmar(`Marcar ${ids.length} como ${STATUS_META[status].label}?`, '', async () => {
-      const r = await errosService.bulkStatus(ids, status)
-      toast.success(`${r.atualizados} atualizado(s)`)
-    })
-  }
-  function handleBulkDelete() {
-    const ids = [...selected]
-    confirmar(`Excluir ${ids.length} erros?`, 'Esta ação não pode ser desfeita.', async () => {
-      const r = await errosService.bulkDelete(ids)
-      toast.success(`${r.removidos} removido(s)`)
-    })
-  }
+    <div style={{display:'flex',gap:SPACE.sm,flexWrap:'wrap',alignItems:'center',marginBottom:SPACE.lg}}>
+      <DSBadge variant={counts.novo?'red':'gray'}>{counts.novo} novo</DSBadge><DSBadge variant="amber">{counts.investigando} investigando</DSBadge><DSBadge variant="green">{counts.resolvido} resolvido</DSBadge>
+      <span style={{color:'var(--adm-muted)',fontSize:FONT.sm}}>·</span><DSBadge variant={critical?'red':'green'}>{critical?`${critical} crítico(s)`:'Produção sem falhas críticas'}</DSBadge><span style={{color:'var(--adm-muted)',fontSize:FONT.sm}}>{healthy}/{(central.sources||[]).length} fontes saudáveis</span>
+    </div>
 
-  async function handleDiagnostico() {
-    setDiagLoading(true)
-    try {
-      const report = await errosService.diagnostico(true)
-      setDiagnostico(report)
-      const qtd = report?.resumo?.linhasSuspeitas || 0
-      toast.success(qtd ? `Diagnóstico concluído: ${qtd} linha(s) suspeita(s)` : 'Diagnóstico concluído sem novos erros')
-      if (qtd) carregar()
-    } catch (err) { toast.error(err.message) }
-    finally { setDiagLoading(false) }
-  }
+    <div className="diag-source-grid" style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:SPACE.sm,marginBottom:SPACE.lg}}>{(central.sources||[]).map(s=><SourceSummary key={s.source} item={s}/>)}</div>
 
-  async function handleMarcarTodosLidos() {
-    try {
-      await errosService.marcarTodosLidos()
-      setErros(es => es.map(e => ({ ...e, lido: true })))
-      setNaoLidos(0)
-      toast.success('Todos marcados como lidos!')
-    } catch (err) { toast.error(err.message) }
-  }
+    <div className="adm-card" style={{padding:SPACE.md,marginBottom:SPACE.lg,display:'grid',gridTemplateColumns:'1fr auto',gap:SPACE.sm,alignItems:'center'}}>
+      <input className="adm-input" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar erros, deploys e logs…" />
+      <button className="adm-btn adm-btn-secondary" onClick={()=>setFiltersOpen(true)}>Filtros</button>
+      <div style={{gridColumn:'1 / -1',display:'flex',gap:SPACE.xs,overflowX:'auto',paddingBottom:2}}>{SOURCES.map(s=><button key={s.key} className={`adm-btn adm-btn-sm ${source===s.key?'adm-btn-primary':'adm-btn-ghost'}`} onClick={()=>setSource(s.key)} style={{flexShrink:0}}>{s.label}</button>)}</div>
+    </div>
 
-  function exportar(format = 'csv') {
-    const dados = modoAgrupado ? grupos.flatMap(g => g.exemplos) : errosFiltrados
-    if (format === 'csv') {
-      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-      const csv = ['Tipo,Status,Mensagem,Data,URL,Rota,Ocorrencias,Contexto'].concat(
-        dados.map(e => [e.tipo,e.status || 'novo',e.mensagem,e.criado_em,e.url || '',e.rota || '',e.ocorrencias || 1,e.dados ? JSON.stringify(e.dados) : ''].map(esc).join(','))
-      ).join('\n')
-      const blob = new Blob([csv], { type: 'text/csv' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `erros_${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-    } else {
-      const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `erros_${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-    }
-    toast.success(`Exportado ${dados.length} registros`)
-  }
+    {loading?<div className="adm-empty">Atualizando diagnósticos…</div>:events.length===0?<div className="adm-card adm-empty"><p>Nenhum problema encontrado nos filtros atuais.</p></div>:<div style={{display:'grid',gap:SPACE.sm}}>{events.map(e=><EventCard key={e.id} event={e} selected={selected.has(e.id)} onSelect={selectEvent} onOpen={openEvent}/>)}</div>}
 
-  const totalPaginas = Math.max(1, Math.ceil(total / 50))
-  const listaExibida = modoAgrupado ? grupos : errosFiltrados
+    {selected.size>0&&<div style={{position:'fixed',left:'50%',bottom:18,transform:'translateX(-50%)',zIndex:1100,background:'var(--adm-surface)',border:'1px solid var(--adm-border)',boxShadow:'0 12px 35px rgba(0,0,0,.2)',borderRadius:16,padding:SPACE.sm,display:'flex',gap:SPACE.sm,alignItems:'center',maxWidth:'calc(100vw - 24px)'}}><strong style={{whiteSpace:'nowrap'}}>{selected.size} selecionado(s)</strong><select className="adm-filter-select" defaultValue="" onChange={e=>{if(e.target.value)bulkStatus(e.target.value);e.target.value=''}}><option value="">Status…</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={()=>setSelected(new Map())}>Limpar</button></div>}
 
-  return (
-    <>
-      <ConfirmModal
-        aberto={confirm.aberto}
-        titulo={confirm.titulo}
-        mensagem={confirm.msg}
-        labelConfirmar="Confirmar"
-        carregando={confirm.carregando}
-        onConfirmar={executarConfirm}
-        onCancelar={() => setConfirm({ aberto: false, titulo: '', msg: '', fn: null, carregando: false })}
-      />
+    <DSModal open={filtersOpen} onClose={()=>setFiltersOpen(false)} title="Filtros" size="sm"><div style={{display:'grid',gap:SPACE.lg}}><label>Período<select className="adm-filter-select" style={{width:'100%',marginTop:6}} value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24h</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="">Todo período</option></select></label><label>Status dos registros do AL<select className="adm-filter-select" style={{width:'100%',marginTop:6}} value={status} onChange={e=>setStatus(e.target.value)}><option value="">Todos</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><button className="adm-btn adm-btn-primary" onClick={()=>{setFiltersOpen(false);load()}}>Aplicar</button></div></DSModal>
 
-      <div className="adm-page-header">
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md + 2 }}>
-            <div className="adm-page-title">Monitor de Erros</div>
-            {naoLidos > 0 && <DSBadge variant="red">{naoLidos} novo{naoLidos !== 1 ? 's' : ''}</DSBadge>}
-          </div>
-          <div className="adm-page-sub">{total} erros registrados</div>
-        </div>
-        <div className="adm-page-actions" style={{ flexWrap: 'wrap', gap: SPACE.sm }}>
-          <button onClick={() => setModoAgrupado(m => !m)} className="adm-btn adm-btn-secondary adm-btn-sm">
-            {modoAgrupado ? '📋 Detalhado' : '📊 Agrupado'}
-          </button>
-          <button onClick={() => exportar('csv')}  className="adm-btn adm-btn-secondary adm-btn-sm">↓ CSV</button>
-          <button onClick={() => exportar('json')} className="adm-btn adm-btn-secondary adm-btn-sm">↓ JSON</button>
-          {naoLidos > 0 && (
-            <button onClick={handleMarcarTodosLidos} className="adm-btn adm-btn-secondary adm-btn-sm">✓ Todos lidos</button>
-          )}
-          {total > 0 && (<>
-            <button onClick={() => handleLimpar('Limpar erros resolvidos?', { status: 'resolvido' })}
-              className="adm-btn adm-btn-sm" style={{ background: C.greenBg, color: C.greenSolid }}>
-              Limpar resolvidos
-            </button>
-            <button onClick={() => handleLimpar('Limpar erros ignorados?', { status: 'ignorado' })}
-              className="adm-btn adm-btn-sm" style={{ background: 'rgba(100,116,139,.12)', color: '#64748b' }}>
-              Limpar ignorados
-            </button>
-            <button onClick={() => handleLimpar('Limpar todos os erros?', {})}
-              className="adm-btn adm-btn-sm" style={{ background: C.redBg, color: C.red }}>
-              Limpar tudo
-            </button>
-          </>)}
-        </div>
-      </div>
+    <DSModal open={settingsOpen} onClose={()=>setSettingsOpen(false)} title="Gerenciar registros" size="sm"><p style={{color:'var(--adm-muted)',marginTop:0}}>Ações de limpeza atingem apenas registros armazenados pelo AL. Logs externos permanecem nas plataformas de origem.</p><div style={{display:'grid',gap:SPACE.sm}}><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar resolvidos?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'resolvido'}))}>Limpar resolvidos</button><button className="adm-btn adm-btn-secondary" onClick={()=>ask('Limpar ignorados?','Essa ação não pode ser desfeita.',()=>errosService.limpar({status:'ignorado'}))}>Limpar ignorados</button><button className="adm-btn" style={{background:T.redBg,color:T.red}} onClick={()=>ask('Limpar todos os registros do AL?','GitHub, Vercel, Render e MongoDB não serão apagados.',()=>errosService.limpar({}))}>Limpar tudo do AL</button></div></DSModal>
 
-      <div className="adm-card" style={{ marginBottom: SPACE.lg, padding: SPACE.xl, overflow: 'hidden', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACE.lg, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0, flex: '1 1 260px' }}>
-            <div style={{ fontSize: FONT.xs, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase', color: C.greenSolid }}>Diagnóstico local</div>
-            <div style={{ marginTop: 5, fontSize: FONT.lg, fontWeight: 800, color: 'var(--adm-text)' }}>Termux, Manager e atualizador</div>
-            <div style={{ marginTop: 5, fontSize: FONT.base, lineHeight: 1.55, color: 'var(--adm-muted)', maxWidth: 680 }}>Analisa somente os logs e PIDs conhecidos do AL Sistemas e do Manager. Credenciais e URLs sensíveis são mascaradas antes de aparecerem aqui.</div>
-          </div>
-          <button onClick={handleDiagnostico} disabled={diagLoading} className="adm-btn adm-btn-primary">
-            {diagLoading ? 'Analisando…' : 'Executar diagnóstico'}
-          </button>
-        </div>
-        {diagnostico && <div style={{ marginTop: SPACE.lg }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: SPACE.sm }}>
-            {[
-              ['Ambiente', diagnostico.termux ? 'Termux' : diagnostico.runtime?.platform || '—'],
-              ['Backend', diagnostico.backend?.ok ? 'respondendo' : 'indisponível'],
-              ['Manager', diagnostico.manager?.instalado ? 'detectado' : 'não detectado'],
-              ['PIDs ativos', diagnostico.resumo?.pidsAtivos ?? 0],
-              ['Logs analisados', diagnostico.resumo?.arquivosAnalisados ?? 0],
-              ['Alertas encontrados', diagnostico.resumo?.linhasSuspeitas ?? 0],
-            ].map(([label,value]) => <div key={label} style={{ padding: SPACE.md, border: '1px solid var(--adm-border)', borderRadius: RADIUS.md, background: 'var(--adm-surface2)' }}>
-              <div style={{ fontSize: FONT.xs, color: 'var(--adm-muted)', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
-              <div style={{ marginTop: 4, fontWeight: 800, color: 'var(--adm-text)', wordBreak: 'break-word' }}>{String(value)}</div>
-            </div>)}
-          </div>
-          {diagnostico.hipoteses?.length > 0 && <div style={{ marginTop: SPACE.md, display: 'grid', gap: SPACE.sm }}>
-            {diagnostico.hipoteses.map(h => <div key={h.codigo} style={{ padding: SPACE.md, borderRadius: RADIUS.md, border: `1px solid ${C.amberBorder}`, background: C.amberBg }}>
-              <div style={{ fontWeight: 800, color: 'var(--adm-text)' }}>{h.titulo}</div>
-              <div style={{ marginTop: 3, color: 'var(--adm-muted)', fontSize: FONT.base, lineHeight: 1.5 }}>{h.acao}</div>
-            </div>)}
-          </div>}
-          {diagnostico.achados?.length > 0 && <div style={{ marginTop: SPACE.md }}>
-            <div style={{ fontWeight: 800, color: 'var(--adm-text)' }}>Últimas linhas suspeitas ({diagnostico.achados.length})</div>
-            <div style={{ marginTop: SPACE.sm, maxHeight: 260, overflow: 'auto', display: 'grid', gap: SPACE.xs }}>
-              {diagnostico.achados.slice(-12).reverse().map((a,i) => <div key={`${a.arquivo}-${i}`} style={{ padding: SPACE.md, borderRadius: RADIUS.md, background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)' }}>
-                <div style={{ fontSize: FONT.xs, color: C.greenSolid, fontWeight: 700 }}>{a.origem} · {a.arquivo}</div>
-                <code style={{ display: 'block', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--adm-text)', fontSize: FONT.sm }}>{a.mensagem}</code>
-              </div>)}
-            </div>
-          </div>}
-        </div>}
-      </div>
+    <DSModal open={diagOpen} onClose={()=>setDiagOpen(false)} title="Assistente de diagnóstico" size="md"><div style={{display:'grid',gap:SPACE.lg}}><div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:SPACE.sm}}>{[['cloud','Produção cloud'],['vps','VPS futuro'],['legacy','Termux legado']].map(([k,l])=><button key={k} className={`adm-btn ${diagMode===k?'adm-btn-primary':'adm-btn-secondary'}`} onClick={()=>{setDiagMode(k);setDiagnostic(null)}}>{l}</button>)}</div><div style={{color:'var(--adm-muted)',lineHeight:1.55}}>{diagMode==='cloud'?'Verifica AL, GitHub, Vercel, Render e MongoDB usando as integrações atuais.':diagMode==='vps'?'Estrutura preparada para um servidor VPS futuro, sem poluir a produção atual.':'Mantém o diagnóstico local antigo para compatibilidade.'}</div><button className="adm-btn adm-btn-primary" onClick={runDiagnostic}>Executar diagnóstico</button>{diagnostic&&<pre style={{whiteSpace:'pre-wrap',wordBreak:'break-word',fontSize:FONT.sm,background:'var(--adm-surface2)',padding:SPACE.md,borderRadius:RADIUS.md,maxHeight:300,overflow:'auto'}}>{JSON.stringify(diagnostic,null,2)}</pre>}</div></DSModal>
 
-      <StatsBar erros={errosFiltrados} />
-      <BulkToolbar selected={selected} onBulkStatus={handleBulkStatus} onBulkDelete={handleBulkDelete} onClear={() => setSelected(new Set())} />
+    <DSModal open={!!detail} onClose={()=>{setDetail(null);setDetails(null);setAnalysis('')}} title={detail?.title||'Detalhes'} size="lg"><div style={{display:'grid',gap:SPACE.lg}}><div style={{display:'flex',gap:SPACE.sm,flexWrap:'wrap'}}><DSBadge variant={detail?.severity==='critical'?'red':'amber'}>{sourceLabel[detail?.source]||detail?.source}</DSBadge>{detail?.createdAt&&<span style={{color:'var(--adm-muted)',fontSize:FONT.sm}}>{formatarDataRelativa(detail.createdAt)}</span>}</div><p style={{margin:0,lineHeight:1.6}}>{detail?.message}</p>{detail?.url&&<a href={detail.url} target="_blank" rel="noreferrer">Abrir na plataforma ↗</a>}<button className="adm-btn adm-btn-primary" onClick={analyze} disabled={aiLoading}>{aiLoading?'Analisando…':'✨ Analisar com IA'}</button>{analysis&&<div className="adm-card" style={{padding:SPACE.lg,whiteSpace:'pre-wrap',lineHeight:1.6}}>{analysis}</div>}<div><strong>Dados e logs</strong>{detailsLoading?<div style={{color:'var(--adm-muted)',marginTop:8}}>Buscando na plataforma…</div>:<pre style={{whiteSpace:'pre-wrap',wordBreak:'break-word',fontSize:FONT.sm,background:'var(--adm-surface2)',padding:SPACE.md,borderRadius:RADIUS.md,maxHeight:380,overflow:'auto'}}>{JSON.stringify(details,null,2)}</pre>}</div></div></DSModal>
 
-      <div className="adm-card" style={{ marginBottom: 0 }}>
-        <div className="adm-table-header" style={{ borderBottom: '1px solid var(--adm-border)', padding: `${SPACE.lg}px ${SPACE.xl}px`, gap: SPACE.md, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: SPACE.xs, flexWrap: 'wrap' }}>
-            {TIPOS_FILTRO.map(({ key, label }) => (
-              <button key={key} onClick={() => { setFiltroTipo(key); setPagina(1) }}
-                className={`adm-btn adm-btn-sm${filtroTipo === key ? ' adm-btn-primary' : ' adm-btn-ghost'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <select className="adm-filter-select" value={filtroStatus} onChange={e => { setFiltroStatus(e.target.value); setPagina(1) }}>
-            <option value="">Todos status</option>
-            {Object.entries(STATUS_META).map(([val, m]) => <option key={val} value={val}>{m.label}</option>)}
-          </select>
-          <select className="adm-filter-select" value={filtroPeriodo} onChange={e => setFiltroPeriodo(e.target.value)}>
-            {PERIODOS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
-          <input type="text" placeholder="Buscar na mensagem…" value={filtroMsg} onChange={e => setFiltroMsg(e.target.value)}
-            style={{ background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.md, padding: `${SPACE.sm}px ${SPACE.lg}px`, fontSize: FONT.base, color: 'var(--adm-text)', outline: 'none', minWidth: 180 }} />
-          <input type="text" placeholder="Filtrar por rota/URL…" value={filtroOrigem} onChange={e => setFiltroOrigem(e.target.value)}
-            style={{ background: 'var(--adm-surface2)', border: '1px solid var(--adm-border)', borderRadius: RADIUS.md, padding: `${SPACE.sm}px ${SPACE.lg}px`, fontSize: FONT.base, color: 'var(--adm-text)', outline: 'none', minWidth: 160 }} />
-          <button onClick={carregar} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Atualizar">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-              <path d="M3 12a9 9 0 019-9 9.75 9.75 0 016.74 2.74L21 8"/><path d="M21 3v5h-5"/>
-              <path d="M21 12a9 9 0 01-9 9 9.75 9.75 0 01-6.74-2.74L3 16"/><path d="M8 16H3v5"/>
-            </svg>
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="adm-empty">
-            <svg className="adm-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24">
-              <path d="M21 12a9 9 0 11-18 0" strokeOpacity=".3"/><path d="M21 12a9 9 0 00-9-9"/>
-            </svg>
-          </div>
-        ) : listaExibida.length === 0 ? (
-          <div className="adm-empty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: .2 }}>
-              <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-            </svg>
-            <p>Nenhum erro encontrado</p>
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="adm-table" style={{ minWidth: modoAgrupado ? 700 : 820 }}>
-              <thead>
-                <tr>
-                  {!modoAgrupado && (
-                    <th style={{ width: 40, padding: `${SPACE.md + 2}px ${SPACE.md}px` }}>
-                      <input type="checkbox"
-                        checked={selected.size > 0 && selected.size === errosFiltrados.length}
-                        onChange={handleToggleAll}
-                        style={{ width: 14, height: 14, cursor: 'pointer' }} />
-                    </th>
-                  )}
-                  <th style={{ width: 20 }}></th>
-                  <th style={{ width: 80 }}>Tipo</th>
-                  {!modoAgrupado && <th style={{ width: 110 }}>Status</th>}
-                  <th>Mensagem</th>
-                  {modoAgrupado && <th style={{ width: 160 }}>Navegador</th>}
-                  <th style={{ width: modoAgrupado ? 80 : 160 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {modoAgrupado
-                  ? grupos.map(g => <GrupoRow key={g.fingerprint} grupo={g} />)
-                  : errosFiltrados.map(e => (
-                    <ErroRow
-                      key={eid(e)}
-                      erro={e}
-                      selected={selected.has(eid(e))}
-                      onToggleSelect={handleToggleSelect}
-                      onAtualizarStatus={handleAtualizarStatus}
-                      onExcluir={handleExcluir}
-                    />
-                  ))
-                }
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {totalPaginas > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: SPACE.md, padding: `${SPACE.lg}px ${SPACE.xl}px`, borderTop: '1px solid var(--adm-border)' }}>
-            <button onClick={() => setPagina(p => p - 1)} disabled={pagina === 1} className="adm-btn adm-btn-secondary adm-btn-sm">← Anterior</button>
-            <span style={{ fontSize: FONT.base, color: 'var(--adm-muted)' }}>{pagina} / {totalPaginas}</span>
-            <button onClick={() => setPagina(p => p + 1)} disabled={pagina >= totalPaginas} className="adm-btn adm-btn-secondary adm-btn-sm">Próximo →</button>
-          </div>
-        )}
-      </div>
-    </>
-  )
+    <style>{`@media(max-width:900px){.diag-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}} @media(max-width:560px){.diag-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.adm-page-actions{gap:6px!important}}`}</style>
+  </>
 }

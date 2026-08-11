@@ -252,3 +252,7 @@ No fluxo gerenciado, o painel separa R2, GitHub, Vercel e Render. O upload exibe
 ### Publicação GitHub/R2 (1.0.93)
 
 O Wizard mostra o progresso de upload do ZIP. Com snapshot R2 habilitado, o pacote é salvo em `projects/<owner>/<repo>/snapshots/<branch>/` antes do commit. Após o upload chegar a 100%, o backend ainda valida/descompacta e publica no GitHub.
+
+### Central online de diagnóstico (1.0.95)
+
+Em Vercel + Render, use **Admin → Erros e logs** para acompanhar ocorrências do AL, GitHub Actions, Vercel, Render e MongoDB. As credenciais continuam centralizadas em Integrações e APIs. Logs externos são consultados sob demanda e não são duplicados integralmente no MongoDB. O diagnóstico VPS fica preparado para ativação futura; o diagnóstico Termux continua disponível como legado.

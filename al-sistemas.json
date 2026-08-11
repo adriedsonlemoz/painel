@@ -1,17 +1,18 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.94",
+  "version": "1.0.95",
   "packageFormat": 2,
   "changelog": [
-    "Atualizador cloud: upload do ZIP passa a exibir progresso real do envio, tamanho transferido e estado de validação/armazenamento no R2 após 100%.",
-    "Atualizador cloud: seletor de arquivo foi redesenhado para um controle compacto de Selecionar pacote / Enviar e preparar, mais legível em celular.",
-    "Publicação cloud agora separa visualmente R2, GitHub, Vercel e Render em cards independentes, cada um com estado próprio.",
-    "O commit no GitHub deixa de representar 100% da atualização: o progresso geral só conclui quando os deploys vinculados de Vercel e Render estiverem prontos.",
-    "Vercel e Render são acompanhados automaticamente pelas APIs configuradas em Integrações e APIs, exibindo aguardando/build/ready/live/falha no próprio painel.",
-    "A Central mostra SHA e link do commit GitHub, URLs de produção e horário da última consulta às APIs das plataformas quando disponíveis.",
-    "Falhas ficam associadas à etapa/plataforma correspondente, evitando que um erro da Render pareça uma falha do GitHub ou da Vercel.",
-    "Termux/VPS preservam o atualizador local existente; a nova experiência detalhada é aplicada ao fluxo gerenciado R2 → GitHub → Vercel/Render.",
-    "Pacote completo 1.0.94 inclui todas as melhorias das versões anteriores."
+    "Erros e logs foi reformulado como Central online de diagnóstico, com interface compacta e foco em produção cloud.",
+    "Ações Limpar resolvidos, Limpar ignorados e Limpar tudo saíram do topo e foram movidas para a engrenagem de gerenciamento.",
+    "A tela agora reúne AL Sistemas, GitHub Actions, Vercel, Render e MongoDB como fontes de diagnóstico, usando as credenciais existentes de Integrações e APIs.",
+    "GitHub, Vercel e Render exibem falhas recentes de workflows/deploys; detalhes e logs são buscados sob demanda diretamente nas plataformas, evitando duplicar logs completos no MongoDB.",
+    "MongoDB ganhou diagnóstico de conexão/ping e métricas do banco; indisponibilidade do banco aparece como ocorrência crítica na mesma Central.",
+    "Analisar com IA foi generalizado para ocorrências do AL, GitHub, Vercel, Render e MongoDB, usando Gemini/OpenRouter já configurados e sem executar correções automaticamente.",
+    "Filtros avançados foram movidos para popup; a tela principal mantém somente busca, origem e cards de ocorrências.",
+    "Seleção em massa agora usa uma barra flutuante compacta no rodapé; alterações de status continuam limitadas aos registros persistidos pelo AL.",
+    "O diagnóstico principal agora prioriza Produção cloud; Termux permanece como modo legado e VPS fica preparado para ativação futura via infraestrutura sem poluir a interface atual.",
+    "Pacote completo 1.0.95 inclui todas as melhorias das versões anteriores."
   ],
   "updatePackages": {
     "full": true,

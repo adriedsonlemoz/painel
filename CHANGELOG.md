@@ -1,5 +1,16 @@
 # Changelog
 
+
+## 1.0.95
+
+- **Central online de diagnóstico:** a antiga tela Erros e logs foi reestruturada para reduzir ruído visual e priorizar produção online.
+- **Fontes unificadas:** AL Sistemas, GitHub Actions, Vercel, Render e MongoDB aparecem na mesma Central, sem exigir configuração duplicada.
+- **Logs sob demanda:** falhas recentes de GitHub/Vercel/Render são descobertas pelas APIs oficiais e os detalhes são carregados somente ao abrir uma ocorrência.
+- **MongoDB:** conexão, ping e métricas do banco entram no diagnóstico; falhas são destacadas como ocorrência crítica.
+- **IA central:** qualquer ocorrência suportada pode ser analisada por Gemini/OpenRouter configurados em Integrações e APIs; a IA apenas diagnostica e sugere próximos passos.
+- **Interface limpa:** limpeza de registros foi movida para a engrenagem, filtros para popup e seleção em massa para barra flutuante.
+- **Cloud primeiro:** Produção cloud é o modo principal do assistente; Termux continua legado e VPS fica preparado para uso futuro.
+
 ## 1.0.94
 
 - Atualizador cloud ganha progresso real durante o upload do ZIP, incluindo percentual e bytes enviados; depois de 100% o painel informa que o backend está validando e armazenando a release no R2.
