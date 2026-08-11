@@ -245,6 +245,10 @@ Dados persistentes como `.env`, `backend/.al-sistemas/`, uploads, backups e logs
 A análise de logs é feita no backend usando o token GitHub do cofre central. O ZIP completo continua disponível. Gemini/OpenRouter são opcionais: o resumo estrutural funciona sem IA; diagnóstico e sugestão exigem ao menos um provedor ativo em Integrações e APIs.
 
 
+### Acompanhamento cloud do atualizador (1.0.94)
+
+No fluxo gerenciado, o painel separa R2, GitHub, Vercel e Render. O upload exibe progresso real; após o commit, a Central consulta as APIs de Vercel e Render até confirmar a produção. O progresso geral não chega a 100% apenas pelo commit.
+
 ### Publicação GitHub/R2 (1.0.93)
 
 O Wizard mostra o progresso de upload do ZIP. Com snapshot R2 habilitado, o pacote é salvo em `projects/<owner>/<repo>/snapshots/<branch>/` antes do commit. Após o upload chegar a 100%, o backend ainda valida/descompacta e publica no GitHub.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.94
+
+- Atualizador cloud ganha progresso real durante o upload do ZIP, incluindo percentual e bytes enviados; depois de 100% o painel informa que o backend está validando e armazenando a release no R2.
+- O seletor nativo de arquivo foi substituído visualmente por uma área compacta `Selecionar pacote` + `Enviar e preparar`, mantendo o input de arquivo acessível internamente.
+- O acompanhamento de produção passa a ser dividido em quatro cards: **R2**, **GitHub**, **Vercel** e **Render**.
+- R2 mostra armazenamento da release; GitHub mostra publicação/commit e SHA; Vercel e Render mostram estados vindos das APIs das próprias plataformas.
+- O commit GitHub deixa de marcar a atualização geral como 100%. O progresso global só conclui quando Vercel estiver READY e Render estiver live/succeeded/deployed.
+- A Central exibe a última hora de consulta das APIs, links para commit/produção quando disponíveis e mantém erros associados à etapa que falhou.
+- Mensagens antigas que orientavam acompanhar a Vercel manualmente foram substituídas pelo acompanhamento automático no próprio atualizador.
+- Termux/VPS continuam usando o fluxo local existente, sem remoção de funcionalidades.
+
 ## 1.0.93
 
 - Cloudflare R2 passa a ser o foco da tela Cloudflare; recursos avançados foram movidos para uma engrenagem/modal.

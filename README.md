@@ -295,6 +295,13 @@ O pré-check valida espaço, permissões, Node.js, dependências, migrações, M
 O painel GitHub mantém o ZIP de logs e adiciona resumo estrutural, análise por IA e sugestões de correção para cada execução. A IA usa apenas Gemini/OpenRouter configurados em Integrações e APIs, recebe trechos relevantes selecionados no backend e nunca altera workflows automaticamente.
 
 
+## AL Sistemas 1.0.94 — acompanhamento cloud por etapa
+
+- Upload do pacote com progresso real e estado de processamento após o envio.
+- Pipeline visual R2 → GitHub → Vercel → Render, com cards independentes e status consultados pelas APIs das plataformas.
+- 100% geral somente depois de frontend e backend confirmados em produção.
+- Termux/VPS preservados no modo local legado.
+
 ## AL Sistemas 1.0.93 — R2 focado e uploads com progresso
 
 A tela Cloudflare prioriza R2/buckets e move os demais recursos para a engrenagem. Uploads diretos ao R2 e publicações ZIP no GitHub exibem progresso real. O snapshot R2 do Wizard GitHub fica habilitado por padrão, podendo ser desativado antes do commit.

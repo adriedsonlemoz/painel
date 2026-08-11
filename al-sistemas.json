@@ -1,16 +1,17 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.93",
+  "version": "1.0.94",
   "packageFormat": 2,
   "changelog": [
-    "Cloudflare R2: a tela passa a priorizar buckets e objetos; DNS, SSL, Workers, Analytics e demais recursos ficam reunidos em uma engrenagem no topo.",
-    "R2: resumo compacto de armazenamento, objetos e buckets; dentro de cada bucket são exibidos uso, quantidade de objetos e uploads retornados pela integração atual.",
-    "R2: upload direto passa a exibir progresso real no celular/computador e atualiza a listagem e as métricas após concluir.",
-    "GitHub Publicar: envio de ZIP passa a exibir progresso real; após 100% a interface informa que o backend está validando o pacote, criando snapshot e commit.",
-    "GitHub Publicar: snapshot R2 passa a vir ativado por padrão para novos destinos, continuando opcional e podendo ser desmarcado no Wizard.",
-    "Snapshots de publicação são armazenados em projects/<conta>/<repositorio>/snapshots/<branch>/ no bucket R2 configurado em Integrações e APIs.",
-    "A reorganização preserva Termux/VPS, GitHub, Vercel e Render; nenhuma credencial paralela foi criada.",
-    "Pacote completo 1.0.93 inclui todas as melhorias das versões anteriores."
+    "Atualizador cloud: upload do ZIP passa a exibir progresso real do envio, tamanho transferido e estado de validação/armazenamento no R2 após 100%.",
+    "Atualizador cloud: seletor de arquivo foi redesenhado para um controle compacto de Selecionar pacote / Enviar e preparar, mais legível em celular.",
+    "Publicação cloud agora separa visualmente R2, GitHub, Vercel e Render em cards independentes, cada um com estado próprio.",
+    "O commit no GitHub deixa de representar 100% da atualização: o progresso geral só conclui quando os deploys vinculados de Vercel e Render estiverem prontos.",
+    "Vercel e Render são acompanhados automaticamente pelas APIs configuradas em Integrações e APIs, exibindo aguardando/build/ready/live/falha no próprio painel.",
+    "A Central mostra SHA e link do commit GitHub, URLs de produção e horário da última consulta às APIs das plataformas quando disponíveis.",
+    "Falhas ficam associadas à etapa/plataforma correspondente, evitando que um erro da Render pareça uma falha do GitHub ou da Vercel.",
+    "Termux/VPS preservam o atualizador local existente; a nova experiência detalhada é aplicada ao fluxo gerenciado R2 → GitHub → Vercel/Render.",
+    "Pacote completo 1.0.94 inclui todas as melhorias das versões anteriores."
   ],
   "updatePackages": {
     "full": true,
