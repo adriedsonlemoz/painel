@@ -45,6 +45,7 @@ const AdminArquivos       = lazyWithRetry(() => import('./pages/admin/AdminArqui
 const AdminTemas          = lazyWithRetry(() => import('./pages/admin/AdminTemas'))
 const AdminIntegracoes     = lazyWithRetry(() => import('./pages/admin/AdminIntegracoes'))
 const AdminAtualizacoes    = lazyWithRetry(() => import('./pages/admin/AdminAtualizacoes'))
+const AdminCentral         = lazyWithRetry(() => import('./pages/admin/AdminCentral'))
 
 // ── Módulo Portal (notícias/CMS) — mantido, apenas reagrupado na nav
 // Estas páginas continuam funcionando em /admin/noticias, /admin/categorias etc.
@@ -278,6 +279,10 @@ export default function App() {
         <Route path="temas"          element={<S><AdminTemas /></S>} />
         <Route path="integracoes"    element={<S><AdminIntegracoes /></S>} />
         <Route path="atualizacoes"   element={<S><AdminAtualizacoes /></S>} />
+        <Route path="conteudo"       element={<S><AdminCentral area="conteudo" /></S>} />
+        <Route path="portal"         element={<S><AdminCentral area="portal" /></S>} />
+        <Route path="publicacao"     element={<S><AdminCentral area="publicacao" /></S>} />
+        <Route path="central-sistema" element={<S><AdminCentral area="sistema" /></S>} />
 
         {/* Módulo Portal — rotas preservadas para não quebrar bookmarks/links */}
         <Route path="noticias"       element={<S><AdminNoticias /></S>} />

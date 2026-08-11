@@ -1,22 +1,15 @@
 # Changelog
 
-## 1.0.105 — Publicação cloud persistente e IA resiliente a cotas
+## 1.0.106 — Navegação administrativa e publicação GitHub mais compactas
 
-- A publicação GitHub do atualizador cloud deixa de depender de uma única requisição HTTP longa: o estado passa a ser persistido no MongoDB e a rota retorna imediatamente após criar o job.
-- Cada publicação guarda heartbeat, fase, progresso, tentativas, timeline e erro. Se o Render reiniciar, a Central detecta o job interrompido e retoma o mesmo pacote do R2 automaticamente.
-- Se o processo cair **depois do push e antes da confirmação**, o SHA candidato e sua URL ficam persistidos; na retomada o AL confirma esse mesmo commit antes de cogitar nova publicação, evitando commits duplicados.
-- Um reconciliador cloud interno funciona mesmo sem o navegador aberto: detecta heartbeats expirados de publicação e também reconsulta periodicamente releases em deploy.
-- O destino **R2 → repositório → branch → versão** é congelado antes da publicação começar; mudanças posteriores no repositório padrão do módulo GitHub não alteram uma release já iniciada.
-- A confirmação GitHub agora exige três verificações: o SHA existe no repositório correto, `al-sistemas.json` daquele commit contém a versão esperada e a branch de produção aponta para o SHA ou contém esse commit em sua história.
-- Publicações transitórias podem ser retomadas automaticamente até o limite configurado; ao exceder o limite, entram em **Publicação interrompida** e preservam o ZIP para nova tentativa manual sem upload.
-- Encerrar acompanhamento durante a publicação marca o job persistente como cancelado; o worker respeita esse estado e não transforma silenciosamente uma operação descartada em deploy ativo depois.
-- O monitor passa a usar o progresso persistido do job GitHub e exibe o repositório/branch congelados enquanto o commit está sendo preparado.
-- Núcleo de IA passa a interpretar `Retry-After` e o `RetryInfo.retryDelay` retornado pelas APIs, inclusive quando o tempo de espera vem dentro do JSON de erro do Gemini.
-- Respostas `429` e `503` com espera explícita não são repetidas imediatamente no mesmo provedor: o circuit breaker entra em cooldown e o AL tenta o próximo provedor configurado.
-- Cotas identificadas como diárias recebem cooldown maior (15 min por padrão) para evitar gastar chamadas inúteis; o valor pode ser ajustado por `AI_DAILY_QUOTA_COOLDOWN_MS`.
-- Diagnóstico de IA mostra pausas longas em minutos e mensagens de erro passam a distinguir **limite de uso** de **indisponibilidade temporária**.
-- Adicionados parâmetros opcionais de recuperação cloud: `AL_UPDATE_PUBLISH_HEARTBEAT_STALE_MS`, `AL_UPDATE_PUBLISH_MAX_ATTEMPTS` e `AL_UPDATE_GITHUB_PUBLISH_TIMEOUT_MS`.
-- Frontend, backend, Setup, backup/exportação e manifesto sincronizados em **1.0.105**.
+- Menu do Admin reorganizado: Dashboard, Atualizações e Erros e logs ficam no nível principal; o antigo grupo Desenvolvimento foi removido.
+- Novas centrais em cards para Conteúdo, Portal, Publicação e Sistema reduzem listas longas no menu mobile sem mudar as rotas existentes.
+- Wizard de Publicar projeto no GitHub foi centralizado e redesenhado para telas pequenas, com cabeçalho/ações fixos e corpo rolável.
+- Seleção de ZIP passa a usar cartão visual, lê metadados do pacote no navegador e compara versão atual do repositório com a versão enviada quando disponível.
+- Branch, pasta, modo, snapshot, repositório, versões e plataformas aparecem em grades compactas de colunas na revisão final.
+- Depois do envio, o Wizard troca para um dashboard detalhado de pacote, validação, R2 e GitHub; falhas ficam no próprio fluxo com opção de revisar/tentar novamente.
+- A tela final consolida commit, arquivos, snapshot e vínculos Vercel/Render em cards compactos.
+- Novo componente base `AdminWizard` prepara a padronização dos demais assistentes do sistema.
 
 ## 1.0.104 — Recuperação do atualizador cloud e destino GitHub seguro
 

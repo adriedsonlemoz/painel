@@ -1,20 +1,19 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.105",
+  "version": "1.0.106",
   "packageFormat": 2,
   "changelog": [
-    "Atualizador cloud passa a persistir também a fase de publicação GitHub no MongoDB; o POST inicia um job e responde rápido, sem depender de uma única requisição HTTP longa no Render.",
-    "Se o Render reiniciar no meio da publicação, a Central detecta heartbeat expirado e retoma automaticamente o mesmo ZIP preservado no R2, com limite de tentativas e estado de recuperação.",
-    "Se o Render reiniciar depois de o GitHub receber o push mas antes da confirmação, o SHA candidato fica persistido e é revalidado primeiro; o AL não cria um segundo commit automaticamente.",
-    "Um reconciliador cloud roda no backend mesmo sem a tela aberta: retoma publicações com heartbeat expirado e continua consultando deploys ativos em Vercel/Render.",
-    "O destino de produção fica congelado antes do job iniciar: repositório, branch e versão são persistidos e não podem ser trocados por uma preferência global durante a publicação.",
-    "A verificação pós-push ficou mais rígida: além de validar o commit e o al-sistemas.json, o AL confirma que a branch de produção aponta para o SHA publicado ou contém esse commit em sua história.",
-    "O monitor cloud usa o progresso persistido do job GitHub e mostra repositório/branch durante a publicação; fechar a tela não cancela o processamento persistente.",
-    "Encerrar uma operação em publicação agora marca o job como cancelado sem apagar o ZIP do R2, permitindo publicar novamente sem novo upload.",
-    "Núcleo de IA passa a interpretar Retry-After e RetryInfo dos provedores, entrando em cooldown imediatamente em 429/503 e seguindo para o fallback sem repetir chamadas que a API já pediu para aguardar.",
-    "Cotas identificadas como diárias recebem cooldown maior para evitar tentativas inúteis; o diagnóstico de Integrações mostra a pausa automática em segundos ou minutos.",
-    "Mensagens de falha de IA ficam mais curtas e distinguem limite de uso de indisponibilidade temporária, preparando a infraestrutura para uma futura Central de IA dedicada.",
-    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.105."
+    "Menu do Admin reorganizado: Dashboard, Atualizações e Erros e logs ficam soltos; Desenvolvimento é removido e o restante passa a ser organizado em Conteúdo, Portal, Publicação e Sistema.",
+    "No celular, Conteúdo, Portal, Publicação e Sistema abrem centrais em cards em vez de despejar listas longas no menu; as rotas antigas continuam preservadas.",
+    "Publicar projeto no GitHub ganha Wizard centralizado e responsivo, com cabeçalho e ações fixos, corpo rolável e layout preparado para celulares menores.",
+    "O seletor nativo de ZIP foi substituído por um cartão de pacote no mesmo padrão visual da Central de Atualizações, com nome, tamanho e quantidade de arquivos detectada.",
+    "O Wizard tenta identificar produto e versão do ZIP e compara com a versão atual detectada no repositório antes da publicação.",
+    "Revisão final usa informações compactadas em colunas: arquivo, versão, repositório, branch, pasta, modo, snapshot R2 e vínculos de produção.",
+    "Depois de confirmar, o formulário deixa a tela e abre um dashboard de publicação com etapas separadas para pacote, validação, snapshot R2 e GitHub, incluindo destino congelado da operação.",
+    "Falhas durante a publicação permanecem dentro do dashboard com mensagem clara, opção de revisar e tentar novamente; sucessos rotineiros não dependem de notificações grandes.",
+    "Tela final da publicação mostra projeto/versão, commit, arquivos, R2 e vínculos Vercel/Render em colunas compactas, além de acesso ao commit e implantação Render quando aplicável.",
+    "Foi criado um componente base de Wizard do AL para padronizar centralização, stepper, rolagem, rodapé fixo e grades compactas em futuras migrações dos demais assistentes.",
+    "Frontend, backend, Setup, backup/exportação, manifesto e changelog sincronizados em 1.0.106."
   ],
   "updatePackages": {
     "full": true,

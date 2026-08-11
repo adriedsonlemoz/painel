@@ -18,7 +18,7 @@
  * Funcionalidades preservadas integralmente.
  * Token GitHub NUNCA exposto — toda comunicação via proxy backend.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useGitHubRepos }   from '../../modules/github/useGitHubRepos.js'
 import { githubService }    from '../../services/domains/github.js'
 import { updatesService }   from '../../services/domains/updates.js'
@@ -27,6 +27,8 @@ import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import AdminIcon            from '../../components/admin/ui/AdminIcon'
 import { DSBtn, DSBadge, DSSectionTitle, DSModal } from '../../components/admin/ui/DS'
 import NovoProjetoGitHubWizard from '../../components/admin/github/NovoProjetoGitHubWizard.jsx'
+import JSZip from 'jszip'
+import { AdminWizardModal, WizardInfo } from '../../components/admin/wizard/AdminWizard.jsx'
 
 /* ── Helpers ─────────────────────────────────────────────── */
 function relTime(iso) {
@@ -451,9 +453,7 @@ function PainelDetalhes({ repo, onFechar, toastShow }) {
           )}
         </DSModal>
 
-        <DSModal open={publicarAberto} onClose={() => setPublicarAberto(false)} title="Publicar projeto" size="xl">
-          <AbaPublicar repo={repoDetalhes} owner={owner} repoNome={repoNome} meta={meta} toastShow={toastShow} onMetaAtualizado={setMeta} onClose={() => setPublicarAberto(false)} />
-        </DSModal>
+        <AbaPublicar open={publicarAberto} repo={repoDetalhes} owner={owner} repoNome={repoNome} meta={meta} toastShow={toastShow} onMetaAtualizado={setMeta} onClose={() => setPublicarAberto(false)} />
       </div>
     </div>
   )
@@ -1002,7 +1002,7 @@ function AbaAnalysis({ analysis: an }) {
 /* ── ABA: Excluir ────────────────────────────────────────── */
 
 /* ── ABA: Push (local → GitHub) ──────────────────────────── */
-function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado, onClose }) {
+function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtualizado, onClose }) {
   const repoAtual = repo.nomeCompleto || `${owner}/${repoNome}`
   const [repos, setRepos] = useState([])
   const [repository, setRepository] = useState(meta?.publicacao?.repository || repoAtual)
@@ -1011,21 +1011,36 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado,
   const [snapshotR2, setSnapshotR2] = useState(meta?.publicacao?.snapshotR2 !== false)
   const [replacePath, setReplacePath] = useState(false)
   const [arquivo, setArquivo] = useState(null)
+  const [packageMeta, setPackageMeta] = useState(null)
+  const [repoInsight, setRepoInsight] = useState(null)
+  const [inspectando, setInspectando] = useState(false)
   const [commitMessage, setCommitMessage] = useState('')
   const [checking, setChecking] = useState(false)
   const [deployment, setDeployment] = useState(null)
   const [publicando, setPublicando] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [publishPhase, setPublishPhase] = useState('')
+  const [publishPhase, setPublishPhase] = useState('idle')
+  const [publishError, setPublishError] = useState('')
   const [resultado, setResultado] = useState(null)
   const [deployingRender, setDeployingRender] = useState({})
   const [passo, setPasso] = useState(1)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
+    if (!open) return
     githubService.repos({ per_page: 100, sort: 'updated' })
       .then(d => setRepos(d.repos || []))
       .catch(() => setRepos([]))
-  }, [])
+  }, [open])
+
+  useEffect(() => {
+    if (!open || !repository || !branch) return
+    const [o, r] = repository.split('/')
+    if (!o || !r) return
+    let alive = true
+    githubService.insight(o, r, branch).then(d => { if (alive) setRepoInsight(d) }).catch(() => { if (alive) setRepoInsight(null) })
+    return () => { alive = false }
+  }, [open, repository, branch])
 
   const conferir = useCallback(async () => {
     if (!repository || !branch) return null
@@ -1044,6 +1059,39 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado,
   const limparPath = v => v.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\.{2}/g, '').replace(/\/+/g, '/')
   const destinoVisual = `${repository || 'repositório'} → ${branch || 'main'} → /${targetPath || ''}`
   const totalPassos = 6
+  const etapas = [
+    { title:'Pacote', desc:'ZIP do projeto' },
+    { title:'GitHub', desc:'Repositório' },
+    { title:'Destino', desc:'Branch e pasta' },
+    { title:'Opções', desc:'Modo e R2' },
+    { title:'Produção', desc:'Vercel / Render' },
+    { title:'Revisão', desc:'Confirmar publicação' },
+  ]
+
+  async function analisarPacote(file) {
+    setArquivo(file || null); setResultado(null); setPublishError(''); setPackageMeta(null)
+    if (!file) return
+    setInspectando(true)
+    try {
+      const zip = await JSZip.loadAsync(file)
+      const entries = Object.values(zip.files).filter(x => !x.dir)
+      const byEnd = suffix => entries.find(x => String(x.name || '').replace(/\\/g,'/').toLowerCase().endsWith(suffix.toLowerCase()))
+      const manifestEntry = byEnd('al-sistemas.json')
+      const pkgEntry = byEnd('package.json')
+      let metaInfo = { nome:file.name, tamanho:file.size, arquivos:entries.length, produto:'Projeto ZIP', versao:'' }
+      if (manifestEntry) {
+        const manifest = JSON.parse(await manifestEntry.async('string'))
+        metaInfo = { ...metaInfo, produto:manifest.product || 'AL Sistemas', versao:String(manifest.version || ''), tipo:'AL Sistemas' }
+      } else if (pkgEntry) {
+        const pkg = JSON.parse(await pkgEntry.async('string'))
+        metaInfo = { ...metaInfo, produto:pkg.name || 'Projeto Node.js', versao:String(pkg.version || ''), tipo:'package.json' }
+      }
+      setPackageMeta(metaInfo)
+      if (!commitMessage.trim()) setCommitMessage(metaInfo.versao ? `Atualiza ${metaInfo.produto} para ${metaInfo.versao}` : `Publica ${file.name}`)
+    } catch (e) {
+      setPackageMeta({ nome:file.name, tamanho:file.size, arquivos:0, produto:'Projeto ZIP', versao:'', aviso:'Não foi possível ler os metadados do ZIP no navegador.' })
+    } finally { setInspectando(false) }
+  }
 
   async function avancar() {
     if (passo === 1 && !arquivo) return toastShow('Selecione o ZIP do projeto para continuar.', 'erro')
@@ -1052,29 +1100,32 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado,
     if (passo === 5) await conferir()
     setPasso(p => Math.min(totalPassos, p + 1))
   }
-
   function voltar() { setPasso(p => Math.max(1, p - 1)) }
 
   async function publicar() {
     if (!arquivo || !repository || !branch) return
-    setPublicando(true); setResultado(null); setUploadProgress(0); setPublishPhase('Enviando ZIP para o AL…')
+    setPublicando(true); setResultado(null); setPublishError(''); setUploadProgress(0); setPublishPhase('upload'); setPasso(7)
     try {
       const r = await githubService.publicarPacote(owner, repoNome, arquivo, {
         repository, branch, targetPath, replacePath, snapshotR2,
         commitMessage: commitMessage.trim() || `Publica ${arquivo.name} pelo AL Sistemas`,
       }, prog => {
-        setUploadProgress(prog.percent || 0)
-        if ((prog.percent || 0) >= 100) setPublishPhase('ZIP recebido. Validando, salvando snapshot e criando commit…')
+        const pct = prog.percent || 0
+        setUploadProgress(pct)
+        if (pct >= 100) setPublishPhase('backend')
       })
       setResultado(r)
-      toastShow(r.mensagem || 'Projeto publicado no GitHub.')
+      setPublishPhase('github-done')
       const atualizado = await githubService.getMeta(repo.id).catch(() => null)
       if (atualizado) onMetaAtualizado?.(atualizado)
       await conferir()
-      setPasso(7)
+      setPublishPhase('done')
+      setPasso(8)
     } catch (e) {
-      toastShow(e.message || 'Não foi possível publicar o projeto.', 'erro')
-    } finally { setPublicando(false); setPublishPhase('') }
+      setPublishError(e.message || 'Não foi possível publicar o projeto.')
+      setPublishPhase('error')
+      setPasso(7)
+    } finally { setPublicando(false) }
   }
 
   async function implantarRender(service) {
@@ -1088,106 +1139,137 @@ function AbaPublicar({ repo, owner, repoNome, meta, toastShow, onMetaAtualizado,
     finally { setDeployingRender(p => ({ ...p, [service.id]: false })) }
   }
 
-  const etapas = [
-    ['Origem', 'ZIP do projeto'],
-    ['GitHub', 'Repositório'],
-    ['Destino', 'Branch e pasta'],
-    ['Opções', 'R2 e substituição'],
-    ['Cloud', 'Vercel e Render'],
-    ['Revisão', 'Confirmar publicação'],
-  ]
+  const currentVersion = repoInsight?.versao || repo?.versao || ''
+  const sentVersion = packageMeta?.versao || ''
+  const versionLabel = sentVersion ? (currentVersion ? `${currentVersion} → ${sentVersion}` : sentVersion) : 'Não detectada'
+  const footer = passo <= 6 ? <>
+    <DSBtn onClick={passo === 1 ? onClose : voltar} disabled={publicando}>{passo === 1 ? 'Cancelar' : '← Voltar'}</DSBtn>
+    {passo < totalPassos
+      ? <DSBtn variant="primary" onClick={avancar} loading={checking && passo===5} disabled={inspectando}>Continuar →</DSBtn>
+      : <DSBtn variant="primary" onClick={publicar} loading={publicando}>↑ Publicar no GitHub</DSBtn>}
+  </> : passo === 7 ? <>
+    {publishError ? <DSBtn onClick={() => setPasso(6)}>← Revisar</DSBtn> : <span />}
+    {publishError ? <DSBtn variant="primary" onClick={publicar}>Tentar novamente</DSBtn> : <DSBtn disabled>Publicando…</DSBtn>}
+  </> : <>
+    <DSBtn onClick={() => setPasso(6)}>Ver revisão</DSBtn>
+    <DSBtn variant="primary" onClick={onClose}>Concluir</DSBtn>
+  </>
 
-  return (
-    <div className="gh-wizard-shell">
-      {passo <= totalPassos && <>
-        <div className="gh-wizard-progress" aria-label={`Etapa ${passo} de ${totalPassos}`}>
-          <div className="gh-wizard-progress-top"><b>Etapa {passo} de {totalPassos}</b><span>{etapas[passo-1][0]} · {etapas[passo-1][1]}</span></div>
-          <div className="gh-wizard-track"><span style={{width:`${(passo/totalPassos)*100}%`}} /></div>
-          <div className="gh-wizard-dots">{etapas.map((e,i)=><button type="button" key={e[0]} className={i+1===passo?'ativo':i+1<passo?'feito':''} onClick={()=>i+1<passo&&setPasso(i+1)} title={`${i+1}. ${e[0]}`}>{i+1}</button>)}</div>
-        </div>
+  return <AdminWizardModal
+    open={open}
+    title={passo === 7 ? 'Publicando projeto' : passo === 8 ? 'Publicação concluída' : 'Publicar projeto'}
+    eyebrow="GITHUB · PUBLICAÇÃO"
+    step={passo <= 6 ? passo : 6}
+    steps={passo <= 6 ? etapas : []}
+    onClose={onClose}
+    canClose={!publicando}
+    footer={footer}
+    className="gh-publish-wizard"
+  >
+    {passo === 1 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>1</span><div><h3>Escolha o pacote</h3><p>O projeto pode vir do celular ou computador e não precisa existir no módulo Projetos.</p></div></div>
+      <button type="button" className={`gh-package-picker${arquivo ? ' selected' : ''}`} onClick={() => fileInputRef.current?.click()} disabled={inspectando}>
+        <input ref={fileInputRef} type="file" accept=".zip,application/zip" hidden onChange={e => analisarPacote(e.target.files?.[0] || null)} />
+        <span className="gh-package-picker-icon">{arquivo ? '📦' : '↑'}</span>
+        <span className="gh-package-picker-copy"><b>{arquivo ? arquivo.name : 'Selecionar pacote ZIP'}</b><small>{arquivo ? `${fmtBytes(arquivo.size)} · ${packageMeta?.arquivos || '…'} arquivo(s)` : 'Toque para escolher o projeto que será preparado e publicado.'}</small></span>
+        <span className="gh-package-picker-action">{inspectando ? 'Lendo…' : arquivo ? 'Trocar' : 'Escolher'}</span>
+      </button>
+      <div className="al-wizard-info-grid gh-version-compare">
+        <WizardInfo label="Projeto atual" value={repoInsight?.produto || repo?.produto || repo.nome || repoNome} />
+        <WizardInfo label="Versão atual" value={currentVersion || 'Não detectada'} />
+        <WizardInfo label="Pacote enviado" value={packageMeta?.produto || 'Projeto ZIP'} />
+        <WizardInfo label="Versão enviada" value={sentVersion || 'Não detectada'} help={sentVersion && currentVersion ? versionLabel : ''} />
+      </div>
+      {packageMeta?.aviso && <div className="gh-muted-box">{packageMeta.aviso}</div>}
+      <label className="gh-field"><span>Mensagem do commit</span><input value={commitMessage} onChange={e => setCommitMessage(e.target.value.slice(0,240))} placeholder={arquivo ? `Publica ${arquivo.name}` : 'Gerada automaticamente quando possível'} style={inp()} /></label>
+    </section>}
 
-        {passo === 1 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>1</span><div><h3>Escolha o projeto</h3><p>O arquivo pode vir do celular, computador ou qualquer outro lugar. Ele não precisa existir no módulo Projetos.</p></div></div>
-          <label className="gh-upload-box gh-wizard-upload">
-            <input type="file" accept=".zip,application/zip" onChange={e => { setArquivo(e.target.files?.[0] || null); setResultado(null) }} />
-            <strong>{arquivo ? arquivo.name : 'Selecionar ZIP do projeto'}</strong>
-            <span>{arquivo ? `${fmtBytes(arquivo.size)} · pronto para continuar` : 'Toque aqui e selecione o pacote que será enviado ao GitHub.'}</span>
-          </label>
-          <label className="gh-field"><span>Mensagem do commit</span><input value={commitMessage} onChange={e => setCommitMessage(e.target.value.slice(0,240))} placeholder={arquivo ? `Publica ${arquivo.name}` : 'Pode deixar em branco para gerar automaticamente'} style={inp()} /></label>
-        </section>}
+    {passo === 2 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>2</span><div><h3>Escolha o repositório</h3><p>A lista vem diretamente da conta GitHub configurada em Integrações e APIs.</p></div></div>
+      <label className="gh-field"><span>Repositório de destino</span><select value={repository} onChange={e => { setRepository(e.target.value); setDeployment(null); setResultado(null); setRepoInsight(null) }} style={inp()}>
+        {!repos.some(r => r.nomeCompleto === repository) && repository && <option value={repository}>{repository}</option>}
+        {repos.map(r => <option key={r.id} value={r.nomeCompleto}>{r.nomeCompleto}{r.privado ? ' · privado' : ''}</option>)}
+      </select></label>
+      <div className="al-wizard-info-grid"><WizardInfo label="Repositório" value={repository || '—'} /><WizardInfo label="Branch sugerida" value={branch || 'main'} /><WizardInfo label="Versão atual" value={currentVersion || '—'} /><WizardInfo label="Pacote" value={arquivo?.name || '—'} /></div>
+    </section>}
 
-        {passo === 2 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>2</span><div><h3>Escolha o repositório</h3><p>A lista vem diretamente da conta GitHub configurada em Integrações e APIs.</p></div></div>
-          <label className="gh-field"><span>Repositório de destino</span><select value={repository} onChange={e => { setRepository(e.target.value); setDeployment(null); setResultado(null) }} style={inp()}>
-            {!repos.some(r => r.nomeCompleto === repository) && repository && <option value={repository}>{repository}</option>}
-            {repos.map(r => <option key={r.id} value={r.nomeCompleto}>{r.nomeCompleto}{r.privado ? ' · privado' : ''}</option>)}
-          </select></label>
-          <div className="gh-wizard-summary-line"><span>Conta / repositório</span><code>{repository || '—'}</code></div>
-        </section>}
+    {passo === 3 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>3</span><div><h3>Defina o destino</h3><p>Branch e pasta são independentes; confira exatamente onde o conteúdo será aplicado.</p></div></div>
+      <div className="gh-two-fields">
+        <label className="gh-field"><span>Branch</span><input value={branch} onChange={e => { setBranch(e.target.value.replace(/\s/g,'')); setDeployment(null); setResultado(null); setRepoInsight(null) }} placeholder="main" style={inp()} /></label>
+        <label className="gh-field"><span>Pasta no GitHub</span><input value={targetPath} onChange={e => { setTargetPath(limparPath(e.target.value)); setResultado(null) }} placeholder="/ (raiz), frontend, backend..." style={inp()} /></label>
+      </div>
+      <div className="gh-path-preview"><span>Destino exato</span><code>{destinoVisual}</code></div>
+    </section>}
 
-        {passo === 3 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>3</span><div><h3>Defina branch e pasta</h3><p>Confira exatamente em qual lugar do GitHub os arquivos serão gravados.</p></div></div>
-          <div className="gh-two-fields">
-            <label className="gh-field"><span>Branch</span><input value={branch} onChange={e => { setBranch(e.target.value.replace(/\s/g,'')); setDeployment(null); setResultado(null) }} placeholder="main" style={inp()} /></label>
-            <label className="gh-field"><span>Pasta no GitHub</span><input value={targetPath} onChange={e => { setTargetPath(limparPath(e.target.value)); setResultado(null) }} placeholder="/ (raiz), frontend, backend..." style={inp()} /></label>
-          </div>
-          <div className="gh-path-preview"><span>Destino exato</span><code>{destinoVisual}</code></div>
-        </section>}
+    {passo === 4 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>4</span><div><h3>Modo e segurança</h3><p>Escolha como tratar o conteúdo atual e se o pacote deve permanecer preservado no R2.</p></div></div>
+      <div className="gh-option-grid">
+        <button type="button" className={`gh-option-card${!replacePath?' active':''}`} onClick={() => setReplacePath(false)}><b>Mesclar / atualizar</b><small>Mantém arquivos existentes que não estão no ZIP.</small></button>
+        <button type="button" className={`gh-option-card${replacePath?' active danger':''}`} onClick={() => setReplacePath(true)}><b>Substituir destino</b><small>Remove arquivos ausentes apenas da pasta escolhida.</small></button>
+        <button type="button" className={`gh-option-card${snapshotR2?' active':''}`} onClick={() => setSnapshotR2(v => !v)}><b>Snapshot R2 {snapshotR2 ? '✓' : '—'}</b><small>{snapshotR2 ? 'Cópia preservada antes do commit.' : 'Publicar sem guardar snapshot.'}</small></button>
+      </div>
+      <div className="al-wizard-info-grid"><WizardInfo label="Branch" value={branch || 'main'} /><WizardInfo label="Pasta" value={`/${targetPath || ''}`} /><WizardInfo label="Modo" value={replacePath ? 'Substituir' : 'Mesclar'} /><WizardInfo label="Snapshot" value={snapshotR2 ? 'R2 ✓' : 'Desativado'} /></div>
+    </section>}
 
-        {passo === 4 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>4</span><div><h3>Opções de segurança</h3><p>Escolha como o AL tratará o conteúdo existente e se deve guardar uma cópia no R2.</p></div></div>
-          <label className="gh-check-row gh-wizard-choice"><input type="checkbox" checked={replacePath} onChange={e => setReplacePath(e.target.checked)} /><span><b>Substituir somente a pasta escolhida</b><small>{targetPath ? `Somente /${targetPath} poderá ter arquivos antigos removidos.` : 'A raiz do repositório é o destino; use esta opção com atenção.'} Desmarcado = mesclar/atualizar sem apagar arquivos ausentes do ZIP.</small></span></label>
-          <label className="gh-check-row gh-wizard-choice"><input type="checkbox" checked={snapshotR2} onChange={e => setSnapshotR2(e.target.checked)} /><span><b>Guardar snapshot no R2 antes do commit</b><small>Recomendado e ativado por padrão. Usa a configuração R2 existente em Integrações e APIs e cria uma cópia em projects/&lt;conta&gt;/&lt;repositório&gt;/snapshots/.</small></span></label>
-        </section>}
+    {passo === 5 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>5</span><div><h3>Produção detectada</h3><p>Vercel e Render são opcionais; o GitHub permanece como destino principal.</p></div></div>
+      <div className="gh-cloud-action-row"><DSBtn size="sm" variant="ghost" onClick={conferir} loading={checking}>↻ Conferir novamente</DSBtn></div>
+      {checking && !deployment ? <div className="gh-muted-box">Conferindo vínculos do repositório…</div> : deployment?.erro ? <div className="gh-error-box">{deployment.erro}</div> : deployment ? <div className="gh-cloud-grid gh-wizard-cloud">
+        <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Vercel</b><DSBadge variant={deployment.vercel?.projects?.length ? 'green' : 'gray'}>{deployment.vercel?.projects?.length || 0}</DSBadge></div>{deployment.vercel?.projects?.length ? deployment.vercel.projects.map(p=><div className="gh-cloud-row" key={p.id}><span><b>{p.name}</b><small>{p.rootDirectory ? `/${p.rootDirectory}` : 'raiz'}{p.productionBranch ? ` · ${p.productionBranch}` : ''}</small></span><em>Git deploy</em></div>) : <p>Nenhum projeto Vercel vinculado.</p>}</div>
+        <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Render</b><DSBadge variant={deployment.render?.services?.length ? 'green' : 'gray'}>{deployment.render?.services?.length || 0}</DSBadge></div>{deployment.render?.services?.length ? deployment.render.services.map(s=><div className="gh-cloud-row" key={s.id}><span><b>{s.name || s.id}</b><small>{s.branch || branch}</small></span><em>vinculado</em></div>) : <p>Nenhum serviço Render vinculado.</p>}</div>
+      </div> : <div className="gh-muted-box">Ao continuar, o AL consulta automaticamente Vercel e Render.</div>}
+    </section>}
 
-        {passo === 5 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>5</span><div><h3>Conferir plataformas</h3><p>Vercel e Render são opcionais. O GitHub continua sendo o destino principal.</p></div></div>
-          <DSBtn size="sm" variant="ghost" onClick={conferir} loading={checking}>↻ Conferir novamente</DSBtn>
-          {checking && !deployment ? <div className="gh-muted-box">Conferindo vínculos do repositório…</div> : deployment?.erro ? <div className="gh-error-box">{deployment.erro}</div> : deployment ? <div className="gh-cloud-grid gh-wizard-cloud">
-            <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Vercel</b><DSBadge variant={deployment.vercel?.projects?.length ? 'green' : 'gray'}>{deployment.vercel?.projects?.length || 0}</DSBadge></div>{deployment.vercel?.projects?.length ? deployment.vercel.projects.map(p=><div className="gh-cloud-row" key={p.id}><span><b>{p.name}</b><small>{p.rootDirectory ? `/${p.rootDirectory}` : 'raiz'}{p.productionBranch ? ` · ${p.productionBranch}` : ''}</small></span><em>Git deploy</em></div>) : <p>Nenhum projeto Vercel vinculado.</p>}</div>
-            <div className="gh-cloud-card"><div className="gh-cloud-title"><b>Render</b><DSBadge variant={deployment.render?.services?.length ? 'green' : 'gray'}>{deployment.render?.services?.length || 0}</DSBadge></div>{deployment.render?.services?.length ? deployment.render.services.map(s=><div className="gh-cloud-row" key={s.id}><span><b>{s.name || s.id}</b><small>{s.branch || branch}</small></span><em>vinculado</em></div>) : <p>Nenhum serviço Render vinculado.</p>}</div>
-          </div> : <div className="gh-muted-box">Toque em continuar para conferir automaticamente Vercel e Render.</div>}
-        </section>}
+    {passo === 6 && <section className="gh-wizard-step gh-wizard-compact-step">
+      <div className="gh-wizard-step-head"><span>6</span><div><h3>Revise antes de publicar</h3><p>As informações foram compactadas em colunas para facilitar a conferência mesmo em telas menores.</p></div></div>
+      <div className="al-wizard-info-grid gh-final-review-grid">
+        <WizardInfo label="Arquivo" value={arquivo?.name || '—'} help={arquivo ? fmtBytes(arquivo.size) : ''} />
+        <WizardInfo label="Versão" value={versionLabel} />
+        <WizardInfo label="Repositório" value={repository || '—'} />
+        <WizardInfo label="Branch" value={branch || 'main'} />
+        <WizardInfo label="Pasta" value={`/${targetPath || ''}`} help={targetPath ? 'Limitado a esta pasta' : 'Raiz do repositório'} />
+        <WizardInfo label="Modo" value={replacePath ? 'Substituir' : 'Mesclar'} />
+        <WizardInfo label="Snapshot" value={snapshotR2 ? 'R2 ✓' : 'Não'} />
+        <WizardInfo label="Produção" value={`Vercel ${deployment?.vercel?.projects?.length || 0} · Render ${deployment?.render?.services?.length || 0}`} />
+      </div>
+      <div className="gh-wizard-warning">Destino final: <b>{repository}</b> · <b>{branch}</b> · <b>/{targetPath || ''}</b>.</div>
+    </section>}
 
-        {passo === 6 && <section className="gh-wizard-step">
-          <div className="gh-wizard-step-head"><span>6</span><div><h3>Revise antes de publicar</h3><p>Nada será enviado antes da sua confirmação nesta tela.</p></div></div>
-          <div className="gh-publish-confirm gh-wizard-review">
-            <div><span>Arquivo</span><b>{arquivo?.name || '—'}</b><small>{arquivo ? fmtBytes(arquivo.size) : ''}</small></div>
-            <div><span>Repositório</span><b>{repository || '—'}</b></div>
-            <div><span>Branch</span><b>{branch || 'main'}</b></div>
-            <div><span>Pasta</span><b>/{targetPath || ''}</b><small>{targetPath ? 'Publicação limitada a esta pasta.' : 'Destino na raiz.'}</small></div>
-            <div><span>Modo</span><b>{replacePath ? 'Substituir destino' : 'Mesclar / atualizar'}</b></div>
-            <div><span>Snapshot R2</span><b>{snapshotR2 ? 'Sim' : 'Não'}</b></div>
-            <div><span>Vercel</span><b>{deployment?.vercel?.projects?.length || 0} vínculo(s)</b></div>
-            <div><span>Render</span><b>{deployment?.render?.services?.length || 0} vínculo(s)</b></div>
-          </div>
-          <div className="gh-wizard-warning">O commit será criado em <b>{repository}</b>, branch <b>{branch}</b>, pasta <b>/{targetPath || ''}</b>.</div>
-          {publicando && <div className="gh-publish-progress" role="status" aria-live="polite">
-            <div className="gh-publish-progress-head"><b>{publishPhase || 'Publicando…'}</b><span>{uploadProgress}%</span></div>
-            <div className="gh-publish-progress-track"><span style={{width:`${uploadProgress}%`}} /></div>
-            <small>{uploadProgress < 100 ? 'Mantenha esta janela aberta enquanto o arquivo é enviado.' : 'O upload terminou; o backend pode levar alguns instantes para processar o ZIP e concluir o GitHub.'}</small>
-          </div>}
-        </section>}
+    {passo === 7 && <section className="gh-publish-dashboard">
+      <div className={`gh-publish-state-icon ${publishError ? 'error' : ''}`}>{publishError ? '!' : '↟'}</div>
+      <h3>{publishError ? 'A publicação encontrou um problema' : 'Publicando no GitHub'}</h3>
+      <p>{publishError || (publishPhase === 'upload' ? 'Enviando o pacote para o backend…' : 'Upload concluído. O servidor está validando, preparando o snapshot e criando o commit.')}</p>
+      <div className="gh-dashboard-grid">
+        <PublishStage label="Pacote" state={uploadProgress >= 100 ? 'done' : publishError ? 'error' : 'active'} value={uploadProgress < 100 ? `${uploadProgress}%` : 'Recebido'} desc={arquivo?.name || ''} />
+        <PublishStage label="Validação" state={publishPhase === 'backend' ? 'active' : publishPhase === 'github-done' || publishPhase === 'done' ? 'done' : publishError ? 'error' : 'pending'} value={publishPhase === 'backend' ? 'Processando' : publishPhase === 'github-done' || publishPhase === 'done' ? 'Concluída' : 'Aguardando'} desc={`${packageMeta?.arquivos || 0} arquivo(s) no ZIP`} />
+        <PublishStage label="Snapshot R2" state={!snapshotR2 ? 'off' : publishPhase === 'backend' ? 'active' : resultado?.snapshot ? 'done' : publishError ? 'error' : 'pending'} value={!snapshotR2 ? 'Desativado' : resultado?.snapshot ? 'Salvo' : publishPhase === 'backend' ? 'Preparando' : 'Aguardando'} desc={resultado?.snapshot?.objectKey || (snapshotR2 ? 'Cópia de segurança' : 'Sem snapshot')} />
+        <PublishStage label="GitHub" state={resultado?.commit ? 'done' : publishError ? 'error' : publishPhase === 'backend' ? 'active' : 'pending'} value={resultado?.commit?.commitSha ? resultado.commit.commitSha.slice(0,7) : publishPhase === 'backend' ? 'Criando commit' : 'Aguardando'} desc={`${repository} · ${branch}`} />
+      </div>
+      {uploadProgress < 100 && !publishError && <div className="gh-dashboard-progress"><i style={{width:`${uploadProgress}%`}} /></div>}
+      <div className="gh-dashboard-destination"><span>Destino congelado nesta operação</span><b>{destinoVisual}</b></div>
+    </section>}
 
-        <div className="gh-wizard-actions">
-          <DSBtn onClick={passo === 1 ? onClose : voltar} disabled={publicando}>{passo === 1 ? 'Cancelar' : '← Voltar'}</DSBtn>
-          {passo < totalPassos ? <DSBtn variant="primary" onClick={avancar} loading={checking && passo===5}>Continuar →</DSBtn> : <DSBtn variant="primary" onClick={publicar} loading={publicando}>↑ Publicar no GitHub</DSBtn>}
-        </div>
-      </>}
+    {passo === 8 && resultado && <section className="gh-publish-finish">
+      <div className="gh-wizard-success-icon">✓</div><h3>Publicação concluída</h3><p>O pacote foi processado e o commit foi confirmado pelo GitHub.</p>
+      <div className="al-wizard-info-grid gh-finish-grid">
+        <WizardInfo label="Projeto" value={packageMeta?.produto || repo.nome || repoNome} help={sentVersion ? `Versão ${sentVersion}` : ''} />
+        <WizardInfo label="GitHub" value={resultado.destino?.repository} help={`${resultado.destino?.branch || branch} · ${resultado.commit?.commitSha?.slice(0,7) || '—'}`} />
+        <WizardInfo label="Arquivos" value={`${resultado.pacote?.arquivos || 0}`} help={fmtBytes(resultado.pacote?.bytes || 0)} />
+        <WizardInfo label="R2" value={resultado.snapshot ? 'Snapshot ✓' : 'Não usado'} />
+        <WizardInfo label="Vercel" value={deployment?.vercel?.projects?.length ? `${deployment.vercel.projects.length} vínculo(s)` : 'Não vinculado'} />
+        <WizardInfo label="Render" value={deployment?.render?.services?.length ? `${deployment.render.services.length} vínculo(s)` : 'Não vinculado'} />
+      </div>
+      <div className="gh-finish-actions">{resultado.commit?.commitUrl && <a href={resultado.commit.commitUrl} target="_blank" rel="noopener noreferrer">Abrir commit ↗</a>}</div>
+      {resultado.snapshot?.objectKey && <div className="gh-cloud-note">R2: <code>{resultado.snapshot.bucket}/{resultado.snapshot.objectKey}</code></div>}
+      {deployment?.render?.services?.length > 0 && <div className="gh-wizard-deploys"><b>Render</b>{deployment.render.services.map(svc=><div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}</small></span><DSBtn size="sm" onClick={()=>implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar este commit</DSBtn></div>)}</div>}
+    </section>}
+  </AdminWizardModal>
+}
 
-      {passo === 7 && resultado && <section className="gh-wizard-success">
-        <div className="gh-wizard-success-icon">✓</div>
-        <h3>Publicação concluída</h3>
-        <p>{resultado.destino?.repository} → {resultado.destino?.branch} → {resultado.destino?.path || '/'}</p>
-        <div className="gh-result-stats"><span><b>{resultado.pacote?.arquivos || 0}</b> arquivos</span><span><b>{resultado.commit?.commitSha?.slice(0,7) || '—'}</b> commit</span><span><b>{resultado.snapshot ? 'R2 ✓' : 'R2 —'}</b> snapshot</span></div>
-        {resultado.snapshot?.objectKey && <div className="gh-cloud-note">Snapshot R2: <code>{resultado.snapshot.bucket}/{resultado.snapshot.objectKey}</code></div>}
-        {resultado.commit?.commitUrl && <a href={resultado.commit.commitUrl} target="_blank" rel="noopener noreferrer">Ver commit no GitHub ↗</a>}
-        {deployment?.render?.services?.length > 0 && <div className="gh-wizard-deploys"><b>Render</b>{deployment.render.services.map(svc=><div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}</small></span><DSBtn size="sm" onClick={()=>implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar este commit</DSBtn></div>)}</div>}
-        {deployment?.vercel?.projects?.length > 0 && <div className="gh-cloud-note">Vercel: o commit foi enviado ao GitHub; projetos vinculados por Git podem iniciar o deploy automaticamente.</div>}
-        <div className="gh-wizard-actions"><DSBtn variant="primary" onClick={onClose}>Concluir</DSBtn></div>
-      </section>}
-    </div>
-  )
+function PublishStage({ label, state='pending', value, desc }) {
+  const icon = state === 'done' ? '✓' : state === 'error' ? '!' : state === 'active' ? '●' : state === 'off' ? '—' : '○'
+  return <div className={`gh-dashboard-stage ${state}`}><span className="gh-dashboard-stage-icon">{icon}</span><span className="gh-dashboard-stage-copy"><small>{label}</small><b>{value}</b><em>{desc}</em></span></div>
 }
 
 function AbaDelete({ repo, repoNome, deleteStep, setDeleteStep, deleteInput, setDeleteInput, onConfirmar, deletandoRepo }) {
@@ -1859,12 +1941,12 @@ export default function AdminGitHub() {
         .gh-overview-body{display:grid;gap:10px}.gh-overview-body p{margin:3px 0 0;font-size:10.5px;line-height:1.45;color:var(--adm-text);overflow-wrap:anywhere}.gh-overview-body a{font-size:10px;color:var(--adm-blue,var(--adm-accent));overflow-wrap:anywhere}.gh-mini-label{font-size:7px;color:var(--adm-muted);font-weight:850;text-transform:uppercase;letter-spacing:.06em}.gh-muted{color:var(--adm-muted)!important}.gh-inline-link{display:inline-flex;margin-top:2px;text-decoration:none;font-weight:750}
         .gh-compact-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-compact-info>div{min-width:0;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:7px}.gh-compact-info span{display:block;font-size:6.8px;color:var(--adm-muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}.gh-compact-info b{display:block;margin-top:3px;font-size:9.5px;color:var(--adm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-topic-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
         .gh-readme-section{margin-top:12px;padding:12px}.gh-readme-section .gh-readme{border:0;border-top:1px solid var(--adm-border);border-radius:0;padding:14px 0 0;margin-top:2px}
-        .gh-publish-shell{min-width:0}.gh-publish-intro{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start;margin-bottom:12px}.gh-publish-intro h3{margin:3px 0 4px;font-size:15px;color:var(--adm-text)}.gh-publish-intro p{margin:0;font-size:10.5px;line-height:1.5;color:var(--adm-muted)}.gh-destination-pill{max-width:260px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 9%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--adm-text);overflow-wrap:anywhere}
-        .gh-publish-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-card-section-head b{font-size:11px;color:var(--adm-text)}.gh-card-section-head>span{font-size:8px;color:var(--adm-muted);text-align:right}.gh-field{display:block;margin-top:9px}.gh-field>span{display:block;font-size:8px;font-weight:800;color:var(--adm-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}.gh-two-fields{display:grid;grid-template-columns:1fr 1fr;gap:7px}.gh-path-preview{margin-top:9px;border:1px solid var(--adm-border);background:var(--adm-bg);border-radius:8px;padding:8px}.gh-path-preview span{display:block;font-size:7px;color:var(--adm-muted);font-weight:800;text-transform:uppercase;margin-bottom:3px}.gh-path-preview code{display:block;font-size:8.5px;color:var(--adm-text);white-space:normal;overflow-wrap:anywhere}.gh-check-row{display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer}.gh-check-row input{margin-top:2px;accent-color:var(--adm-accent);flex:0 0 auto}.gh-check-row span{min-width:0}.gh-check-row b{display:block;font-size:9.5px;color:var(--adm-text)}.gh-check-row small{display:block;margin-top:2px;font-size:8.5px;line-height:1.35;color:var(--adm-muted)}.gh-upload-box{display:grid;place-items:center;text-align:center;min-height:104px;border:1px dashed color-mix(in srgb,var(--adm-accent) 45%,var(--adm-border));border-radius:10px;padding:12px;background:color-mix(in srgb,var(--adm-accent) 4%,var(--adm-bg));cursor:pointer;overflow:hidden}.gh-upload-box input{max-width:100%;font-size:9px}.gh-upload-box strong{font-size:10.5px;margin-top:8px;color:var(--adm-text);overflow-wrap:anywhere}.gh-upload-box span{font-size:8.5px;color:var(--adm-muted);line-height:1.35;margin-top:3px}
+        .gh-publish-shell{min-width:0}.gh-publish-intro{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start;margin-bottom:12px}.gh-publish-intro h3{margin:3px 0 4px;font-size:15px;color:var(--adm-text)}.gh-publish-intro p{margin:0;font-size:11px;line-height:1.5;color:var(--adm-muted)}.gh-destination-pill{max-width:260px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 9%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--adm-text);overflow-wrap:anywhere}
+        .gh-publish-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-card-section-head b{font-size:11px;color:var(--adm-text)}.gh-card-section-head>span{font-size:8px;color:var(--adm-muted);text-align:right}.gh-field{display:block;margin-top:9px}.gh-field>span{display:block;font-size:9px;font-weight:800;color:var(--adm-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}.gh-two-fields{display:grid;grid-template-columns:1fr 1fr;gap:7px}.gh-path-preview{margin-top:9px;border:1px solid var(--adm-border);background:var(--adm-bg);border-radius:8px;padding:8px}.gh-path-preview span{display:block;font-size:7px;color:var(--adm-muted);font-weight:800;text-transform:uppercase;margin-bottom:3px}.gh-path-preview code{display:block;font-size:8.5px;color:var(--adm-text);white-space:normal;overflow-wrap:anywhere}.gh-check-row{display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer}.gh-check-row input{margin-top:2px;accent-color:var(--adm-accent);flex:0 0 auto}.gh-check-row span{min-width:0}.gh-check-row b{display:block;font-size:9.5px;color:var(--adm-text)}.gh-check-row small{display:block;margin-top:2px;font-size:8.5px;line-height:1.35;color:var(--adm-muted)}.gh-upload-box{display:grid;place-items:center;text-align:center;min-height:104px;border:1px dashed color-mix(in srgb,var(--adm-accent) 45%,var(--adm-border));border-radius:10px;padding:12px;background:color-mix(in srgb,var(--adm-accent) 4%,var(--adm-bg));cursor:pointer;overflow:hidden}.gh-upload-box input{max-width:100%;font-size:9px}.gh-upload-box strong{font-size:10.5px;margin-top:8px;color:var(--adm-text);overflow-wrap:anywhere}.gh-upload-box span{font-size:8.5px;color:var(--adm-muted);line-height:1.35;margin-top:3px}
         .gh-cloud-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.gh-cloud-card{border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg);padding:9px;min-width:0}.gh-cloud-title{margin-bottom:6px}.gh-cloud-title>b{font-size:10.5px}.gh-cloud-card p,.gh-cloud-note{font-size:8.5px;line-height:1.4;color:var(--adm-muted);margin:0}.gh-cloud-row{display:flex;align-items:center;justify-content:space-between;gap:7px;border-top:1px solid var(--adm-border);padding:7px 0}.gh-cloud-row:first-of-type{border-top:0}.gh-cloud-row span{min-width:0}.gh-cloud-row b{display:block;font-size:9.5px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-cloud-row small{display:block;font-size:7.5px;color:var(--adm-muted);margin-top:2px}.gh-cloud-row em{font-style:normal;font-size:7.5px;color:var(--adm-accent);font-weight:800;white-space:nowrap}.gh-cloud-note{margin-top:8px}.gh-muted-box,.gh-error-box{padding:10px;border-radius:8px;background:var(--adm-bg);border:1px solid var(--adm-border);font-size:9px;color:var(--adm-muted)}.gh-error-box{color:var(--adm-red,#c33);border-color:color-mix(in srgb,var(--adm-red,#c33) 35%,var(--adm-border))}
         .gh-publish-confirm{display:grid;grid-template-columns:1fr 1fr;gap:8px}.gh-publish-confirm>div{min-width:0;padding:9px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-bg)}.gh-publish-confirm span{display:block;font-size:7px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;color:var(--adm-muted)}.gh-publish-confirm b{display:block;margin-top:3px;font-size:10px;color:var(--adm-text);overflow-wrap:anywhere}.gh-publish-confirm small{display:block;margin-top:3px;font-size:8px;line-height:1.35;color:var(--adm-muted)}
         .gh-publish-result{margin-top:12px;padding:12px;border-radius:11px;border:1px solid color-mix(in srgb,var(--adm-green,#1d9f55) 35%,var(--adm-border));background:color-mix(in srgb,var(--adm-green,#1d9f55) 7%,var(--adm-surface));display:grid;gap:9px}.gh-publish-result>div:first-child b{display:block;font-size:11px;color:var(--adm-text)}.gh-publish-result>div:first-child span{display:block;font-size:8.5px;color:var(--adm-muted);margin-top:2px}.gh-result-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.gh-result-stats span{font-size:7.5px;color:var(--adm-muted);padding:7px;background:var(--adm-bg);border-radius:7px;border:1px solid var(--adm-border);text-align:center}.gh-result-stats b{display:block;color:var(--adm-text);font-size:9px}.gh-publish-result>a{font-size:9px;font-weight:800;color:var(--adm-accent);text-decoration:none}
-        .gh-wizard-shell{min-width:0}.gh-wizard-progress{padding:2px 0 14px;border-bottom:1px solid var(--adm-border);margin-bottom:16px}.gh-wizard-progress-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.gh-wizard-progress-top b{font-size:10px;color:var(--adm-text)}.gh-wizard-progress-top span{font-size:9px;color:var(--adm-muted)}.gh-wizard-track{height:4px;background:var(--adm-bg);border-radius:999px;overflow:hidden;margin-top:8px}.gh-wizard-track>span{display:block;height:100%;border-radius:inherit;background:var(--adm-accent);transition:width .2s ease}.gh-wizard-dots{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:8px}.gh-wizard-dots button{height:24px;border-radius:7px;border:1px solid var(--adm-border);background:var(--adm-bg);color:var(--adm-muted);font-size:9px;font-weight:850}.gh-wizard-dots button.ativo{border-color:var(--adm-accent);background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));color:var(--adm-accent)}.gh-wizard-dots button.feito{border-color:color-mix(in srgb,var(--adm-green,#1d9f55) 40%,var(--adm-border));color:var(--adm-green,#1d9f55);cursor:pointer}.gh-wizard-step{min-height:300px}.gh-wizard-step-head{display:flex;gap:11px;align-items:flex-start;margin-bottom:16px}.gh-wizard-step-head>span{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));font-size:11px;font-weight:900;color:var(--adm-accent)}.gh-wizard-step-head h3{margin:0;font-size:15px;color:var(--adm-text)}.gh-wizard-step-head p{margin:4px 0 0;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-wizard-upload{min-height:150px}.gh-wizard-summary-line{margin-top:12px;padding:11px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg)}.gh-wizard-summary-line span{display:block;font-size:7.5px;font-weight:850;text-transform:uppercase;color:var(--adm-muted);margin-bottom:4px}.gh-wizard-summary-line code{display:block;font-size:10px;overflow-wrap:anywhere;color:var(--adm-text)}.gh-wizard-choice{padding:12px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-wizard-cloud{margin-top:12px}.gh-wizard-actions{display:flex;justify-content:space-between;gap:8px;padding-top:14px;margin-top:16px;border-top:1px solid var(--adm-border);position:sticky;bottom:-1px;background:var(--adm-surface);z-index:2}.gh-wizard-warning{margin-top:12px;padding:10px;border:1px solid color-mix(in srgb,var(--adm-amber,#b7791f) 35%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-amber,#b7791f) 7%,var(--adm-surface));font-size:9px;color:var(--adm-text);overflow-wrap:anywhere}.gh-wizard-success{text-align:center;padding:10px 0}.gh-wizard-success-icon{display:grid;place-items:center;margin:0 auto 10px;width:48px;height:48px;border-radius:50%;background:color-mix(in srgb,var(--adm-green,#1d9f55) 12%,var(--adm-surface));color:var(--adm-green,#1d9f55);font-size:24px;font-weight:900}.gh-wizard-success h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-wizard-success>p{font-size:10px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-wizard-success>a{display:inline-flex;margin:12px 0;font-size:10px;font-weight:800;color:var(--adm-accent);text-decoration:none}.gh-wizard-deploys{text-align:left;margin-top:14px;border:1px solid var(--adm-border);border-radius:10px;padding:10px}.gh-command-empty{min-height:120px}.gh-publish-progress{margin-top:10px;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-publish-progress-head{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:9px;color:var(--adm-text)}.gh-publish-progress-head span{font-weight:900;color:var(--adm-accent)}.gh-publish-progress-track{height:6px;margin-top:7px;border-radius:999px;background:var(--adm-surface);overflow:hidden}.gh-publish-progress-track>span{display:block;height:100%;background:var(--adm-accent);border-radius:inherit;transition:width .18s ease}.gh-publish-progress small{display:block;margin-top:6px;font-size:8px;line-height:1.45;color:var(--adm-muted)}
+        .gh-wizard-shell{min-width:0}.gh-wizard-progress{padding:2px 0 14px;border-bottom:1px solid var(--adm-border);margin-bottom:16px}.gh-wizard-progress-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.gh-wizard-progress-top b{font-size:10px;color:var(--adm-text)}.gh-wizard-progress-top span{font-size:9px;color:var(--adm-muted)}.gh-wizard-track{height:4px;background:var(--adm-bg);border-radius:999px;overflow:hidden;margin-top:8px}.gh-wizard-track>span{display:block;height:100%;border-radius:inherit;background:var(--adm-accent);transition:width .2s ease}.gh-wizard-dots{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:8px}.gh-wizard-dots button{height:24px;border-radius:7px;border:1px solid var(--adm-border);background:var(--adm-bg);color:var(--adm-muted);font-size:9px;font-weight:850}.gh-wizard-dots button.ativo{border-color:var(--adm-accent);background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));color:var(--adm-accent)}.gh-wizard-dots button.feito{border-color:color-mix(in srgb,var(--adm-green,#1d9f55) 40%,var(--adm-border));color:var(--adm-green,#1d9f55);cursor:pointer}.gh-wizard-step{min-height:300px}.gh-wizard-step-head{display:flex;gap:11px;align-items:flex-start;margin-bottom:16px}.gh-wizard-step-head>span{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));font-size:11px;font-weight:900;color:var(--adm-accent)}.gh-wizard-step-head h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-wizard-step-head p{margin:4px 0 0;font-size:11px;line-height:1.45;color:var(--adm-muted)}.gh-wizard-upload{min-height:150px}.gh-wizard-summary-line{margin-top:12px;padding:11px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-bg)}.gh-wizard-summary-line span{display:block;font-size:7.5px;font-weight:850;text-transform:uppercase;color:var(--adm-muted);margin-bottom:4px}.gh-wizard-summary-line code{display:block;font-size:10px;overflow-wrap:anywhere;color:var(--adm-text)}.gh-wizard-choice{padding:12px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-wizard-cloud{margin-top:12px}.gh-wizard-actions{display:flex;justify-content:space-between;gap:8px;padding-top:14px;margin-top:16px;border-top:1px solid var(--adm-border);position:sticky;bottom:-1px;background:var(--adm-surface);z-index:2}.gh-wizard-warning{margin-top:12px;padding:10px;border:1px solid color-mix(in srgb,var(--adm-amber,#b7791f) 35%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-amber,#b7791f) 7%,var(--adm-surface));font-size:9px;color:var(--adm-text);overflow-wrap:anywhere}.gh-wizard-success{text-align:center;padding:10px 0}.gh-wizard-success-icon{display:grid;place-items:center;margin:0 auto 10px;width:48px;height:48px;border-radius:50%;background:color-mix(in srgb,var(--adm-green,#1d9f55) 12%,var(--adm-surface));color:var(--adm-green,#1d9f55);font-size:24px;font-weight:900}.gh-wizard-success h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-wizard-success>p{font-size:10px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-wizard-success>a{display:inline-flex;margin:12px 0;font-size:10px;font-weight:800;color:var(--adm-accent);text-decoration:none}.gh-wizard-deploys{text-align:left;margin-top:14px;border:1px solid var(--adm-border);border-radius:10px;padding:10px}.gh-command-empty{min-height:120px}.gh-publish-progress{margin-top:10px;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-publish-progress-head{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:9px;color:var(--adm-text)}.gh-publish-progress-head span{font-weight:900;color:var(--adm-accent)}.gh-publish-progress-track{height:6px;margin-top:7px;border-radius:999px;background:var(--adm-surface);overflow:hidden}.gh-publish-progress-track>span{display:block;height:100%;background:var(--adm-accent);border-radius:inherit;transition:width .18s ease}.gh-publish-progress small{display:block;margin-top:6px;font-size:8px;line-height:1.45;color:var(--adm-muted)}
         .gh-readme{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:10px;padding:16px;max-width:100%;overflow:auto;color:var(--adm-text);font-size:12px;line-height:1.65;word-wrap:break-word}
         .gh-readme>*:first-child{margin-top:0}.gh-readme>*:last-child{margin-bottom:0}.gh-readme h1{font-size:20px}.gh-readme h2{font-size:17px}.gh-readme h3{font-size:15px}.gh-readme h1,.gh-readme h2{padding-bottom:6px;border-bottom:1px solid var(--adm-border)}
         .gh-readme pre{max-width:100%;overflow:auto;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:11px}.gh-readme code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}.gh-readme :not(pre)>code{background:var(--adm-bg);padding:2px 5px;border-radius:5px}
@@ -1873,9 +1955,10 @@ export default function AdminGitHub() {
         .gh-profile-edit-head{display:flex;align-items:center;gap:12px;padding:10px;background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:10px}.gh-profile-edit-avatar{width:54px;height:54px;border-radius:50%;object-fit:cover}.gh-external-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 9px;border:1px solid var(--adm-border);border-radius:8px;color:var(--adm-text);font-size:10px;font-weight:700;text-decoration:none;background:var(--adm-surface)}
         .gh-profile-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gh-profile-form-grid label>span{display:block;font-size:10px;color:var(--adm-muted);font-weight:700;margin-bottom:5px}.gh-profile-wide{grid-column:1/-1}.gh-profile-check{display:flex!important;align-items:center;gap:8px;color:var(--adm-text);font-size:11px}.gh-profile-check input{accent-color:var(--adm-accent)}
         .gh-new-project-launch{width:100%;margin:0 0 14px;display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:11px;align-items:center;text-align:left;padding:12px 14px;border:1px solid color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border));border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));color:var(--adm-text);cursor:pointer}.gh-new-project-launch-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));color:var(--adm-accent);font-size:21px;font-weight:700}.gh-new-project-launch>span:nth-child(2){display:grid;gap:2px;min-width:0}.gh-new-project-launch b{font-size:12px}.gh-new-project-launch small{font-size:9px;color:var(--adm-muted);line-height:1.35}.gh-new-project-launch-arrow{font-size:24px;color:var(--adm-muted)}
+        .gh-package-picker{width:100%;display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;padding:12px;border:1.5px dashed color-mix(in srgb,var(--adm-accent) 38%,var(--adm-border));border-radius:12px;background:color-mix(in srgb,var(--adm-accent) 3%,var(--adm-surface2));color:var(--adm-text);cursor:pointer}.gh-package-picker.selected{border-style:solid;border-color:color-mix(in srgb,var(--adm-accent) 50%,var(--adm-border))}.gh-package-picker-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;background:var(--adm-surface);border:1px solid var(--adm-border);font-size:18px}.gh-package-picker-copy{min-width:0;display:grid;gap:2px}.gh-package-picker-copy b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-package-picker-copy small{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-package-picker-action{font-size:9px;font-weight:850;color:var(--adm-accent);padding:7px 8px;border:1px solid color-mix(in srgb,var(--adm-accent) 25%,var(--adm-border));border-radius:8px;background:var(--adm-surface)}.gh-version-compare{margin-top:10px}.gh-wizard-compact-step{display:grid;gap:11px;align-content:start}.gh-wizard-compact-step .gh-wizard-step-head{margin-bottom:1px}.gh-option-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.gh-option-card{min-width:0;text-align:left;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);cursor:pointer}.gh-option-card.active{border-color:color-mix(in srgb,var(--adm-accent) 55%,var(--adm-border));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--adm-accent) 20%,transparent)}.gh-option-card.danger.active{border-color:color-mix(in srgb,var(--adm-red,#dc2626) 42%,var(--adm-border))}.gh-option-card b{display:block;font-size:10px}.gh-option-card small{display:block;margin-top:3px;font-size:8px;line-height:1.3;color:var(--adm-muted)}.gh-cloud-action-row{display:flex;justify-content:flex-end}.gh-final-review-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.gh-publish-dashboard,.gh-publish-finish{display:grid;gap:12px;align-content:start}.gh-publish-state-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface2));color:var(--adm-accent);font-size:23px;font-weight:900}.gh-publish-state-icon.error{background:color-mix(in srgb,var(--adm-red,#dc2626) 10%,var(--adm-surface2));color:var(--adm-red,#dc2626)}.gh-publish-dashboard h3,.gh-publish-finish h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-publish-dashboard>p,.gh-publish-finish>p{margin:-5px 0 0;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-dashboard-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.gh-dashboard-stage{min-width:0;display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;align-items:center;padding:10px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface2)}.gh-dashboard-stage.done{border-color:color-mix(in srgb,var(--adm-green,#16a34a) 28%,var(--adm-border))}.gh-dashboard-stage.error{border-color:color-mix(in srgb,var(--adm-red,#dc2626) 38%,var(--adm-border))}.gh-dashboard-stage.active{border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border))}.gh-dashboard-stage-icon{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:var(--adm-surface);border:1px solid var(--adm-border);font-size:11px;font-weight:900;color:var(--adm-muted)}.gh-dashboard-stage.done .gh-dashboard-stage-icon{color:var(--adm-green,#16a34a)}.gh-dashboard-stage.error .gh-dashboard-stage-icon{color:var(--adm-red,#dc2626)}.gh-dashboard-stage.active .gh-dashboard-stage-icon{color:var(--adm-accent)}.gh-dashboard-stage-copy{min-width:0;display:grid;gap:1px}.gh-dashboard-stage-copy small{font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:var(--adm-muted)}.gh-dashboard-stage-copy b{font-size:10px;color:var(--adm-text);overflow-wrap:anywhere}.gh-dashboard-stage-copy em{font-style:normal;font-size:8px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-dashboard-progress{height:8px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.gh-dashboard-progress i{display:block;height:100%;border-radius:inherit;background:var(--adm-accent);transition:width .2s}.gh-dashboard-destination{display:grid;gap:3px;padding:10px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-dashboard-destination span{font-size:7px;font-weight:900;text-transform:uppercase;color:var(--adm-muted)}.gh-dashboard-destination b{font-size:9px;color:var(--adm-text);overflow-wrap:anywhere}.gh-finish-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-finish-actions{display:flex;gap:8px;flex-wrap:wrap}.gh-finish-actions a{display:inline-flex;align-items:center;min-height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-size:9px;font-weight:850;color:var(--adm-accent);text-decoration:none}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-command-card{min-height:105px;padding:9px 8px;grid-template-columns:1fr;align-content:start;gap:7px}.gh-command-card-icon{width:29px;height:29px;font-size:14px}.gh-command-card-copy b{font-size:9.5px}.gh-command-card-copy small{font-size:7.4px;line-height:1.28}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{gap:6px}.gh-command-card{min-height:101px;padding:8px 7px;border-radius:12px}.gh-command-card-copy b{font-size:9px}.gh-command-card-copy small{font-size:7px}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{gap:6px}.gh-command-card{min-height:101px;padding:8px 7px;border-radius:12px}.gh-command-card-copy b{font-size:9px}.gh-command-card-copy small{font-size:7px}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-package-picker{grid-template-columns:34px minmax(0,1fr) auto;padding:9px;gap:7px}.gh-package-picker-icon{width:32px;height:32px;font-size:15px}.gh-package-picker-copy b{font-size:10.5px}.gh-package-picker-copy small{font-size:8px}.gh-package-picker-action{font-size:8px;padding:6px}.gh-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-option-grid .gh-option-card:last-child{grid-column:1/-1}.gh-final-review-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-dashboard-stage{grid-template-columns:24px minmax(0,1fr);padding:8px;gap:6px}.gh-dashboard-stage-icon{width:24px;height:24px}.gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
       `}</style>
 
       <PerfilGitHubModal

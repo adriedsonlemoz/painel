@@ -20,73 +20,55 @@ import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 // Itens core do SaaS ficam no nível raiz para acesso rápido.
 // Módulo Portal agrupado em seção colapsável — rotas preservadas intactas.
 const NAV = [
-  // O topo fica intencionalmente curto. As páginas continuam com as mesmas
-  // rotas; apenas a descoberta delas foi organizada por contexto de trabalho.
-  { to: '/admin', label: 'Dashboard', icon: IconGrid, perm: null },
+  // Ações principais ficam soltas: são as três centrais acessadas com mais frequência.
+  { to: '/admin',               label: 'Dashboard',      icon: IconGrid,   perm: null },
+  { to: '/admin/atualizacoes',  label: 'Atualizações',   icon: IconBackup, perm: 'atualizacoes.gerenciar' },
+  { to: '/admin/erros',         label: 'Erros e logs',   icon: IconAlerta, perm: 'erros.ver' },
 
+  // Os grupos levam a uma Central em cards no mobile. As rotas antigas
+  // continuam preservadas e aparecem como atalhos no dropdown desktop.
   {
-    group: true,
-    label: 'Conteúdo',
-    icon: IconGlobe,
-    perm: null,
+    group: true, to: '/admin/conteudo', label: 'Conteúdo', icon: IconDoc, perm: null,
     children: [
-      { to: '/',                   label: 'Ver site',           icon: IconGlobe,  perm: null,                   external: true },
-      { to: '/admin/noticias',     label: 'Notícias',           icon: IconDoc,    perm: 'noticias.ver' },
-      { to: '/admin/nova-noticia', label: 'Nova notícia',       icon: IconPlus,   perm: 'noticias.criar' },
-      { to: '/admin/categorias',   label: 'Categorias',         icon: IconTag,    perm: 'categorias.gerenciar' },
-      { to: '/admin/eventos',      label: 'Eventos',            icon: IconCal,    perm: 'eventos.gerenciar' },
-      { to: '/admin/onibus',       label: 'Horários de ônibus', icon: IconBus,    perm: 'extras.gerenciar' },
-      { to: '/admin/newsletter',   label: 'Newsletter',         icon: IconMail,   perm: 'newsletter.gerenciar' },
-      { to: '/admin/seo',          label: 'SEO',                icon: IconSearch, perm: 'seo.gerenciar' },
-      { to: '/admin/rss-import',   label: 'Importar RSS',       icon: IconRss,    perm: 'rss.gerenciar' },
-      { to: '/admin/fontes',       label: 'Fontes',             icon: IconGlobe,  perm: 'fontes.gerenciar' },
-      { to: '/admin/modulos',      label: 'Módulos do portal',  icon: IconLayers, perm: 'modulos.gerenciar' },
+      { to: '/admin/noticias',     label: 'Notícias',        icon: IconDoc,   perm: 'noticias.ver' },
+      { to: '/admin/categorias',   label: 'Categorias',      icon: IconTag,   perm: 'categorias.gerenciar' },
+      { to: '/admin/rss-import',   label: 'RSS e importação',icon: IconRss,   perm: 'rss.gerenciar' },
+      { to: '/admin/fontes',       label: 'Fontes',          icon: IconGlobe, perm: 'fontes.gerenciar' },
+      { to: '/admin/eventos',      label: 'Eventos',         icon: IconCal,   perm: 'eventos.gerenciar' },
+      { to: '/admin/onibus',       label: 'Ônibus',          icon: IconBus,   perm: 'extras.gerenciar' },
+      { to: '/admin/newsletter',   label: 'Newsletter',      icon: IconMail,  perm: 'newsletter.gerenciar' },
     ],
   },
-
   {
-    group: true,
-    label: 'Desenvolvimento',
-    icon: IconFolderCode,
-    perm: null,
+    group: true, to: '/admin/portal', label: 'Portal', icon: IconGlobe, perm: null,
     children: [
-      { to: '/admin/projetos',     label: 'Projetos',           icon: IconFolderCode, perm: 'projetos.ver' },
-      { to: '/admin/github',       label: 'GitHub',             icon: IconGitHub,     perm: 'github.gerenciar' },
-      { to: '/admin/arquivos',     label: 'Arquivos',           icon: IconFileEdit,   perm: 'arquivos.gerenciar' },
-      { to: '/admin/atualizacoes', label: 'Atualizações',       icon: IconBackup,     perm: 'atualizacoes.gerenciar' },
-      { to: '/admin/ai-assistant', label: 'Assistente de IA',   icon: IconIA,         perm: 'ia.usar' },
-      { to: '/admin/integracoes',  label: 'Integrações e APIs', icon: IconPlug,       perm: 'configuracoes.gerenciar' },
+      { to: '/',                  label: 'Ver site',          icon: IconGlobe,  perm: null, external: true },
+      { to: '/admin/modulos',     label: 'Home e módulos',    icon: IconLayers, perm: 'modulos.gerenciar' },
+      { to: '/admin/seo',         label: 'SEO & Metadados',   icon: IconSearch, perm: 'seo.gerenciar' },
+      { to: '/admin/temas',       label: 'Aparência e temas', icon: IconPalette,perm: 'temas.gerenciar' },
+      { to: '/admin/cloudinary',  label: 'Mídia / Cloudinary',icon: IconCloud,  perm: 'cloudinary.gerenciar' },
     ],
   },
-
   {
-    group: true,
-    label: 'Infraestrutura',
-    icon: IconServer,
-    perm: null,
+    group: true, to: '/admin/publicacao', label: 'Publicação', icon: IconGitHub, perm: null,
     children: [
-      { to: '/admin/sistema',      label: 'Sistema',            icon: IconCpu,      perm: 'sistema.gerenciar' },
-      { to: '/admin/monitor',      label: 'Monitor',            icon: IconMonitor,  perm: 'sistema.gerenciar' },
-      { to: '/admin/mongo',        label: 'MongoDB',            icon: IconMongo,    perm: 'mongodb.gerenciar' },
-      { to: '/admin/cloudinary',   label: 'Cloudinary',         icon: IconCloud,    perm: 'cloudinary.gerenciar' },
-      { to: '/admin/cloudflare',   label: 'Cloudflare',         icon: IconCF,       perm: 'cloudflare.gerenciar' },
-      { to: '/admin/plataformas',  label: 'Plataformas',        icon: IconPlatform, perm: 'plataformas.gerenciar' },
-      { to: '/admin/ambientes',    label: 'Ambientes',          icon: IconPlatform, perm: 'configuracoes.gerenciar' },
-      { to: '/admin/backup',       label: 'Backup',             icon: IconBackup,   perm: 'backup.gerenciar' },
+      { to: '/admin/github',      label: 'GitHub',          icon: IconGitHub,     perm: 'github.gerenciar' },
+      { to: '/admin/plataformas', label: 'Vercel / Render', icon: IconPlatform,   perm: 'plataformas.gerenciar' },
+      { to: '/admin/cloudflare',  label: 'Cloudflare / R2', icon: IconCF,         perm: 'cloudflare.gerenciar' },
+      { to: '/admin/projetos',    label: 'Projetos',        icon: IconFolderCode, perm: 'projetos.ver' },
     ],
   },
-
   {
-    group: true,
-    label: 'Administração',
-    icon: IconGear,
-    perm: null,
+    group: true, to: '/admin/central-sistema', label: 'Sistema', icon: IconGear, perm: null,
     children: [
-      { to: '/admin/usuarios',     label: 'Usuários e acessos', icon: IconUsers,   perm: 'usuarios.gerenciar' },
-      { to: '/admin/seguranca',    label: 'Segurança',          icon: IconShield,  perm: 'seguranca.gerenciar' },
-      { to: '/admin/temas',        label: 'Aparência e temas',  icon: IconPalette, perm: 'temas.gerenciar' },
-      { to: '/admin/erros',        label: 'Erros e logs',       icon: IconAlerta,  perm: 'erros.ver' },
-      { to: '/admin/setup',        label: 'Configuração inicial', icon: IconSetup, perm: 'configuracoes.gerenciar' },
+      { to: '/admin/integracoes',  label: 'Integrações e APIs', icon: IconPlug,     perm: 'configuracoes.gerenciar' },
+      { to: '/admin/usuarios',      label: 'Usuários e acessos', icon: IconUsers,    perm: 'usuarios.gerenciar' },
+      { to: '/admin/seguranca',     label: 'Segurança',          icon: IconShield,   perm: 'seguranca.gerenciar' },
+      { to: '/admin/mongo',         label: 'MongoDB',            icon: IconMongo,    perm: 'mongodb.gerenciar' },
+      { to: '/admin/backup',        label: 'Backup',             icon: IconBackup,   perm: 'backup.gerenciar' },
+      { to: '/admin/sistema',       label: 'Infraestrutura',     icon: IconCpu,      perm: 'sistema.gerenciar' },
+      { to: '/admin/ambientes',     label: 'Ambientes',          icon: IconPlatform, perm: 'configuracoes.gerenciar' },
+      { to: '/admin/ai-assistant',  label: 'Assistente de IA',   icon: IconIA,       perm: 'ia.usar' },
     ],
   },
 ]
@@ -98,13 +80,14 @@ function isActive(pathname, to) {
 }
 
 function groupHasActive(pathname, group) {
-  return group.children.some(c => isActive(pathname, c.to))
+  return (group.to && isActive(pathname, group.to)) || group.children.some(c => isActive(pathname, c.to))
 }
 
 /** Percorre NAV e devolve o label do item/filho que está ativo */
 function labelAtualFromNav(pathname, navItems) {
   for (const item of navItems) {
     if (item.group) {
+      if (item.to && pathname === item.to) return item.label
       const filho = item.children.find(c => isActive(pathname, c.to))
       if (filho) return filho.label
     } else {
@@ -235,80 +218,25 @@ export default function AdminLayout() {
     )
   }
 
-  /** Grupo colapsável no drawer */
+  /** Grupo no drawer mobile: abre uma Central em cards, sem despejar dezenas de links. */
   function DrawerGroup({ item }) {
-    const aberto  = !!gruposAbertos[item.label]
     const temAtivo = groupHasActive(pathname, item)
-    const filhosVisiveis = item.children.filter(c => podeVer(c.perm))
-    if (!filhosVisiveis.length) return null
-
-    // conta erros dentro do grupo
-    const errosNoGrupo = item.children.some(c => c.to === '/admin/erros') && naoLidos > 0
-
     return (
-      <div style={{ marginBottom:2 }}>
-        {/* Cabeçalho do grupo */}
-        <button onClick={() => toggleGrupo(item.label)}
-          style={{
-            display:'flex', alignItems:'center', gap:10, width:'100%',
-            padding:'9px 12px', borderRadius:RADIUS.md,
-            fontSize:13, fontWeight:500, textAlign:'left',
-            background: temAtivo ? 'var(--adm-surface2)' : 'transparent',
-            border:'none', cursor:'pointer',
-            color: temAtivo ? 'var(--adm-text)' : 'var(--adm-muted)',
-            transition:'all .15s',
-          }}
-        >
-          <span style={{ width:16, height:16, display:'flex', alignItems:'center', flexShrink:0 }}>
-            <item.icon />
-          </span>
-          <span style={{ flex:1 }}>{item.label}</span>
-          {errosNoGrupo && !aberto && badgeErros({ marginRight:4 })}
-          {/* Chevron */}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-            width="12" height="12" style={{ flexShrink:0, transition:'transform .2s',
-              transform: aberto ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-
-        {/* Filhos — animação por max-height */}
-        <div style={{
-          overflow:'hidden', maxHeight: aberto ? `${filhosVisiveis.length * 48}px` : '0px',
-          transition:'max-height .22s cubic-bezier(.4,0,.2,1)',
-        }}>
-          <div style={{ paddingLeft:12, paddingTop:2 }}>
-            {filhosVisiveis.map(child => {
-              const childActive = isActive(pathname, child.to)
-              const ChildLink = child.external ? 'a' : Link
-              const childProps = child.external
-                ? { href: child.to, target: '_blank', rel: 'noopener noreferrer' }
-                : { to: child.to }
-              return (
-                <ChildLink key={child.to} {...childProps}
-                  aria-current={childActive ? 'page' : undefined}
-                  style={{
-                    display:'flex', alignItems:'center', gap:9,
-                    padding:'8px 12px', borderRadius:7, marginBottom:1,
-                    fontSize:12.5, fontWeight:500, textDecoration:'none',
-                    color: childActive ? 'var(--adm-text)' : 'var(--adm-muted)',
-                    background: childActive ? 'var(--adm-surface2)' : 'transparent',
-                    transition:'all .15s',
-                    borderLeft:'2px solid',
-                    borderLeftColor: childActive ? 'var(--adm-accent)' : 'transparent',
-                  }}
-                >
-                  <span style={{ width:14, height:14, display:'flex', alignItems:'center', flexShrink:0 }}>
-                    <child.icon />
-                  </span>
-                  <span style={{ flex:1 }}>{child.label}</span>
-                  {child.to === '/admin/erros' ? badgeErros({ marginLeft:0 }) : null}
-                </ChildLink>
-              )
-            })}
-          </div>
-        </div>
-      </div>
+      <Link to={item.to}
+        aria-current={pathname === item.to ? 'page' : undefined}
+        style={{
+          display:'flex', alignItems:'center', gap:10, width:'100%',
+          padding:'10px 12px', borderRadius:RADIUS.md, marginBottom:2,
+          fontSize:13, fontWeight:600, textAlign:'left', textDecoration:'none',
+          background: temAtivo ? 'var(--adm-surface2)' : 'transparent',
+          color: temAtivo ? 'var(--adm-text)' : 'var(--adm-muted)',
+          transition:'all .15s',
+        }}
+      >
+        <span style={{ width:16, height:16, display:'flex', alignItems:'center', flexShrink:0 }}><item.icon /></span>
+        <span style={{ flex:1 }}>{item.label}</span>
+        <span style={{ fontSize:16, lineHeight:1, color:'var(--adm-muted)' }}>›</span>
+      </Link>
     )
   }
 
@@ -483,6 +411,11 @@ export default function AdminLayout() {
                   </button>
                   {aberto && (
                     <div className="adm-top-dropdown">
+                      <Link to={item.to} className={`adm-top-dd-item${pathname === item.to ? ' active' : ''}`} onClick={() => setTopDropdown(null)} style={{fontWeight:700,borderBottom:'1px solid var(--adm-border)'}}>
+                        <span style={{ width:14, height:14, display:'flex', alignItems:'center', flexShrink:0 }}><item.icon /></span>
+                        <span style={{ flex:1 }}>Abrir central de {item.label.toLowerCase()}</span>
+                        <span>›</span>
+                      </Link>
                       {filhosVisiveis.map(child => {
                         const childActive = isActive(pathname, child.to)
                         const TopChildLink = child.external ? 'a' : Link
