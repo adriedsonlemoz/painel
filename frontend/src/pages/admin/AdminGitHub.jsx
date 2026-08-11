@@ -1251,7 +1251,7 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
     </section>}
 
     {passo === 8 && resultado && <section className="gh-publish-finish">
-      <div className="gh-wizard-success-icon">✓</div><h3>Publicação concluída</h3><p>O pacote foi processado e o commit foi confirmado pelo GitHub.</p>
+      <div className="gh-wizard-success-icon">✓</div><h3>Publicação concluída</h3><p>{resultado.commit?.initializedRepository ? 'O repositório estava vazio: o primeiro commit foi criado e o projeto completo foi publicado.' : 'O pacote foi processado e o commit foi confirmado pelo GitHub.'}</p>
       <div className="al-wizard-info-grid gh-finish-grid">
         <WizardInfo label="Projeto" value={packageMeta?.produto || repo.nome || repoNome} help={sentVersion ? `Versão ${sentVersion}` : ''} />
         <WizardInfo label="GitHub" value={resultado.destino?.repository} help={`${resultado.destino?.branch || branch} · ${resultado.commit?.commitSha?.slice(0,7) || '—'}`} />

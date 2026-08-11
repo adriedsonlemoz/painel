@@ -1,18 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.118",
+  "version": "1.0.119",
   "packageFormat": 2,
   "changelog": [
-    "RSS agora é vinculado diretamente às Fontes editoriais do módulo Conteúdo; uma Fonte pode possuir vários feeds.",
-    "Categoria padrão passou a ser obrigatória em cada feed, com migração segura para instalações existentes.",
-    "A Home não consulta mais feeds externos diretamente: RSS é somente entrada editorial e apenas notícias publicadas aparecem no portal.",
-    "Feed RSS público do portal agora inclui somente notícias publicadas e usa o MIME real das imagens.",
-    "Capas importadas por RSS são copiadas para Cloudflare R2 em alsistemas/noticias/rss/fonte/AAAA/MM, preservando URL original e metadados.",
-    "Importador passou a detectar charset e corrigir mojibake/UTF-8 quebrado; reprocessamento também corrige notícias antigas.",
-    "IA do RSS roda após a persistência, em background, com título desligado por padrão e reclassificação restrita às categorias existentes.",
-    "Tela RSS redesenhada: cards compactos expansíveis, cadastro curto, configurações avançadas e integração direta com Fontes/Categorias.",
-    "Cadastro de feed agora segue URL → teste → Fonte → Categoria → automação, com criação rápida de Fonte e Categoria sem sair do formulário.",
-    "Fetch RSS endurecido contra SSRF, redes privadas, redirecionamentos perigosos e XML excessivo; exclusão de feed preserva notícias sem referência quebrada."
+    "Corrige a publicação pelo módulo GitHub quando o repositório de destino ainda está totalmente vazio.",
+    "O erro 409 “Git Repository is empty.” agora é reconhecido como primeiro envio, em vez de encerrar a publicação.",
+    "Reutiliza a estratégia já comprovada no módulo Atualizações: cria o primeiro commit pela Contents API e continua a sincronização completa pela Git Database API.",
+    "A primeira publicação também funciona quando a branch escolhida é diferente da branch padrão do repositório.",
+    "Snapshot R2, validação do ZIP, modo substituir/mesclar e auditoria continuam funcionando no primeiro envio."
   ],
   "updatePackages": {
     "full": true,

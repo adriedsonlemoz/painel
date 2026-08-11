@@ -95,22 +95,32 @@ async function extrairZipPublicavel(buffer) {
   return {files:out,totalBytes,commonRoot}
 }
 
+function repositorioGitVazio(err) {
+  return Number(err?.status)===409 && /(?:git\s+)?repository\s+is\s+empty|reposit[oó]rio.+vazio/i.test(String(err?.message||''))
+}
+
 async function obterBranchBase(owner,repo,branch) {
   const repoInfo=await githubFetch(`/repos/${owner}/${repo}`)
   const wanted=String(branch||repoInfo.default_branch||'main').trim()||'main'
   try{
     const ref=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(wanted)}`)
     const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${ref.object.sha}`)
-    return {repoInfo,branch:wanted,exists:true,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||''}
+    return {repoInfo,branch:wanted,exists:true,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||'',empty:false}
   }catch(err){
+    // O GitHub responde 409 "Git Repository is empty." antes mesmo de existir
+    // qualquer ref. Esse é o mesmo cenário já tratado pelo publicador do módulo
+    // Atualizações e deve seguir para a inicialização do primeiro commit.
+    if(repositorioGitVazio(err)) return {repoInfo,branch:wanted,exists:false,parentSha:'',baseTreeSha:'',empty:true}
     if(err.status!==404) throw err
     try{
-      const ref=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(repoInfo.default_branch||'main')}`)
+      const defaultBranch=String(repoInfo.default_branch||'main')
+      const ref=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(defaultBranch)}`)
       const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${ref.object.sha}`)
-      return {repoInfo,branch:wanted,exists:false,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||''}
+      return {repoInfo,branch:wanted,exists:false,parentSha:ref.object.sha,baseTreeSha:commit.tree?.sha||'',empty:false}
     }catch(baseErr){
+      if(repositorioGitVazio(baseErr)) return {repoInfo,branch:wanted,exists:false,parentSha:'',baseTreeSha:'',empty:true}
       if(baseErr.status!==404) throw baseErr
-      return {repoInfo,branch:wanted,exists:false,parentSha:'',baseTreeSha:''}
+      return {repoInfo,branch:wanted,exists:false,parentSha:'',baseTreeSha:'',empty:true}
     }
   }
 }
@@ -118,22 +128,31 @@ async function obterBranchBase(owner,repo,branch) {
 async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false}) {
   let base=await obterBranchBase(owner,repo,branch)
   const prefix=normalizarTargetPath(targetPath)
+  let initializedRepository=false
 
-  // Git Database API retorna conflito em repositórios totalmente vazios.
-  // Inicializamos a branch padrão pela Contents API e, a partir daí, todo o
-  // restante segue pelo mesmo commit/tree transacional usado em repos normais.
+  // Reutiliza a estratégia do publicador do módulo Atualizações: a Git Database
+  // API não consegue criar a primeira ref de um repositório totalmente vazio.
+  // A Contents API grava um arquivo real na branch padrão, criando o primeiro
+  // commit; depois retomamos o fluxo normal de blobs/tree/commit. Se o usuário
+  // escolheu outra branch, ela nasce a partir desse commit inicial.
   if(!base.parentSha){
-    const defaultBranch=base.repoInfo.default_branch||'main'
-    if(base.branch!==defaultBranch){
-      const e=new Error(`O repositório está vazio. Faça a primeira publicação na branch padrão (${defaultBranch}); depois outras branches poderão ser criadas.`);e.status=409;throw e
-    }
-    const first=[...files].sort((a,b)=>a.data.length-b.data.length)[0]
-    const firstDest=prefix?`${prefix}/${first.path}`:first.path
-    await githubFetch(`/repos/${owner}/${repo}/contents/${encodeGitPath(firstDest)}`,{method:'PUT',body:JSON.stringify({
+    const defaultBranch=String(base.repoInfo.default_branch||'main')
+    const seed=files.find(f=>f.path==='README.md')||files.find(f=>f.path==='.gitignore')||files[0]
+    const seedDest=prefix?`${prefix}/${seed.path}`:seed.path
+    const initBody={
       message:String(message||'Inicializa repositório pelo AL Sistemas').slice(0,240),
-      content:first.data.toString('base64'),
-    })})
+      content:seed.data.toString('base64'),
+    }
+    if(base.branch===defaultBranch) initBody.branch=defaultBranch
+    const initialized=await githubFetch(`/repos/${owner}/${repo}/contents/${encodeGitPath(seedDest)}`,{method:'PUT',body:JSON.stringify(initBody)})
+    const initialSha=initialized?.commit?.sha||''
+    if(!initialSha){const e=new Error('O GitHub inicializou o repositório, mas não retornou o primeiro commit.');e.status=502;throw e}
+    if(base.branch!==defaultBranch){
+      await githubFetch(`/repos/${owner}/${repo}/git/refs`,{method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:initialSha})})
+    }
+    initializedRepository=true
     base=await obterBranchBase(owner,repo,base.branch)
+    if(!base.parentSha){const e=new Error('O primeiro commit foi criado, mas a branch ainda não ficou disponível no GitHub.');e.status=502;throw e}
   }
   const tree=[]
   const incomingPaths=new Set(files.map(file=>prefix?`${prefix}/${file.path}`:file.path))
@@ -157,7 +176,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   const treeBody={tree}
   if(base.baseTreeSha) treeBody.base_tree=base.baseTreeSha
   const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{method:'POST',body:JSON.stringify(treeBody)})
-  if(base.baseTreeSha && newTree.sha===base.baseTreeSha) return {changed:false,branch:base.branch,commitSha:base.parentSha,commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,enviados:0,removidos:0}
+  if(base.baseTreeSha && newTree.sha===base.baseTreeSha) return {changed:false,branch:base.branch,commitSha:base.parentSha,commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,enviados:0,removidos:0,initializedRepository}
   const commitBody={message:String(message||'Publicação pelo AL Sistemas').slice(0,240),tree:newTree.sha,parents:base.parentSha?[base.parentSha]:[]}
   const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{method:'POST',body:JSON.stringify(commitBody)})
   if(base.exists){
@@ -165,7 +184,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   }else{
     await githubFetch(`/repos/${owner}/${repo}/git/refs`,{method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha})})
   }
-  return {changed:true,branch:base.branch,commitSha:commit.sha,commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,enviados,removidos}
+  return {changed:true,branch:base.branch,commitSha:commit.sha,commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,enviados,removidos,initializedRepository}
 }
 
 const PROJETOS_DIR = process.env.PROJETOS_PATH
@@ -921,7 +940,7 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
     await AuditLog.create({
       admin_id: req.usuario._id, admin_email: req.usuario.email,
       acao: 'publicar', recurso: 'github_pacote', recurso_id: repository,
-      payload: { source: `${owner}/${repo}`, repository, branch: result.branch || branch, targetPath, replacePath, snapshotR2, files: unpacked.files.length, bytes: unpacked.totalBytes, sha256 },
+      payload: { source: `${owner}/${repo}`, repository, branch: result.branch || branch, targetPath, replacePath, snapshotR2, initializedRepository: Boolean(result.initializedRepository), files: unpacked.files.length, bytes: unpacked.totalBytes, sha256 },
       ip: req.ip, request_id: req.requestId || null,
     }).catch(() => {})
 

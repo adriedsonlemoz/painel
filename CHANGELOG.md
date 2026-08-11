@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.119 — Primeiro envio para repositório GitHub vazio
+- Corrige o fluxo **GitHub → Publicar projeto** quando o repositório escolhido ainda não possui nenhum commit.
+- Respostas `409 Git Repository is empty.` passam a ser reconhecidas como repositório novo, sem abortar a publicação.
+- O publicador reutiliza a mesma estratégia já usada pelo módulo Atualizações: inicializa o repositório com um arquivo real via Contents API e depois sincroniza o pacote completo via blobs/tree/commit.
+- A primeira publicação passa a aceitar também uma branch diferente da branch padrão: a branch é criada automaticamente a partir do commit inicial.
+- Mantém snapshot R2, validação do ZIP, modos Mesclar/Substituir, metadados e AuditLog no mesmo fluxo.
+
 ## 1.0.118 — RSS integrado ao Conteúdo, R2 e fluxo editorial
 
 - Fonte RSS vinculada a uma Fonte editorial real; vários feeds podem compartilhar a mesma Fonte.
