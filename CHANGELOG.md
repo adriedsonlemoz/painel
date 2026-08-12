@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.129 — Publicação GitHub resiliente e sem estouro de limite
+
+- Corrige o falso diagnóstico de permissão quando o GitHub responde `403` por limite secundário de gravação.
+- Publicação por ZIP passa a comparar SHA Git de cada arquivo antes de gravar e reutiliza arquivos inalterados.
+- Arquivos de texto são enviados em lote pela criação da árvore Git, reduzindo drasticamente requisições mutativas.
+- Binários e arquivos grandes continuam usando blobs, agora com pacing e retry automático respeitando `Retry-After`/rate-limit.
+- Log ao vivo registra `ADD`, `MOD`, `SKIP` e `DEL` por arquivo, além de pausas solicitadas pelo GitHub.
+- Erros da API preservam endpoint, mensagem real, request id e dados de rate limit para diagnóstico correto.
+- Resultado final separa alterados, inalterados, blobs explícitos e remoções.
+
 ## 1.0.128 — Wizard de atualização e modo reparo
 
 - Atualizações passam a abrir em um wizard profissional centralizado com cinco etapas: **Pacote → Revisão → Proteção → Instalação → Concluído**.

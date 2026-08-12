@@ -76,7 +76,8 @@ function registrarGithubPublishLog(job, phase, label, message, state = 'active',
   const entry = { at, phase, label, message, state, progress: Number.isFinite(progress) ? job.progress : null }
   if (details && typeof details === 'object') entry.details = details
   job.logs.push(entry)
-  if (job.logs.length > 160) job.logs.splice(0, job.logs.length - 160)
+  const maxLogs = Number(process.env.AL_GITHUB_PUBLISH_MAX_LOGS || 3500)
+  if (job.logs.length > maxLogs) job.logs.splice(0, job.logs.length - maxLogs)
 }
 function versaoPartes(value = '') {
   const match = String(value || '').trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$/)
@@ -174,18 +175,84 @@ async function obterBranchBase(owner,repo,branch) {
   }
 }
 
+function computeGitBlobShaBuffer(data) {
+  const buf=Buffer.isBuffer(data)?data:Buffer.from(data||'')
+  const header=Buffer.from(`blob ${buf.length}\0`)
+  return crypto.createHash('sha1').update(header).update(buf).digest('hex')
+}
+
+function bufferUtf8Seguro(data) {
+  if(!Buffer.isBuffer(data)) return false
+  if(data.includes(0)) return false
+  const text=data.toString('utf8')
+  return Buffer.from(text,'utf8').equals(data)
+}
+
+function githubRateLimitError(err) {
+  const msg=String(err?.message||'')
+  return Number(err?.status)===429 || (
+    Number(err?.status)===403 && (
+      /secondary rate limit|rate limit|abuse detection|too many requests|temporarily blocked/i.test(msg) ||
+      Number.isFinite(err?.retryAfter) ||
+      err?.rateLimitRemaining===0
+    )
+  ) || (Number(err?.status)===422 && /spam|abuse/i.test(msg))
+}
+
+function githubPublishErrorMessage(err) {
+  const msg=String(err?.message||'Erro desconhecido do GitHub').trim()
+  if(githubRateLimitError(err)) return err?.githubRetriesExhausted
+    ? `O GitHub aplicou um limite temporário de gravação. O AL Sistemas aguardou e tentou novamente ${err.githubRetriesExhausted} vezes, mas a API ainda recusou a operação. Aguarde alguns minutos e repita. Detalhe: ${msg}`
+    : `O GitHub aplicou um limite temporário à API. Aguarde alguns minutos e repita a operação. Detalhe: ${msg}`
+  if(Number(err?.status)===403 && /resource not accessible|personal access token|integration|permission|push access|contents/i.test(msg)) {
+    return `O token do GitHub não possui permissão suficiente para esta etapa. Confira Contents: Read and write em Integrações e APIs. Detalhe: ${msg}`
+  }
+  if(Number(err?.status)===403 && /protected branch|repository rule|ruleset|review required|branch protection/i.test(msg)) {
+    return `A branch recusou a atualização por uma regra de proteção do GitHub. Detalhe: ${msg}`
+  }
+  const endpoint=err?.githubPath ? ` (${err.githubMethod||'GET'} ${err.githubPath})` : ''
+  return `GitHub recusou a operação${endpoint}: ${msg}`
+}
+
 async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false,onProgress=null}) {
   onProgress?.({phase:'branch',label:'Destino GitHub',message:`Conferindo branch ${branch || 'main'}…`,progress:42})
   let base=await obterBranchBase(owner,repo,branch)
   const prefix=normalizarTargetPath(targetPath)
   let initializedRepository=false
+  let lastMutationAt=0
 
-  // Repositórios totalmente vazios não aceitam criação de refs pela Git Database API.
-  // O fluxo abaixo é o mesmo princípio usado no publicador de projetos/atualizações:
-  // 1) cria um arquivo real pela Contents API na branch padrão, sem forçar `branch`;
-  // 2) usa o SHA retornado como base;
-  // 3) se o destino pedido for outra branch, cria essa branch a partir do commit inicial;
-  // 4) publica o projeto completo pela Git Database API.
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+  const writeGithub=async(apiPath,options={},meta={})=>{
+    const attempts=3
+    for(let attempt=1;attempt<=attempts;attempt++){
+      const elapsed=Date.now()-lastMutationAt
+      if(lastMutationAt && elapsed<1100) await sleep(1100-elapsed)
+      try{
+        const result=await githubFetch(apiPath,options)
+        lastMutationAt=Date.now()
+        return result
+      }catch(err){
+        lastMutationAt=Date.now()
+        if(!githubRateLimitError(err)) throw err
+        if(attempt>=attempts){err.githubRetriesExhausted=attempts;throw err}
+        let waitMs=0
+        if(Number(err.retryAfter)>0) waitMs=Number(err.retryAfter)*1000
+        else if(err.rateLimitRemaining===0 && Number(err.rateLimitReset)>0) waitMs=Math.max(1000,(Number(err.rateLimitReset)*1000)-Date.now()+1500)
+        else waitMs=61000*(2**(attempt-1))
+        waitMs=Math.min(Math.max(waitMs,1000),180000)
+        const seconds=Math.ceil(waitMs/1000)
+        onProgress?.({
+          phase:'rate-limit',label:'Pausa solicitada pelo GitHub',
+          message:`Limite temporário detectado em ${meta.label||'gravação'}. Aguardando ${seconds}s antes da tentativa ${attempt+1}/${attempts}…`,
+          state:'warn',progress:Number.isFinite(meta.progress)?meta.progress:null,
+          details:{retryAfterSeconds:seconds,attempt,nextAttempt:attempt+1,apiPath},
+        })
+        await sleep(waitMs)
+      }
+    }
+  }
+
+  // Repositórios totalmente vazios precisam de um primeiro commit pela Contents API.
   if(!base.parentSha){
     onProgress?.({phase:'initialize',label:'Primeiro commit',message:'Repositório vazio detectado. Criando a base inicial…',progress:48})
     const defaultBranch=String(base.repoInfo.default_branch||'main').trim()||'main'
@@ -195,145 +262,152 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
       message:String(message||'Inicializa repositório pelo AL Sistemas').slice(0,240),
       content:seed.data.toString('base64'),
     }
-
-    // IMPORTANTE: em repositório vazio não envie `branch`.
-    // A Contents API inicializa a branch padrão do próprio repositório.
-    const initialized=await githubFetch(
+    const initialized=await writeGithub(
       `/repos/${owner}/${repo}/contents/${encodeGitPath(seedDest)}`,
-      {method:'PUT',body:JSON.stringify(initBody)}
+      {method:'PUT',body:JSON.stringify(initBody)},
+      {label:'primeiro commit',progress:48},
     )
     const initialSha=initialized?.commit?.sha||''
-    if(!initialSha){
-      const e=new Error('O GitHub inicializou o repositório, mas não retornou o primeiro commit.')
-      e.status=502
-      throw e
-    }
-
+    if(!initialSha){const e=new Error('O GitHub inicializou o repositório, mas não retornou o primeiro commit.');e.status=502;throw e}
     const initialCommit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${initialSha}`)
     const initialTreeSha=initialCommit?.tree?.sha||''
-    if(!initialTreeSha){
-      const e=new Error('O primeiro commit foi criado, mas a árvore inicial não pôde ser obtida.')
-      e.status=502
-      throw e
-    }
+    if(!initialTreeSha){const e=new Error('O primeiro commit foi criado, mas a árvore inicial não pôde ser obtida.');e.status=502;throw e}
 
     if(base.branch!==defaultBranch){
-      await githubFetch(`/repos/${owner}/${repo}/git/refs`,{
-        method:'POST',
-        body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:initialSha}),
-      })
+      await writeGithub(`/repos/${owner}/${repo}/git/refs`,{
+        method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:initialSha}),
+      },{label:'criação da branch',progress:52})
     }
 
     initializedRepository=true
     onProgress?.({phase:'initialize',label:'Primeiro commit',message:`Base inicial criada em ${defaultBranch}${base.branch!==defaultBranch ? ` e branch ${base.branch} preparada` : ''}.`,progress:54})
-    // Não reconsulta imediatamente a ref: o GitHub pode levar alguns instantes para
-    // refletir a branch recém-criada. O SHA retornado pela Contents API já é a fonte
-    // de verdade suficiente para continuar a publicação.
-    base={
-      ...base,
-      exists:true,
-      parentSha:initialSha,
-      baseTreeSha:initialTreeSha,
-      empty:false,
-      defaultBranch,
+    base={...base,exists:true,parentSha:initialSha,baseTreeSha:initialTreeSha,empty:false,defaultBranch}
+  }
+
+  // Carrega a tree remota uma vez. Isso permite comparar SHA localmente e evita
+  // dezenas/centenas de POSTs para arquivos que já estão idênticos.
+  let currentTree=null
+  const remoteMap=new Map()
+  if(base.baseTreeSha){
+    onProgress?.({phase:'diff',label:'Comparando conteúdo',message:'Indexando a árvore atual para calcular somente as diferenças…',progress:56})
+    try{
+      currentTree=await githubFetch(`/repos/${owner}/${repo}/git/trees/${base.baseTreeSha}?recursive=1`)
+      for(const item of currentTree?.tree||[]) if(item.type==='blob') remoteMap.set(item.path,item.sha)
+      if(currentTree?.truncated){
+        onProgress?.({phase:'diff',label:'Comparação parcial',message:'A árvore remota foi truncada pelo GitHub; arquivos não indexados serão tratados como alterados.',state:'warn',progress:57})
+      }
+    }catch(err){
+      onProgress?.({phase:'diff',label:'Comparação indisponível',message:`Não foi possível indexar a árvore remota; o pacote será preparado integralmente. ${err.message}`,state:'warn',progress:57})
     }
   }
 
   const tree=[]
   const incomingPaths=new Set(files.map(file=>prefix?`${prefix}/${file.path}`:file.path))
   let removidos=0
-  if(replacePath && base.baseTreeSha){
-    onProgress?.({phase:'diff',label:'Comparando conteúdo',message:'Calculando arquivos que serão substituídos ou removidos…',progress:57})
-    const current=await githubFetch(`/repos/${owner}/${repo}/git/trees/${base.baseTreeSha}?recursive=1`)
+  if(replacePath && currentTree){
     const pathPrefix=prefix?`${prefix}/`:''
-    for(const item of current.tree||[]){
+    for(const item of currentTree.tree||[]){
       if(item.type!=='blob') continue
       const within=prefix ? item.path.startsWith(pathPrefix) : true
-      if(within && !incomingPaths.has(item.path)){tree.push({path:item.path,mode:'100644',type:'blob',sha:null});removidos++}
+      if(within && !incomingPaths.has(item.path)){
+        tree.push({path:item.path,mode:'100644',type:'blob',sha:null});removidos++
+        onProgress?.({phase:'files',label:'DEL',message:item.path,state:'done',progress:58,details:{file:item.path,operation:'DEL'}})
+      }
     }
   }
 
-  let enviados=0
-  onProgress?.({phase:'blobs',label:'Enviando arquivos',message:`Preparando ${files.length} arquivo(s) para a árvore Git…`,progress:60})
-  for(const file of files){
-    const blob=await githubFetch(`/repos/${owner}/${repo}/git/blobs`,{
-      method:'POST',
-      body:JSON.stringify({content:file.data.toString('base64'),encoding:'base64'}),
-    })
+  const inlinePerFileMax=Number(process.env.AL_GITHUB_TREE_INLINE_FILE_MAX_BYTES||1024*1024)
+  const inlineTotalMax=Number(process.env.AL_GITHUB_TREE_INLINE_TOTAL_MAX_BYTES||6*1024*1024)
+  let inlineBytes=0, enviados=0, inalterados=0, inlineTree=0, blobsCriados=0
+  const total=Math.max(1,files.length)
+  onProgress?.({phase:'blobs',label:'Preparando arquivos',message:`Comparando e preparando ${files.length} arquivo(s) sem sobrecarregar a API do GitHub…`,progress:60})
+
+  for(let index=0;index<files.length;index++){
+    const file=files[index]
     const dest=prefix?`${prefix}/${file.path}`:file.path
+    const progress=60+Math.round(((index+1)/total)*20)
+    const localSha=computeGitBlobShaBuffer(file.data)
+    const remoteSha=remoteMap.get(dest)
+
+    if(remoteSha && remoteSha===localSha){
+      inalterados++
+      onProgress?.({phase:'files',label:'SKIP',message:`${index+1}/${files.length} · ${dest} · sem alteração`,state:'done',progress,details:{file:dest,operation:'SKIP',index:index+1,total:files.length}})
+      continue
+    }
+
+    const op=remoteSha?'MOD':'ADD'
+    const safeText=bufferUtf8Seguro(file.data)
+    const canInline=safeText && file.data.length<=inlinePerFileMax && (inlineBytes+file.data.length)<=inlineTotalMax
+    if(canInline){
+      tree.push({path:dest,mode:'100644',type:'blob',content:file.data.toString('utf8')})
+      inlineBytes+=file.data.length;inlineTree++;enviados++
+      onProgress?.({phase:'files',label:op,message:`${index+1}/${files.length} · ${dest} · preparado na árvore`,state:'done',progress,details:{file:dest,operation:op,mode:'inline',index:index+1,total:files.length}})
+      continue
+    }
+
+    // Binários e textos grandes ainda usam blob explícito, porém com pacing e retry.
+    const blob=await writeGithub(`/repos/${owner}/${repo}/git/blobs`,{
+      method:'POST',body:JSON.stringify({content:file.data.toString('base64'),encoding:'base64'}),
+    },{label:`arquivo ${dest}`,progress})
     tree.push({path:dest,mode:'100644',type:'blob',sha:blob.sha})
-    enviados++
-    if (enviados === files.length || enviados === 1 || enviados % Math.max(1, Math.floor(files.length / 8)) === 0) {
-      onProgress?.({phase:'blobs',label:'Enviando arquivos',message:`${enviados}/${files.length} arquivo(s) preparados`,progress:60 + Math.round((enviados / files.length) * 20)})
+    blobsCriados++;enviados++
+    onProgress?.({phase:'files',label:op,message:`${index+1}/${files.length} · ${dest} · blob enviado`,state:'done',progress,details:{file:dest,operation:op,mode:'blob',index:index+1,total:files.length}})
+  }
+
+  if(tree.length===0){
+    onProgress?.({phase:'verify',label:'Sem alterações',message:`Os ${inalterados} arquivo(s) já correspondem ao conteúdo do GitHub.`,progress:99,state:'done'})
+    return {
+      changed:false,branch:base.branch,commitSha:base.parentSha,
+      commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,
+      enviados:0,removidos:0,inalterados,inlineTree:0,blobsCriados:0,initializedRepository,
+      verified:true,verifiedAt:new Date().toISOString(),
     }
   }
 
-  onProgress?.({phase:'tree',label:'Árvore Git',message:'Montando a árvore final do projeto…',progress:82})
+  onProgress?.({phase:'tree',label:'Árvore Git',message:`Enviando uma árvore única com ${enviados} alteração(ões)${removidos?` e ${removidos} remoção(ões)`:''}…`,progress:82})
   const treeBody={tree}
   if(base.baseTreeSha) treeBody.base_tree=base.baseTreeSha
-  const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{
-    method:'POST',
-    body:JSON.stringify(treeBody),
-  })
+  const newTree=await writeGithub(`/repos/${owner}/${repo}/git/trees`,{
+    method:'POST',body:JSON.stringify(treeBody),
+  },{label:'árvore Git',progress:82})
+
   if(base.baseTreeSha && newTree.sha===base.baseTreeSha){
     return {
-      changed:false,
-      branch:base.branch,
-      commitSha:base.parentSha,
+      changed:false,branch:base.branch,commitSha:base.parentSha,
       commitUrl:`https://github.com/${owner}/${repo}/commit/${base.parentSha}`,
-      enviados:0,
-      removidos:0,
-      initializedRepository,
-      verified:true,
-      verifiedAt:new Date().toISOString(),
+      enviados:0,removidos:0,inalterados,inlineTree,blobsCriados,initializedRepository,
+      verified:true,verifiedAt:new Date().toISOString(),
     }
   }
 
   onProgress?.({phase:'commit',label:'Commit',message:'Criando o commit da publicação…',progress:88})
-  const commitBody={
-    message:String(message||'Publicação pelo AL Sistemas').slice(0,240),
-    tree:newTree.sha,
-    parents:base.parentSha?[base.parentSha]:[],
-  }
-  const commit=await githubFetch(`/repos/${owner}/${repo}/git/commits`,{
-    method:'POST',
-    body:JSON.stringify(commitBody),
-  })
+  const commitBody={message:String(message||'Publicação pelo AL Sistemas').slice(0,240),tree:newTree.sha,parents:base.parentSha?[base.parentSha]:[]}
+  const commit=await writeGithub(`/repos/${owner}/${repo}/git/commits`,{
+    method:'POST',body:JSON.stringify(commitBody),
+  },{label:'commit',progress:88})
 
   onProgress?.({phase:'ref',label:'Branch',message:`Atualizando ${base.branch} para o novo commit…`,progress:93})
   if(base.exists){
-    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
-      method:'PATCH',
-      body:JSON.stringify({sha:commit.sha,force:false}),
-    })
+    await writeGithub(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
+      method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false}),
+    },{label:`branch ${base.branch}`,progress:93})
   }else{
-    await githubFetch(`/repos/${owner}/${repo}/git/refs`,{
-      method:'POST',
-      body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha}),
-    })
+    await writeGithub(`/repos/${owner}/${repo}/git/refs`,{
+      method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha}),
+    },{label:`branch ${base.branch}`,progress:93})
   }
 
   onProgress?.({phase:'verify',label:'Verificação GitHub',message:'Confirmando o commit diretamente na branch publicada…',progress:96})
-  const verifyRef = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base.branch)}`)
-  const verifyCommit = await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`)
-  const verified = verifyRef?.object?.sha === commit.sha && Boolean(verifyCommit?.tree?.sha)
-  if (!verified) {
-    const e = new Error('O GitHub recebeu o commit, mas a verificação final da branch não confirmou a publicação.')
-    e.status = 502
-    throw e
-  }
-  onProgress?.({phase:'verify',label:'Verificação GitHub',message:`Commit ${commit.sha.slice(0,7)} confirmado na branch ${base.branch}.`,progress:99})
+  const verifyRef=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base.branch)}`)
+  const verifyCommit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`)
+  const verified=verifyRef?.object?.sha===commit.sha && Boolean(verifyCommit?.tree?.sha)
+  if(!verified){const e=new Error('O GitHub recebeu o commit, mas a verificação final da branch não confirmou a publicação.');e.status=502;throw e}
+  onProgress?.({phase:'verify',label:'Verificação GitHub',message:`Commit ${commit.sha.slice(0,7)} confirmado na branch ${base.branch}.`,progress:99,state:'done'})
   return {
-    changed:true,
-    branch:base.branch,
-    commitSha:commit.sha,
+    changed:true,branch:base.branch,commitSha:commit.sha,
     commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,
-    treeSha:verifyCommit.tree?.sha || newTree.sha,
-    enviados,
-    removidos,
-    initializedRepository,
-    verified:true,
-    verifiedAt:new Date().toISOString(),
+    treeSha:verifyCommit.tree?.sha||newTree.sha,enviados,removidos,inalterados,inlineTree,blobsCriados,
+    initializedRepository,verified:true,verifiedAt:new Date().toISOString(),
   }
 }
 
@@ -1368,9 +1442,7 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
           onLog:e=>registrarGithubPublishLog(job,e.phase,e.label,e.message,e.state||'active',e.progress,e.details)})
         job.result=result; job.status='succeeded'; job.progress=100; job.phase='done'; job.updatedAt=new Date().toISOString()
       }catch(err){
-        job.status='failed'; job.phase='error'; job.error={message:err.status===403
-          ? `GitHub recusou a gravação. Confira Contents: Read and write para o token salvo em Integrações e APIs.`
-          : err.message, status:err.status||500, preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined}
+        job.status='failed'; job.phase='error'; job.error={message:githubPublishErrorMessage(err), status:err.status||500, preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined}
         registrarGithubPublishLog(job,'error','Publicação interrompida',job.error.message,'error',job.progress)
       }
     })
@@ -1381,7 +1453,7 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
     const result=await executarGithubPublish({sourceOwner:owner,sourceRepoName:repo,fileBuffer:req.file.buffer,original,body:req.body||{},usuario:req.usuario,ip:req.ip,requestId:req.requestId})
     res.status(201).json(result)
   }catch(err){
-    const msg=err.status===403 ? 'GitHub recusou a gravação. Confira Contents: Read and write para o token salvo em Integrações e APIs.' : err.message
+    const msg=githubPublishErrorMessage(err)
     res.status(err.status||500).json({erro:msg,preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined})
   }
 })

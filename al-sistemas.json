@@ -1,6 +1,6 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.128",
+  "version": "1.0.129",
   "packageFormat": 2,
   "changelog": [
     "Atualizações passam a usar um wizard centralizado em cinco etapas: Pacote, Revisão, Proteção, Instalação e Concluído, com navegação fixa e visual compatível com todos os temas.",

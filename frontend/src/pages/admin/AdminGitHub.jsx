@@ -1388,7 +1388,8 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
       <div className="al-wizard-info-grid gh-finish-grid">
         <WizardInfo label="Commit" value={resultado.commit?.commitSha?.slice(0,10) || 'Sem alteração'} help={resultado.commit?.verified ? 'Verificado no GitHub ✓' : ''} />
         <WizardInfo label="Pacote" value={`${resultado.pacote?.arquivos || 0} arquivo(s)`} help={fmtBytes(resultado.pacote?.bytes || 0)} />
-        <WizardInfo label="Enviados" value={`${resultado.commit?.enviados || 0}`} help="blobs preparados" />
+        <WizardInfo label="Alterados" value={`${resultado.commit?.enviados || 0}`} help={`${resultado.commit?.inlineTree || 0} na árvore · ${resultado.commit?.blobsCriados || 0} blob(s)`} />
+        <WizardInfo label="Inalterados" value={`${resultado.commit?.inalterados || 0}`} help="reutilizados sem novo upload" />
         <WizardInfo label="Removidos" value={`${resultado.commit?.removidos || 0}`} help={replacePath?'modo substituir':'nenhum pelo modo mesclar'} />
         <WizardInfo label="R2" value={resultado.snapshot ? 'Snapshot ✓' : 'Não usado'} />
         <WizardInfo label="Vercel" value={deployment?.vercel?.projects?.length ? `${deployment.vercel.projects.length} vínculo(s)` : 'Não vinculado'} />

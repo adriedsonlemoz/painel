@@ -48,6 +48,15 @@ export async function githubFetch(apiPath, options = {}) {
   if (!res.ok) {
     const err = new Error(data.message || `GitHub API error ${res.status}`)
     err.status = res.status
+    err.githubPath = apiPath
+    err.githubMethod = String(options.method || 'GET').toUpperCase()
+    err.githubErrors = Array.isArray(data.errors) ? data.errors : []
+    err.githubDocumentationUrl = data.documentation_url || null
+    err.githubRequestId = res.headers.get('x-github-request-id') || null
+    err.retryAfter = Number(res.headers.get('retry-after') || 0) || null
+    err.rateLimitRemaining = Number(res.headers.get('x-ratelimit-remaining') ?? NaN)
+    err.rateLimitReset = Number(res.headers.get('x-ratelimit-reset') || 0) || null
+    err.acceptedPermissions = res.headers.get('x-accepted-github-permissions') || null
     throw err
   }
 
