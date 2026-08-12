@@ -1,7 +1,7 @@
 {
   "name": "al-sistemas",
   "private": true,
-  "version": "1.0.126",
+  "version": "1.0.127",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "lint": "eslint src/**/*.{js,jsx}",
     "format": "prettier --write src/**/*.{js,jsx}",
     "check:effects": "node scripts/check-effects.mjs",
-    "build:warm": "vite build && node scripts/warm-vite-cache.mjs"
+    "build:warm": "vite build && node scripts/warm-vite-cache.mjs",
+    "check:themes": "node scripts/check-themes.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -564,17 +564,17 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
     zip:    { icon: '📤', label: 'Enviando ZIP',             cor: '#3b82f6' },
     extrai: { icon: '📦', label: 'Extraindo arquivos',       cor: '#8b5cf6' },
     limpa:  { icon: '🧹', label: 'Substituindo versão anterior', cor: '#f97316' },
-    gridfs: { icon: '🗄️', label: 'Gravando no GridFS',       cor: '#22c55e' },
+    gridfs: { icon: '🗄️', label: 'Gravando no GridFS',       cor: 'var(--adm-success)' },
     meta:   { icon: '📋', label: 'Salvando metadados',       cor: '#06b6d4' },
-    ok:     { icon: '✅', label: 'Concluído',                 cor: '#22c55e' },
-    erro:   { icon: '❌', label: 'Erro',                      cor: '#ef4444' },
+    ok:     { icon: '✅', label: 'Concluído',                 cor: 'var(--adm-success)' },
+    erro:   { icon: '❌', label: 'Erro',                      cor: 'var(--adm-red)' },
   }
-  const GFS_GREEN = '#22c55e'
+  const GFS_GREEN = 'var(--adm-success)'
 
   return (
     <div style={{
       position:'fixed', inset:0, zIndex:1000,
-      background:'#00000077', display:'flex', alignItems:'center', justifyContent:'center',
+      background:'var(--adm-overlay)', display:'flex', alignItems:'center', justifyContent:'center',
     }} onClick={e => e.target === e.currentTarget && !enviando && onClose()}>
       <div style={{
         background:C.surface, border:`1px solid ${C.border}`,
@@ -701,8 +701,8 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
               <div style={{
                 height:'100%', borderRadius:RADIUS.xs, width:`${pct}%`,
                 background: etapa === 'ok'
-                  ? '#22c55e'
-                  : `linear-gradient(90deg, #22c55e, #06b6d4)`,
+                  ? 'var(--adm-success)'
+                  : `linear-gradient(90deg, var(--adm-success), #06b6d4)`,
                 transition:'width .5s ease',
               }} />
             </div>
@@ -756,9 +756,9 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
                 style={{
                   display:'flex', alignItems:'center', justifyContent:'center', gap:8,
                   padding:'10px 16px', borderRadius:RADIUS.md,
-                  background:'#16a34a', border:'none', cursor:'pointer',
+                  background:'var(--adm-success)', border:'none', cursor:'pointer',
                   color:'#fff', fontWeight:700, fontSize:FONT.base,
-                  boxShadow:'0 4px 14px #16a34a40',
+                  boxShadow:'0 4px 14px color-mix(in srgb,var(--adm-success) 25%,transparent)',
                   transition:'opacity .15s',
                 }}
               >
@@ -780,8 +780,8 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
         {erro && (
           <div style={{
             padding:`${SPACE.sm}px ${SPACE.md}px`, borderRadius:RADIUS.md,
-            background:`#ef444412`, border:`1px solid #ef444430`,
-            color:'#ef4444', fontSize:FONT.sm,
+            background:`color-mix(in srgb,var(--adm-red) 7%,transparent)`, border:`1px solid color-mix(in srgb,var(--adm-red) 19%,transparent)`,
+            color:'var(--adm-red)', fontSize:FONT.sm,
           }}>{erro}</div>
         )}
 
@@ -1169,12 +1169,12 @@ function ExploradorGridFS({ projeto, onFechar }) {
 ════════════════════════════════════════════════════════════════ */
 
 const GH_STATUS = {
-  em_dia:        { emoji: '🟢', label: 'Em dia',            cor: '#22c55e' },
-  github_frente: { emoji: '🔴', label: 'GitHub mais novo',  cor: '#ef4444' },
-  deploy_frente: { emoji: '🟡', label: 'Deploy mais novo',  cor: '#eab308' },
-  sem_vinculo:   { emoji: '⬛', label: 'Sem GitHub',         cor: '#6b7280' },
+  em_dia:        { emoji: '🟢', label: 'Em dia',            cor: 'var(--adm-success)' },
+  github_frente: { emoji: '🔴', label: 'GitHub mais novo',  cor: 'var(--adm-red)' },
+  deploy_frente: { emoji: '🟡', label: 'Deploy mais novo',  cor: 'var(--adm-amber)' },
+  sem_vinculo:   { emoji: '⬛', label: 'Sem GitHub',         cor: 'var(--adm-muted)' },
   sem_token:     { emoji: '🔑', label: 'Sem token GitHub',  cor: '#f97316' },
-  sem_dados:     { emoji: '❓', label: 'Sem dados',          cor: '#9ca3af' },
+  sem_dados:     { emoji: '❓', label: 'Sem dados',          cor: 'var(--adm-subtle)' },
   erro:          { emoji: '⚠️', label: 'Erro',              cor: '#f97316' },
 }
 
@@ -1229,7 +1229,7 @@ function GitHubBadge({ nome, uploadedAt }) {
 
   if (!uploadedAt) return null
   if (!status) return (
-    <span style={{ fontSize: 10, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 3 }}>
+    <span style={{ fontSize: 10, color: 'var(--adm-subtle)', display: 'flex', alignItems: 'center', gap: 3 }}>
       <AdminIcon name="spinSm" size={10} /> GitHub
     </span>
   )
@@ -1413,15 +1413,15 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
     extrai: { icon: '📦', label: 'Extraindo arquivos',    cor: '#8b5cf6' },
     limpa:  { icon: '🧹', label: 'Limpando versão antiga',cor: '#f97316' },
     r2:     { icon: '☁️', label: 'Publicando no R2',      cor: CF_ORANGE },
-    ok:     { icon: '✅', label: 'Concluído',              cor: '#22c55e' },
-    erro:   { icon: '❌', label: 'Erro',                   cor: '#ef4444' },
+    ok:     { icon: '✅', label: 'Concluído',              cor: 'var(--adm-success)' },
+    erro:   { icon: '❌', label: 'Erro',                   cor: 'var(--adm-red)' },
   }
   const meta = etapa ? (ETAPAS[etapa] || ETAPAS.r2) : null
 
   return (
     <div style={{
       position:'fixed', inset:0, zIndex:1000,
-      background:'#00000077', display:'flex', alignItems:'center', justifyContent:'center',
+      background:'var(--adm-overlay)', display:'flex', alignItems:'center', justifyContent:'center',
     }} onClick={e => e.target === e.currentTarget && !enviando && onClose()}>
       <div style={{
         background:C.surface, border:`1px solid ${C.border}`,
@@ -1536,7 +1536,7 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
               <div style={{
                 height:'100%', borderRadius:RADIUS.xs, width:`${pct}%`,
                 background: etapa === 'ok'
-                  ? '#22c55e'
+                  ? 'var(--adm-success)'
                   : `linear-gradient(90deg, ${CF_ORANGE}, #f59e0b)`,
                 transition:'width .5s ease',
               }} />
@@ -1548,8 +1548,8 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
         {erro && (
           <div style={{
             padding:`${SPACE.sm}px ${SPACE.md}px`, borderRadius:RADIUS.md,
-            background:`#ef444412`, border:`1px solid #ef444430`,
-            color:'#ef4444', fontSize:FONT.sm,
+            background:`color-mix(in srgb,var(--adm-red) 7%,transparent)`, border:`1px solid color-mix(in srgb,var(--adm-red) 19%,transparent)`,
+            color:'var(--adm-red)', fontSize:FONT.sm,
           }}>{erro}</div>
         )}
 
@@ -1792,9 +1792,9 @@ function TestarR2() {
         style={{
           fontSize: FONT.xs, padding:'4px 12px', display:'flex', alignItems:'center', gap:6,
           border: dados
-            ? `1px solid ${dados.ok ? '#22c55e55' : '#ef444455'}`
+            ? `1px solid ${dados.ok ? 'color-mix(in srgb,var(--adm-success) 33%,transparent)' : 'color-mix(in srgb,var(--adm-red) 33%,transparent)'}`
             : `1px solid ${C.border}`,
-          color: dados ? (dados.ok ? '#22c55e' : '#ef4444') : C.muted,
+          color: dados ? (dados.ok ? 'var(--adm-success)' : 'var(--adm-red)') : C.muted,
         }}
       >
         {loading
@@ -1826,7 +1826,7 @@ function TestarR2() {
             zIndex:201,
             width:'min(420px, 92vw)',
             background:C.surface,
-            border:`1.5px solid ${dados.ok ? '#22c55e44' : '#ef444444'}`,
+            border:`1.5px solid ${dados.ok ? 'color-mix(in srgb,var(--adm-success) 27%,transparent)' : 'color-mix(in srgb,var(--adm-red) 27%,transparent)'}`,
             borderRadius:RADIUS.xl,
             boxShadow:'0 12px 48px #0005',
             overflow:'hidden',
@@ -1834,12 +1834,12 @@ function TestarR2() {
           {/* Topo com resumo */}
           <div style={{
             padding:`${SPACE.md}px ${SPACE.lg}px`,
-            background: dados.ok ? '#22c55e0a' : '#ef44440a',
+            background: dados.ok ? 'color-mix(in srgb,var(--adm-success) 4%,transparent)' : 'color-mix(in srgb,var(--adm-red) 4%,transparent)',
             borderBottom:`1px solid ${C.border}`,
             display:'flex', alignItems:'center', justifyContent:'space-between',
           }}>
             <div>
-              <div style={{ fontSize:FONT.sm, fontWeight:700, color: dados.ok ? '#22c55e' : '#ef4444' }}>
+              <div style={{ fontSize:FONT.sm, fontWeight:700, color: dados.ok ? 'var(--adm-success)' : 'var(--adm-red)' }}>
                 {dados.ok ? '✅ Conexão R2 funcionando' : '❌ Falha na conexão'}
               </div>
               {dados.ok && (
@@ -1900,13 +1900,13 @@ function TestarR2() {
               padding:`${SPACE.md}px ${SPACE.lg}px`,
               display:'flex', flexDirection:'column', gap:SPACE.sm,
             }}>
-              <div style={{ fontSize:FONT.xs, color:'#ef4444', fontWeight:600 }}>
+              <div style={{ fontSize:FONT.xs, color:'var(--adm-red)', fontWeight:600 }}>
                 {dados.erro}
               </div>
               {dados.detalhe && (
                 <code style={{
-                  fontSize:10, color:'#ef4444', opacity:0.75,
-                  background:'#ef444410', padding:'4px 6px', borderRadius:4,
+                  fontSize:10, color:'var(--adm-red)', opacity:0.75,
+                  background:'color-mix(in srgb,var(--adm-red) 6%,transparent)', padding:'4px 6px', borderRadius:4,
                   display:'block', wordBreak:'break-all',
                 }}>
                   {dados.detalhe.length > 120 ? dados.detalhe.slice(0,120)+'…' : dados.detalhe}
@@ -2229,7 +2229,7 @@ function AbaGridFS() {
       }}>
         <div>
           <div style={{ fontSize: FONT.md, fontWeight: 700, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#22c55e' }}>🗄️</span>
+            <span style={{ color: 'var(--adm-success)' }}>🗄️</span>
             Projetos · GridFS
           </div>
           <div style={{ fontSize: FONT.sm, color: C.muted, marginTop: 2 }}>

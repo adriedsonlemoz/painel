@@ -195,7 +195,7 @@ function ProjetoRow({ projeto }) {
       {projeto.totalAlertas > 0 && (
         <span style={{
           fontSize:FONT.xs, fontWeight:800, color:C.red,
-          background:'#ef444418', borderRadius:RADIUS.lg, padding:'2px 7px',
+          background:'color-mix(in srgb,var(--adm-red) 9%,transparent)', borderRadius:RADIUS.lg, padding:'2px 7px',
         }}>
           {projeto.totalAlertas} alerta{projeto.totalAlertas > 1 ? 's' : ''}
         </span>
@@ -240,8 +240,8 @@ function ChatMessage({ msg }) {
       <div style={{
         maxWidth:'85%', borderRadius: isUser ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
         padding:'10px 14px',
-        background: isUser ? `${cor}22` : isError ? '#ef444418' : C.surf2,
-        border: `1px solid ${isUser ? `${cor}40` : isError ? '#ef444430' : C.border}`,
+        background: isUser ? `${cor}22` : isError ? 'color-mix(in srgb,var(--adm-red) 9%,transparent)' : C.surf2,
+        border: `1px solid ${isUser ? `${cor}40` : isError ? 'color-mix(in srgb,var(--adm-red) 19%,transparent)' : C.border}`,
       }}>
         {!isUser && !isError && (
           <div style={{ fontSize:FONT.xs, fontWeight:700, color:C.accent, marginBottom:SPACE.sm, display:'flex', alignItems:'center', gap:SPACE.sm }}>
@@ -412,7 +412,7 @@ export default function AdminAIAssistant() {
       {/* ── Aviso de erro geral ───────────────────────────────── */}
       {erro && !loading && (
         <div style={{
-          background:'#ef444412', border:'1px solid #ef444430', borderRadius:RADIUS.lg,
+          background:'color-mix(in srgb,var(--adm-red) 7%,transparent)', border:'1px solid color-mix(in srgb,var(--adm-red) 19%,transparent)', borderRadius:RADIUS.lg,
           padding:`${SPACE.lg}px ${SPACE.xl}px`, marginBottom:SPACE.xl, fontSize:FONT.base, color:C.red,
         }}>
           ⚠️ {erro}
@@ -624,7 +624,7 @@ export default function AdminAIAssistant() {
                 {r.totalAlertas > 0 && (
                   <span style={{
                     fontSize:FONT.xs, fontWeight:800, color:C.amber,
-                    background:'#f59e0b18', borderRadius:RADIUS.lg, padding:'2px 7px',
+                    background:'color-mix(in srgb,var(--adm-amber) 9%,transparent)', borderRadius:RADIUS.lg, padding:'2px 7px',
                   }}>
                     {r.totalAlertas}⚠
                   </span>
@@ -657,7 +657,7 @@ export default function AdminAIAssistant() {
 
           {/* Aviso de segurança */}
           <div style={{
-            background:'#3b82f618', border:'1px solid #3b82f630', borderRadius:RADIUS.md,
+            background:'color-mix(in srgb,var(--adm-blue) 9%,transparent)', border:'1px solid color-mix(in srgb,var(--adm-blue) 19%,transparent)', borderRadius:RADIUS.md,
             padding:'8px 12px', marginBottom:SPACE.lg, fontSize:FONT.sm, color:C.blue,
           }}>
             🔒 A IA apenas analisa e sugere. Nenhuma ação é executada automaticamente.
@@ -802,7 +802,7 @@ export default function AdminAIAssistant() {
 
           {syncErro && (
             <div style={{
-              background:'#ef444412', border:'1px solid #ef444430', borderRadius:RADIUS.md,
+              background:'color-mix(in srgb,var(--adm-red) 7%,transparent)', border:'1px solid color-mix(in srgb,var(--adm-red) 19%,transparent)', borderRadius:RADIUS.md,
               padding:'10px 14px', fontSize:FONT.base, color:C.red, marginBottom:SPACE.xl,
             }}>
               ⚠️ {syncErro}

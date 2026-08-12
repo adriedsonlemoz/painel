@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.127 — Unificação visual final do painel
+
+- GitHub deixa o drawer lateral e passa a abrir cada repositório em um workspace centralizado, amplo e responsivo, mantendo a grade de ações em 3 colunas no celular.
+- Integrações e APIs adota `DSPageHeader` e `DSModal`; diagnóstico geral e diagnóstico da IA passam a usar a mesma superfície/overlay dos demais pop-ups.
+- Estados de integração (sucesso, atenção, erro) deixam de usar verdes/âmbares fixos e passam a consumir os tokens semânticos do tema.
+- Cloudflare mantém o laranja somente como identidade do provedor; Explorer e ferramentas avançadas usam `DSModal` e estados de saúde seguem o Design System.
+- Projetos e Deploys, Monitor e Assistente recebem uma varredura de cores estruturais para reduzir inconsistências entre Claro, Escuro, Oceano e Rosa.
+- Design System ganha `--adm-subtle` e `--adm-overlay`, aplicados globalmente a overlays, placeholders, foco, seleção e superfícies legadas.
+- Adiciona `npm run check:themes`, que valida os tokens obrigatórios dos quatro temas e os principais pontos de responsividade.
+
 ## 1.0.126 — Componentes estruturais, Dashboard e módulos compactos
 
 - Amplia o Design System com `DSStatGrid`, `DSStatCard` compacto e `DSActionCard`, permitindo que páginas definam significado sem escolher layout/cor manualmente.

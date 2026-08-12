@@ -23,7 +23,7 @@ const MAX_PONTOS  = 60
 const INTERVALO_PADRAO = 5000
 
 // ── Gráfico de Área SVG ───────────────────────────────────────
-function GraficoArea({ dados = [], cor = '#22c55e', label = '', unidade = '', altura = 80 }) {
+function GraficoArea({ dados = [], cor = 'var(--adm-success)', label = '', unidade = '', altura = 80 }) {
   const largura = 500
 
   if (dados.length < 2) {
@@ -47,7 +47,7 @@ function GraficoArea({ dados = [], cor = '#22c55e', label = '', unidade = '', al
   const ultimo = dados[dados.length - 1]
   const penultimo = dados[dados.length - 2] ?? ultimo
   const tendencia = ultimo > penultimo ? '↑' : ultimo < penultimo ? '↓' : '→'
-  const corTend   = ultimo > penultimo ? C.red : ultimo < penultimo ? '#22c55e' : C.muted
+  const corTend   = ultimo > penultimo ? C.red : ultimo < penultimo ? 'var(--adm-success)' : C.muted
 
   // Linhas de grade: 25%, 50%, 75%
   const grades = [0.25, 0.5, 0.75].map(f => ({
@@ -101,7 +101,7 @@ function GraficoArea({ dados = [], cor = '#22c55e', label = '', unidade = '', al
 }
 
 // ── Card de métrica ao vivo ───────────────────────────────────
-function MetricaCard({ label, valor, unidade = '', cor = '#22c55e', sub, loading }) {
+function MetricaCard({ label, valor, unidade = '', cor = 'var(--adm-success)', sub, loading }) {
   return (
     <div style={{
       background: C.surface, border: `1px solid ${C.border}`,
@@ -227,8 +227,8 @@ export default function AdminMonitor() {
   const serHeap   = snapshots.map(s => s.heapPct)
   const ultimoSnap = snapshots[snapshots.length - 1]
 
-  function corCpu(v)  { return v > 80 ? C.red ?? '#ef4444' : v > 50 ? '#f59e0b' : '#22c55e' }
-  function corMem(v)  { return v > 90 ? '#ef4444' : v > 75 ? '#f59e0b' : '#22c55e' }
+  function corCpu(v)  { return v > 80 ? C.red ?? 'var(--adm-red)' : v > 50 ? 'var(--adm-amber)' : 'var(--adm-success)' }
+  function corMem(v)  { return v > 90 ? 'var(--adm-red)' : v > 75 ? 'var(--adm-amber)' : 'var(--adm-success)' }
 
   function fmtUptime(s) {
     if (s < 60) return `${s}s`
@@ -271,8 +271,8 @@ export default function AdminMonitor() {
           <button onClick={alternarMonitor} style={{
             padding: '6px 16px', borderRadius: RADIUS.md, fontSize: FONT.sm, fontWeight: 700,
             border: 'none', cursor: 'pointer',
-            background: iniciado ? '#ef444418' : '#22c55e18',
-            color: iniciado ? '#ef4444' : '#22c55e',
+            background: iniciado ? 'color-mix(in srgb,var(--adm-red) 9%,transparent)' : 'var(--adm-success)18',
+            color: iniciado ? 'var(--adm-red)' : 'var(--adm-success)',
           }}>
             {coletando ? <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Spin size={12} /> Iniciando…</span>
               : iniciado ? '⏸ Pausar' : '▶ Iniciar'}
@@ -296,7 +296,7 @@ export default function AdminMonitor() {
         ].map(op => (
           <button key={op.ms} onClick={() => mudarIntervalo(op.ms)} style={{
             padding: '3px 12px', borderRadius: RADIUS.pill, cursor: 'pointer', fontSize: FONT.sm,
-            background: intervalo === op.ms ? '#22c55e' : C.border,
+            background: intervalo === op.ms ? 'var(--adm-success)' : C.border,
             color: intervalo === op.ms ? '#fff' : C.text,
             border: 'none', fontWeight: intervalo === op.ms ? 700 : 400,
             transition: 'all .15s',
@@ -305,7 +305,7 @@ export default function AdminMonitor() {
         <span style={{ marginLeft: 'auto', fontSize: FONT.xs, color: C.muted }}>
           Máx. {MAX_PONTOS} pontos · ~{Math.round(MAX_PONTOS * intervalo / 60000)} min de histórico
         </span>
-        <Link to="/admin/sistema" style={{ fontSize: FONT.sm, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
+        <Link to="/admin/sistema" style={{ fontSize: FONT.sm, color: 'var(--adm-blue)', textDecoration: 'none', fontWeight: 600 }}>
           Ver detalhes →
         </Link>
       </div>
@@ -327,7 +327,7 @@ export default function AdminMonitor() {
           <button onClick={alternarMonitor} style={{
             padding: '10px 28px', borderRadius: RADIUS.lg, fontSize: FONT.md, fontWeight: 700,
             border: 'none', cursor: 'pointer',
-            background: '#22c55e', color: '#fff',
+            background: 'var(--adm-success)', color: '#fff',
           }}>
             ▶ Iniciar Monitoramento
           </button>
@@ -364,7 +364,7 @@ export default function AdminMonitor() {
             <MetricaCard
               label="Erros (total)"
               valor={logs.contagemErros?.total ?? '—'}
-              cor={logs.contagemErros?.nao_lidos > 0 ? '#ef4444' : '#22c55e'}
+              cor={logs.contagemErros?.nao_lidos > 0 ? 'var(--adm-red)' : 'var(--adm-success)'}
               sub={logs.contagemErros?.nao_lidos > 0 ? `${logs.contagemErros.nao_lidos} não lidos` : 'todos lidos'}
             />
           </div>
@@ -397,7 +397,7 @@ export default function AdminMonitor() {
               <span style={{ fontSize: FONT.sm, fontWeight: 700, color: C.text, textTransform: 'uppercase', letterSpacing: '.07em' }}>
                 Erros Recentes
               </span>
-              <Link to="/admin/erros" style={{ fontSize: FONT.sm, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
+              <Link to="/admin/erros" style={{ fontSize: FONT.sm, color: 'var(--adm-blue)', textDecoration: 'none', fontWeight: 600 }}>
                 Ver todos →
               </Link>
             </div>
@@ -409,7 +409,7 @@ export default function AdminMonitor() {
                     const diff = Date.now() - new Date(e.criado_em).getTime()
                     const m = Math.floor(diff / 60000)
                     const tempo = m < 1 ? 'agora' : m < 60 ? `${m}min` : `${Math.floor(m / 60)}h`
-                    const corMap = { render: '#ef4444', js_error: '#f59e0b', unhandled_rejection: '#8b5cf6', api: '#2563eb' }
+                    const corMap = { render: 'var(--adm-red)', js_error: 'var(--adm-amber)', unhandled_rejection: '#8b5cf6', api: 'var(--adm-blue)' }
                     const cor = corMap[e.tipo] || C.muted
                     return (
                       <EventoRow

@@ -1,14 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.126",
+  "version": "1.0.127",
   "packageFormat": 2,
   "changelog": [
-    "Design System recebe grade de métricas configurável, cards compactos e ActionCard reutilizável; confirmações globais passam a usar o mesmo DSModal tematizado.",
-    "Dashboard deixa de usar trilhos e acentos arbitrários, usa o nome do portal e passa a trabalhar somente com cores do tema e estados semânticos.",
-    "Usuários e acessos ganha métricas compactas, filtros na cor do tema, confirmação padronizada e reduz o uso estrutural das cores de perfil.",
-    "Backup fica mais compacto: resumo em três métricas, coleções recolhíveis e criação/importação lado a lado no desktop.",
-    "Ônibus e Eventos usam três métricas na mesma linha inclusive no celular, cabeçalhos padronizados e listas com espaçamento mobile reduzido.",
-    "Tokens de sucesso passam a fazer parte de todos os temas para manter estados legíveis em Claro, Escuro, Oceano e Rosa."
+    "GitHub abre o repositório em um workspace centralizado e tematizado; comandos, arquivos e publicação preservam a grade compacta no celular.",
+    "Integrações e APIs passa a usar cabeçalho e modais do Design System; diagnóstico geral e diagnóstico de IA ficam centralizados e as cores de estado seguem os tokens do tema.",
+    "Cloudflare mantém o laranja apenas como identidade do provedor e migra Explorer e ferramentas avançadas para DSModal, com overlays consistentes em todos os temas.",
+    "Projetos e Deploys, Monitor e Assistente recebem uma varredura de cores estruturais/semânticas para remover verdes, azuis e vermelhos fixos que quebravam Oceano e Rosa.",
+    "Tokens globais ganham --adm-subtle e --adm-overlay; superfícies, foco, inputs e seleção passam a herdar o tema também em páginas legadas.",
+    "Adicionado check:themes para validar Claro, Escuro, Oceano e Rosa e os principais marcadores de responsividade antes do build."
   ],
   "updatePackages": {
     "full": true,

@@ -54,7 +54,7 @@ const text = {
   /** Texto secundário / labels */
   muted:     'var(--adm-muted,    #78716c)',
   /** Texto terciário / placeholders */
-  subtle:    '#94a3b8',
+  subtle:    'var(--adm-subtle,  #94a3b8)',
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -75,19 +75,19 @@ const accent = {
 const status = {
   /** Erro / destrutivo */
   red:       'var(--adm-red,      #dc2626)',
-  redBg:     'rgba(220,38,38,.10)',
-  redBorder: 'rgba(220,38,38,.20)',
+  redBg:     'color-mix(in srgb,var(--adm-red,#dc2626) 10%,transparent)',
+  redBorder: 'color-mix(in srgb,var(--adm-red,#dc2626) 20%,transparent)',
   redDim:    '#7f1d1d',
 
   /** Atenção / alerta */
   amber:     'var(--adm-amber,    #d97706)',
-  amberBg:   'rgba(217,119,6,.10)',
-  amberBorder:'rgba(217,119,6,.20)',
+  amberBg:   'color-mix(in srgb,var(--adm-amber,#d97706) 10%,transparent)',
+  amberBorder:'color-mix(in srgb,var(--adm-amber,#d97706) 20%,transparent)',
 
   /** Informação / ação */
   blue:      'var(--adm-blue,     #2563eb)',
-  blueBg:    'rgba(37,99,235,.10)',
-  blueBorder:'rgba(37,99,235,.20)',
+  blueBg:    'color-mix(in srgb,var(--adm-blue,#2563eb) 10%,transparent)',
+  blueBorder:'color-mix(in srgb,var(--adm-blue,#2563eb) 20%,transparent)',
 
   /** Sucesso */
   greenSolid:'var(--adm-success, #22c55e)',

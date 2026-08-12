@@ -467,7 +467,7 @@ export function DSModal({ open, onClose, title, children, footer, size = 'md' })
       role="presentation"
       style={{
         position: 'fixed', inset: 0, zIndex: 1200,
-        background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(2px)',
+        background: 'var(--adm-overlay, rgba(0,0,0,.45))', backdropFilter: 'blur(2px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: SPACE.xl,
       }}
