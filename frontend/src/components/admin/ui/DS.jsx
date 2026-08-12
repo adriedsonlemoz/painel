@@ -458,7 +458,7 @@ export function DSModal({ open, onClose, title, children, footer, size = 'md' })
     if (e.target === e.currentTarget) onClose?.()
   }
 
-  const portalTarget = document.querySelector('.admin-shell') || document.body
+  const portalTarget = document.body
 
   return createPortal(
     <div
@@ -529,13 +529,32 @@ export function DSModal({ open, onClose, title, children, footer, size = 'md' })
  * <DSStatCard icon={<UsersIcon />} label="Usuários" value={2481} accent={T.blue}
  *   sub="↑ 12 este mês" loading={isLoading} />
  */
-export function DSStatCard({ icon, label, value, sub, accent, loading }) {
-  const ac = accent || T.accent
+export function DSStatGrid({ children, columns = 4, mobileColumns = 2, compact = false, className = '', style }) {
   return (
-    <div className="adm-stat-card">
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: ac, borderRadius: `${RADIUS.lg}px ${RADIUS.lg}px 0 0` }} />
+    <div
+      className={`adm-stats-grid${compact ? ' adm-stats-grid-compact' : ''} ${className}`}
+      style={{ '--adm-stat-cols': columns, '--adm-stat-mobile-cols': mobileColumns, ...style }}
+    >
+      {children}
+    </div>
+  )
+}
+
+export function DSStatCard({ icon, label, value, sub, accent, tone = 'accent', loading, compact = false }) {
+  const tones = {
+    accent: T.accent,
+    success: T.greenSolid,
+    warning: T.amber,
+    danger: T.red,
+    info: T.blue,
+    neutral: T.muted,
+  }
+  const ac = accent || tones[tone] || T.accent
+  return (
+    <div className={`adm-stat-card${compact ? ' adm-stat-card-compact' : ''}`} style={{ '--adm-stat-accent': ac }}>
+      <div className="adm-stat-rail" />
       <div className="adm-stat-card-row">
-        <div className="adm-stat-icon" style={{ background: `${ac}22`, color: ac }}>{icon}</div>
+        {icon && <div className="adm-stat-icon">{icon}</div>}
         <span className="adm-stat-label">{label}</span>
       </div>
       <div className="adm-stat-value">
@@ -545,6 +564,27 @@ export function DSStatCard({ icon, label, value, sub, accent, loading }) {
       </div>
       {sub && <div className="adm-stat-delta neutral">{sub}</div>}
     </div>
+  )
+}
+
+/**
+ * DSActionCard — ação navegável/clicável com hierarquia visual única.
+ * Ideal para centrais (GitHub, Integrações, Conteúdo, Sistema).
+ */
+export function DSActionCard({ icon, title, desc, meta, badge, onClick, href, children, className = '' }) {
+  const Tag = href ? 'a' : onClick ? 'button' : 'div'
+  const props = href ? { href } : onClick ? { type: 'button', onClick } : {}
+  return (
+    <Tag className={`adm-action-card ${className}`} {...props}>
+      {icon && <span className="adm-action-card-icon">{icon}</span>}
+      <span className="adm-action-card-copy">
+        <span className="adm-action-card-title">{title}</span>
+        {desc && <span className="adm-action-card-desc">{desc}</span>}
+        {meta && <span className="adm-action-card-meta">{meta}</span>}
+      </span>
+      {badge && <span className="adm-action-card-badge">{badge}</span>}
+      {children}
+    </Tag>
   )
 }
 

@@ -40,3 +40,12 @@
 
 ## Descrição do GitHub (até 350 caracteres)
 AL Sistemas é uma plataforma modular de gerenciamento com integrações seguras, automações, administração de projetos, monitoramento, backups e inteligência artificial. Centraliza APIs, credenciais criptografadas e diagnósticos em uma interface moderna, responsiva e preparada para expansão.
+
+## Reforma visual 1.0.126
+- Design System ampliado com `DSStatGrid`, `DSStatCard` compacto e `DSActionCard`.
+- `ConfirmModal` global foi refeito em cima de `DSModal`, portanto confirmações passam a respeitar tema e centralização.
+- Dashboard removeu acentos estruturais arbitrários e usa o branding do portal + estados semânticos.
+- Usuários recebeu métricas compactas, filtros na cor do tema e melhor distribuição das ações no mobile.
+- Backup agora prioriza resumo, deixa coleções recolhíveis e organiza criar/importar em layout responsivo.
+- Ônibus e Eventos exibem três métricas compactas lado a lado no celular e usam cabeçalhos do Design System.
+- Claro, Escuro, Oceano e Rosa agora fornecem `--adm-success` como token semântico.

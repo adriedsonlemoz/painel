@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.126 — Componentes estruturais, Dashboard e módulos compactos
+
+- Amplia o Design System com `DSStatGrid`, `DSStatCard` compacto e `DSActionCard`, permitindo que páginas definam significado sem escolher layout/cor manualmente.
+- `ConfirmModal` global passa a reutilizar `DSModal`, eliminando o popup branco/Tailwind que ignorava os temas do painel.
+- Dashboard passa a usar o nome configurado do portal, métricas do Design System e apenas acentos do tema/estados semânticos, removendo trilhos roxo, ciano e azul arbitrários.
+- Usuários e acessos recebe cabeçalho/abas padronizados, cinco métricas compactas, filtros com a cor do tema e confirmação de exclusão centralizada.
+- A cor configurável do Perfil continua como metadado visual, mas deixa de controlar a estrutura principal do card de usuário.
+- Backup deixa de exibir uma grande grade de coleções: mostra Documentos, Coleções e Backups em resumo compacto; detalhes ficam recolhíveis. Criação e importação usam duas colunas no desktop e uma no celular.
+- Ônibus e Eventos passam a exibir três métricas compactas lado a lado também no celular, reduzindo fortemente a rolagem inicial.
+- Pesquisa de ônibus é incorporada a uma barra compacta e as listas de Ônibus/Eventos ganham espaçamento responsivo menor.
+- Todos os temas passam a fornecer token semântico de sucesso (`--adm-success`).
+
+## 1.0.125 — Fundação visual, branding e login
+
+- Centraliza a identidade pública em `BrandingContext`: nome do portal, título, favicon e demais dados passam a vir da configuração pública já usada pelo site.
+- Login deixa de exibir `SaaS Admin` e passa a mostrar o nome real do portal com o subtítulo **Painel administrativo**.
+- Títulos das páginas administrativas passam a seguir `Página | Nome do portal`, preservando **AL Sistemas** apenas como nome técnico do produto.
+- `ThemeProvider` passa a envolver toda a experiência e publica os tokens no `:root`, fazendo login, toasts, modais e portals respeitarem Claro, Escuro, Oceano e Rosa.
+- Aviso global de nova versão do Service Worker passa para um componente React tematizado e é posicionado para não cobrir os campos do login no teclado móvel.
+- `DSModal` passa a renderizar no `body` e permanece centralizado também no celular; a confirmação de logout já usa esse padrão.
+- Tela de login é reconstruída com superfícies, bordas, foco, botões e diagnóstico compatíveis com o Design System; o diagnóstico fica fechado por padrão e mantém o probe leve de conectividade.
+- Experiência global de erro e detalhes técnicos passa a consumir os tokens do tema.
+
 ## 1.0.124 — Integrações e Cloudflare Explorer
 
 - Redesenha os cards de Integrações e APIs no padrão visual da Central de Atualizações e mantém os modais centralizados também no celular.

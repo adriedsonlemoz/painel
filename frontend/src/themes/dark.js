@@ -21,6 +21,7 @@ const darkTheme = {
     '--adm-red':       '#ef4444',
     '--adm-amber':     '#f59e0b',
     '--adm-blue':      '#3b82f6',
+    '--adm-success':   '#22c55e',
     '--adm-topnav-bg': '#18181b',
     '--adm-shadow':    '0 1px 3px rgba(0,0,0,.4)',
     '--adm-shadow-md': '0 4px 12px rgba(0,0,0,.5)',

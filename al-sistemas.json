@@ -1,13 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.124",
+  "version": "1.0.126",
   "packageFormat": 2,
   "changelog": [
-    "GitHub Publicar ganha verificação obrigatória antes do upload e pós-checagem do commit na branch.",
-    "Publicação passa a exibir log real por etapa, progresso do job e resultado final verificável.",
-    "Versões do projeto são comparadas como atual → enviada; frontend/backend divergentes no ZIP bloqueiam o envio.",
-    "Explorer de arquivos ganha seleção múltipla, exclusão em lote ou total em um único commit e layout mais compacto.",
-    "Detalhes mostram SHA, última alteração, autor, data, tipo, tamanho e prévia de arquivos de texto."
+    "Design System recebe grade de métricas configurável, cards compactos e ActionCard reutilizável; confirmações globais passam a usar o mesmo DSModal tematizado.",
+    "Dashboard deixa de usar trilhos e acentos arbitrários, usa o nome do portal e passa a trabalhar somente com cores do tema e estados semânticos.",
+    "Usuários e acessos ganha métricas compactas, filtros na cor do tema, confirmação padronizada e reduz o uso estrutural das cores de perfil.",
+    "Backup fica mais compacto: resumo em três métricas, coleções recolhíveis e criação/importação lado a lado no desktop.",
+    "Ônibus e Eventos usam três métricas na mesma linha inclusive no celular, cabeçalhos padronizados e listas com espaçamento mobile reduzido.",
+    "Tokens de sucesso passam a fazer parte de todos os temas para manter estados legíveis em Claro, Escuro, Oceano e Rosa."
   ],
   "updatePackages": {
     "full": true,

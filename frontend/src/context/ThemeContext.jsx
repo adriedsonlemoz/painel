@@ -2,17 +2,21 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { TEMAS_MAP, TEMA_PADRAO_ID } from '../themes'
 
 const STORAGE_KEY = 'alsistemas_adm_tema'
-
 const ThemeContext = createContext(null)
 
 /**
- * Aplica as variáveis CSS no elemento .admin-shell.
- * As vars são definidas lá no CSS, então precisamos sobrescrever no mesmo elemento
- * para ter especificidade igual (inline style > class style).
+ * Aplica os tokens no nível raiz. Isso faz com que login, toasts, portals,
+ * modais e qualquer overlay montado diretamente em document.body usem o
+ * mesmo tema do painel. O .admin-shell continua recebendo as vars por
+ * compatibilidade com estilos antigos.
  */
-function aplicarVars(vars) {
-  const shell = document.querySelector('.admin-shell') ?? document.documentElement
-  Object.entries(vars).forEach(([k, v]) => shell.style.setProperty(k, v))
+function aplicarVars(vars, temaId) {
+  if (typeof document === 'undefined') return
+  const targets = [document.documentElement, document.querySelector('.admin-shell')].filter(Boolean)
+  targets.forEach(target => {
+    Object.entries(vars).forEach(([k, v]) => target.style.setProperty(k, v))
+  })
+  document.documentElement.setAttribute('data-adm-tema', temaId)
 }
 
 export function ThemeProvider({ children }) {
@@ -23,12 +27,10 @@ export function ThemeProvider({ children }) {
   const tema = TEMAS_MAP[temaId] ?? TEMAS_MAP[TEMA_PADRAO_ID]
 
   useEffect(() => {
-    // Tenta aplicar imediatamente e re-tenta após render (caso .admin-shell ainda não exista no DOM)
-    aplicarVars(tema.vars)
-    document.documentElement.setAttribute('data-adm-tema', temaId)
-
-    // Re-aplica após um tick para garantir que .admin-shell já está montado
-    const t = setTimeout(() => aplicarVars(tema.vars), 0)
+    aplicarVars(tema.vars, temaId)
+    // Reaplica após a montagem para páginas antigas que ainda dependem de
+    // variáveis inline no .admin-shell.
+    const t = setTimeout(() => aplicarVars(tema.vars, temaId), 0)
     return () => clearTimeout(t)
   }, [tema, temaId])
 

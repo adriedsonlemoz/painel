@@ -3,6 +3,11 @@ import { api } from './http.js'
 let cache = null
 let pending = null
 
+function emitBranding(config = null) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('alsistemas:branding-refresh', { detail: { config } }))
+}
+
 async function listar(force = false) {
   if (!force && cache) return cache
   if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG__) {
@@ -28,6 +33,7 @@ function sincronizarPublicConfig(data = {}) {
     window.__AL_PUBLIC_CONFIG__ = cache
     window.__AL_PUBLIC_CONFIG_PROMISE__ = Promise.resolve(cache)
   }
+  emitBranding(cache)
   return cache
 }
 
@@ -38,11 +44,13 @@ export const configuracoesService = {
   async atualizar(chave, valor) {
     const out = await api(`/configuracoes/${chave}`, { method: 'PUT', body: JSON.stringify({ valor }) })
     invalidar()
+    emitBranding()
     return out
   },
   async atualizarLote(pares) {
     const out = await api('/configuracoes-lote', { method: 'PUT', body: JSON.stringify({ pares }) })
     invalidar()
+    emitBranding()
     return out
   },
   async listarSEO() { return api('/seo-configuracoes') },

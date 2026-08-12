@@ -90,9 +90,9 @@ const status = {
   blueBorder:'rgba(37,99,235,.20)',
 
   /** Sucesso */
-  greenSolid:'#22c55e',
-  greenBg:   'rgba(34,197,94,.10)',
-  greenBorder:'rgba(34,197,94,.20)',
+  greenSolid:'var(--adm-success, #22c55e)',
+  greenBg:   'color-mix(in srgb,var(--adm-success,#22c55e) 10%,transparent)',
+  greenBorder:'color-mix(in srgb,var(--adm-success,#22c55e) 20%,transparent)',
 }
 
 // ─────────────────────────────────────────────────────────────────

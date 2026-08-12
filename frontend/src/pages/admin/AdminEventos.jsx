@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal } from '../../components/admin/ui/DS'
+import { DSModal, DSPageHeader, DSStatGrid, DSStatCard, DSBtn } from '../../components/admin/ui/DS'
 import { Calendar, CheckCircle2, Clock, Edit2, Eye, EyeOff, MapPin, Plus, Save, Tag, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ConfirmModal from '../../components/ConfirmModal'
@@ -12,7 +12,7 @@ const CORES = ['#1B5E3B','#1565C0','#C62828','#6A1B9A','#E65100','#F57F17','#006
 const TIPO_ENTRADA_LABELS = { gratuito: 'Gratuito', pago: 'Pago', doacoes: 'Aceita doações' }
 
 function tipoEntradaCor(tipo) {
-  return tipo === 'pago' ? C.red : tipo === 'doacoes' ? C.amber : C.greenDk
+  return tipo === 'pago' ? C.red : tipo === 'doacoes' ? C.amber : C.greenSolid
 }
 
 function toInputDate(dataStr) {
@@ -110,7 +110,7 @@ function EventoItem({ evento, passado, onEdit, onDelete }) {
   return (
     <div style={{ display:'flex', alignItems:'stretch', overflow:'hidden', marginBottom:10, border:'1px solid var(--adm-border)', borderRadius:RADIUS.xl, background:'var(--adm-surface2)', opacity:passado?.72:1 }}>
       <div style={{ width:66, flexShrink:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', borderRight:`3px solid ${cor}`, background:`${cor}12` }}><strong style={{ fontSize:22,lineHeight:1,color:'var(--adm-text)' }}>{data.getDate()}</strong><span style={{ marginTop:3,fontSize:10,fontWeight:800,textTransform:'uppercase',color:'var(--adm-muted)' }}>{data.toLocaleDateString('pt-BR',{month:'short'}).replace('.','')}</span></div>
-      <div style={{ minWidth:0, flex:1, padding:'11px 14px' }}><div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}><strong style={{ color:'var(--adm-text)',fontSize:FONT.lg }}>{evento.titulo}</strong><span style={{ display:'inline-flex',alignItems:'center',gap:4,padding:'2px 7px',borderRadius:RADIUS.pill,fontSize:FONT.sm,fontWeight:800,color:evento.ativo?C.greenDk:'var(--adm-muted)',background:evento.ativo?C.greenBg:'var(--adm-surface)' }}>{evento.ativo?<Eye size={11}/>:<EyeOff size={11}/>} {evento.ativo?'Publicado':'Oculto'}</span></div><div style={{ display:'flex',gap:10,flexWrap:'wrap',marginTop:5,fontSize:FONT.base,color:'var(--adm-muted)' }}>{evento.horario&&<span style={{display:'flex',gap:4,alignItems:'center'}}><Clock size={11}/>{evento.horario}</span>}{evento.local&&<span style={{display:'flex',gap:4,alignItems:'center'}}><MapPin size={11}/>{evento.local}</span>}<span style={{color:tipoEntradaCor(evento.tipoEntrada||'gratuito'),fontWeight:700}}>{TIPO_ENTRADA_LABELS[evento.tipoEntrada||'gratuito']}</span></div></div>
+      <div style={{ minWidth:0, flex:1, padding:'11px 14px' }}><div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}><strong style={{ color:'var(--adm-text)',fontSize:FONT.lg }}>{evento.titulo}</strong><span style={{ display:'inline-flex',alignItems:'center',gap:4,padding:'2px 7px',borderRadius:RADIUS.pill,fontSize:FONT.sm,fontWeight:800,color:evento.ativo?C.greenSolid:'var(--adm-muted)',background:evento.ativo?C.greenBg:'var(--adm-surface)' }}>{evento.ativo?<Eye size={11}/>:<EyeOff size={11}/>} {evento.ativo?'Publicado':'Oculto'}</span></div><div style={{ display:'flex',gap:10,flexWrap:'wrap',marginTop:5,fontSize:FONT.base,color:'var(--adm-muted)' }}>{evento.horario&&<span style={{display:'flex',gap:4,alignItems:'center'}}><Clock size={11}/>{evento.horario}</span>}{evento.local&&<span style={{display:'flex',gap:4,alignItems:'center'}}><MapPin size={11}/>{evento.local}</span>}<span style={{color:tipoEntradaCor(evento.tipoEntrada||'gratuito'),fontWeight:700}}>{TIPO_ENTRADA_LABELS[evento.tipoEntrada||'gratuito']}</span></div></div>
       <div style={{ display:'flex',gap:4,alignItems:'center',padding:'0 10px' }}><button onClick={onEdit} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" aria-label="Editar"><Edit2 size={15}/></button><button onClick={onDelete} className="adm-btn adm-btn-danger adm-btn-icon adm-btn-sm" aria-label="Excluir"><Trash2 size={15}/></button></div>
     </div>
   )
@@ -130,18 +130,28 @@ export default function AdminEventos() {
 
   return <>
     <ConfirmModal aberto={confirm.aberto} titulo="Excluir evento?" mensagem="Essa ação é permanente e não pode ser desfeita." labelConfirmar="Excluir" carregando={confirm.carregando} onConfirmar={confirmarExclusao} onCancelar={()=>setConfirm({aberto:false,id:null,carregando:false})}/>
-    <div className="adm-page-header"><div><div className="adm-page-title">Agenda de Eventos</div><div className="adm-page-sub">Gerencie a programação exibida no portal</div></div>{!editando&&<div className="adm-page-actions"><button className="adm-btn adm-btn-primary" onClick={()=>{setEditando('novo');setEditEvento(null)}}><Plus size={16} style={{marginRight:6}}/>Novo evento</button></div>}</div>
+    <DSPageHeader
+      title="Agenda de eventos"
+      sub="Gerencie a programação exibida no portal."
+      actions={!editando ? <DSBtn variant="primary" onClick={()=>{setEditando('novo');setEditEvento(null)}}><Plus size={16}/>Novo evento</DSBtn> : null}
+    />
 
     {editando && <DSModal open onClose={()=>{setEditando(null);setEditEvento(null)}} title={editEvento?'Editar evento':'Novo evento'} size="xl"><EventoForm evento={editEvento} onSave={salvar} onCancel={()=>{setEditando(null);setEditEvento(null)}}/></DSModal>}
     <>
-      <div style={{ display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:16 }}>
-        {[['Próximos',stats.proximos,Calendar],['Publicados',stats.publicados,CheckCircle2],['Passados',stats.passados,Clock]].map(([label,value,Icon])=><div key={label} className="adm-card" style={{padding:16,display:'flex',alignItems:'center',gap:12}}><div style={{width:36,height:36,borderRadius:RADIUS.lg,display:'flex',alignItems:'center',justifyContent:'center',background:'var(--adm-surface2)',color:'var(--adm-accent)'}}><Icon size={18}/></div><div><strong style={{display:'block',fontSize:20,color:'var(--adm-text)'}}>{value}</strong><span style={{fontSize:FONT.base,color:'var(--adm-muted)'}}>{label}</span></div></div>)}
-      </div>
-      <div className="adm-card" style={{padding:0,overflow:'hidden'}}>{loading?<div className="adm-empty"><div className="adm-spin"/><p style={{marginTop:14,color:'var(--adm-muted)'}}>Carregando eventos...</p></div>:<div style={{padding:20}}>
+      <DSStatGrid columns={3} mobileColumns={3} compact style={{ marginBottom:12 }}>
+        <DSStatCard compact label="Próximos" value={stats.proximos} icon={<Calendar size={16}/>} />
+        <DSStatCard compact label="Publicados" value={stats.publicados} icon={<CheckCircle2 size={16}/>} tone="success" />
+        <DSStatCard compact label="Passados" value={stats.passados} icon={<Clock size={16}/>} tone="neutral" />
+      </DSStatGrid>
+      <div className="adm-card eventos-list-card" style={{padding:0,overflow:'hidden'}}>{loading?<div className="adm-empty"><div className="adm-spin"/><p style={{marginTop:14,color:'var(--adm-muted)'}}>Carregando eventos...</p></div>:<div className="eventos-list">
         {futuros.length>0&&<section style={{marginBottom:24}}><h3 style={{fontSize:FONT.base,fontWeight:800,color:'var(--adm-muted)',textTransform:'uppercase',letterSpacing:1,margin:'0 0 12px'}}>Próximos eventos ({futuros.length})</h3>{futuros.map(ev=><EventoItem key={ev.id||ev._id} evento={ev} onEdit={()=>editar(ev)} onDelete={()=>setConfirm({aberto:true,id:ev.id||ev._id,carregando:false})}/>)}</section>}
         {passados.length>0&&<section><h3 style={{fontSize:FONT.base,fontWeight:800,color:'var(--adm-muted)',textTransform:'uppercase',letterSpacing:1,margin:'0 0 12px'}}>Eventos passados ({passados.length})</h3>{passados.map(ev=><EventoItem key={ev.id||ev._id} evento={ev} passado onEdit={()=>editar(ev)} onDelete={()=>setConfirm({aberto:true,id:ev.id||ev._id,carregando:false})}/>)}</section>}
         {!futuros.length&&!passados.length&&<div className="adm-empty"><Calendar size={34} style={{opacity:.2,marginBottom:14}}/><p style={{color:'var(--adm-muted)'}}>Nenhum evento cadastrado.</p><button className="adm-btn adm-btn-primary adm-btn-sm" style={{marginTop:14}} onClick={()=>{setEditando('novo');setEditEvento(null)}}><Plus size={14} style={{marginRight:5}}/>Criar primeiro evento</button></div>}
       </div>}</div>
+      <style>{`
+        .eventos-list{padding:16px}
+        @media(max-width:640px){.eventos-list{padding:10px}.eventos-list>section{margin-bottom:18px!important}}
+      `}</style>
     </>
   </>
 }

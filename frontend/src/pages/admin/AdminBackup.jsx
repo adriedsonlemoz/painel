@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { backupService } from '../../services/api'
 import toast from 'react-hot-toast'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal, DSBtn, DSBadge, DSAlert } from '../../components/admin/ui/DS'
+import { DSModal, DSBtn, DSBadge, DSAlert, DSPageHeader, DSStatGrid, DSStatCard } from '../../components/admin/ui/DS'
 
 function fmtBytes(b) {
   if (!b) return '—'
@@ -172,12 +172,10 @@ export default function AdminBackup() {
 
   return (
     <div className="adm-page">
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Backup do Banco de Dados</div>
-          <div className="adm-page-sub">Crie, importe, gerencie e restaure backups completos do MongoDB</div>
-        </div>
-      </div>
+      <DSPageHeader
+        title="Backup do banco"
+        sub="Crie, importe e restaure cópias completas do conteúdo e das configurações."
+      />
 
       {/* Modal — confirmar restore */}
       <DSModal
@@ -215,24 +213,33 @@ export default function AdminBackup() {
         </p>
       </DSModal>
 
-      {/* Stats do banco */}
+      {/* Resumo compacto do banco */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: SPACE.md + 2, marginBottom: SPACE.xl2 }}>
-          {Object.entries(stats.colecoes || {}).map(([col, qtd]) => (
-            <div key={col} className="adm-card" style={{ padding: `14px ${SPACE.lg}px`, textAlign: 'center' }}>
-              <div style={{ fontSize: FONT.xl + 2, fontWeight: 800, color: 'var(--adm-accent)' }}>{qtd}</div>
-              <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginTop: 3, wordBreak: 'break-word' }}>{col}</div>
+        <div style={{ marginBottom: SPACE.xl2 }}>
+          <DSStatGrid columns={3} mobileColumns={3} compact>
+            <DSStatCard compact label="Documentos" value={stats.total_documentos || 0} />
+            <DSStatCard compact label="Coleções" value={Object.keys(stats.colecoes || {}).length} tone="neutral" />
+            <DSStatCard compact label="Backups" value={backups.length} tone={backups.length ? 'success' : 'neutral'} />
+          </DSStatGrid>
+          <details className="adm-card" style={{ marginTop:SPACE.md, overflow:'hidden' }}>
+            <summary style={{ padding:'11px 14px', cursor:'pointer', color:C.muted, fontSize:FONT.base, fontWeight:700 }}>
+              Ver documentos por coleção
+            </summary>
+            <div className="backup-collections-grid" style={{ padding:'0 12px 12px' }}>
+              {Object.entries(stats.colecoes || {}).map(([col, qtd]) => (
+                <div key={col} style={{ minWidth:0, padding:'9px 10px', border:`1px solid ${C.border}`, borderRadius:RADIUS.md, background:C.surface2 }}>
+                  <strong style={{ display:'block', color:C.text, fontSize:FONT.md }}>{qtd}</strong>
+                  <span style={{ display:'block', color:C.muted, fontSize:FONT.xs, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{col}</span>
+                </div>
+              ))}
             </div>
-          ))}
-          <div className="adm-card" style={{ padding: `14px ${SPACE.lg}px`, textAlign: 'center' }}>
-            <div style={{ fontSize: FONT.xl + 2, fontWeight: 800, color: 'var(--adm-text)' }}>{stats.total_documentos}</div>
-            <div style={{ fontSize: FONT.sm, color: 'var(--adm-muted)', marginTop: 3 }}>Total de docs</div>
-          </div>
+          </details>
         </div>
       )}
 
+      <div className="backup-actions-grid">
       {/* Criar novo backup */}
-      <div className="adm-card" style={{ marginBottom: SPACE.lg }}>
+      <div className="adm-card" style={{ padding:SPACE.xl, marginBottom: 0 }}>
         <h2 style={{ fontSize: FONT.lg - 1, fontWeight: 700, color: 'var(--adm-text)', marginBottom: SPACE.lg }}>Criar novo backup</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.md + 2 }}>
           <input
@@ -252,7 +259,7 @@ export default function AdminBackup() {
       </div>
 
       {/* Importar backup */}
-      <div className="adm-card" style={{ marginBottom: SPACE.xl3 }}>
+      <div className="adm-card" style={{ padding:SPACE.xl, marginBottom: 0 }}>
         <h2 style={{ fontSize: FONT.lg - 1, fontWeight: 700, color: 'var(--adm-text)', marginBottom: SPACE.xs }}>Importar backup</h2>
         <p style={{ fontSize: FONT.base, color: 'var(--adm-muted)', marginBottom: SPACE.lg, lineHeight: 1.55 }}>
           Envie um arquivo <code>.json</code> exportado anteriormente para registrá-lo e poder restaurá-lo.
@@ -265,7 +272,7 @@ export default function AdminBackup() {
               borderRadius: RADIUS.md, padding: `14px ${SPACE.xl}px`,
               display: 'flex', alignItems: 'center', gap: SPACE.lg,
               cursor: importando ? 'not-allowed' : 'pointer',
-              background: importArquivo ? 'rgba(99,102,241,.07)' : 'transparent',
+              background: importArquivo ? 'color-mix(in srgb,var(--adm-accent) 7%,transparent)' : 'transparent',
               transition: 'border-color .2s, background .2s',
             }}
           >
@@ -301,8 +308,10 @@ export default function AdminBackup() {
         </div>
       </div>
 
+      </div>
+
       {/* Lista de backups */}
-      <div className="adm-card">
+      <div className="adm-card" style={{ padding:SPACE.xl }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACE.xl }}>
           <h2 style={{ fontSize: FONT.lg - 1, fontWeight: 700, color: 'var(--adm-text)' }}>
             Backups disponíveis{' '}
@@ -349,6 +358,12 @@ export default function AdminBackup() {
         <strong>⚠️ Importante:</strong> Os backups são armazenados no servidor (<code>backend/backups/</code>).
         Para segurança máxima, faça o download regular dos arquivos e guarde em local seguro (nuvem, disco externo, etc.).
       </DSAlert>
+
+      <style>{`
+        .backup-actions-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;align-items:start}
+        .backup-collections-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+        @media(max-width:760px){.backup-actions-grid{grid-template-columns:1fr}.backup-collections-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+      `}</style>
     </div>
   )
 }

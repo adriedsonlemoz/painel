@@ -20,7 +20,7 @@ import ForcaSenha from '../../components/admin/ui/ForcaSenha'
 import AdminIcon from '../../components/admin/ui/AdminIcon'
 import { useUsuarios } from '../../hooks/useUsuarios'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal, DSBtn, DSBadge } from '../../components/admin/ui/DS'
+import { DSModal, DSBtn, DSBadge, DSPageHeader, DSTabs, DSTab, DSStatGrid, DSStatCard } from '../../components/admin/ui/DS'
 
 // ── Helpers ───────────────────────────────────────────────────────
 function relTime(d) {
@@ -62,20 +62,6 @@ function AvatarCircle({ nome, email, cor, size = 38 }) {
       color: cor || '#fff',
     }}>
       {letra}
-    </div>
-  )
-}
-
-function StatCard({ label, value, cor }) {
-  return (
-    <div style={{
-      flex: 1, minWidth: 80,
-      background: C.surface2, border: `1px solid ${C.border}`,
-      borderRadius: RADIUS.lg, padding: `${SPACE.md}px ${SPACE.lg}px`,
-      textAlign: 'center',
-    }}>
-      <div style={{ fontSize: 20, fontWeight: 800, color: cor || C.text }}>{value}</div>
-      <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>{label}</div>
     </div>
   )
 }
@@ -233,12 +219,12 @@ function ModalUsuario({ usuario, perfis, onSalvar, onFechar }) {
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px',
                 borderRadius: RADIUS.md, cursor: 'pointer', fontWeight: 700, fontSize: FONT.sm,
-                background: form.ativo ? '#22c55e18' : `${C.red}18`,
-                border: `1px solid ${form.ativo ? '#22c55e40' : `${C.red}40`}`,
-                color: form.ativo ? '#16a34a' : C.red,
+                background: form.ativo ? 'color-mix(in srgb,var(--adm-success,#22c55e) 10%,transparent)' : `${C.red}18`,
+                border: `1px solid ${form.ativo ? 'color-mix(in srgb,var(--adm-success,#22c55e) 30%,transparent)' : `${C.red}40`}`,
+                color: form.ativo ? 'var(--adm-success,#22c55e)' : C.red,
               }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%',
-                background: form.ativo ? '#22c55e' : C.red, flexShrink: 0 }} />
+                background: form.ativo ? 'var(--adm-success,#22c55e)' : C.red, flexShrink: 0 }} />
               {form.ativo ? 'Ativo' : 'Inativo'}
             </button>
           </div>
@@ -573,86 +559,60 @@ export default function AdminUsuarios() {
           onOk={() => setModalReset(null)} />
       )}
 
-      {/* Modal de exclusão temático */}
-      {excluindo && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1001,
-          background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(2px)' }}>
-          <div style={{ background: C.surface, border: `1px solid ${C.red}40`,
-            borderRadius: RADIUS.xl, padding: SPACE.xl2, width: '100%', maxWidth: 360,
-            display: 'flex', flexDirection: 'column', gap: SPACE.lg,
-            boxShadow: `0 0 0 1px ${C.red}20, 0 16px 40px rgba(0,0,0,.4)` }}>
-            <div style={{ display: 'flex', gap: SPACE.md }}>
-              <div style={{ width: 38, height: 38, borderRadius: RADIUS.lg, flexShrink: 0,
-                background: `${C.red}15`, border: `1px solid ${C.red}30`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <AdminIcon name="trash" size={15} style={{ color: C.red }} />
-              </div>
-              <div>
-                <div style={{ fontSize: FONT.md, fontWeight: 700, color: C.text }}>
-                  Excluir {excluindo.tipo === 'usuario' ? 'usuário' : 'perfil'}
-                </div>
-                <div style={{ fontSize: FONT.sm, color: C.muted, marginTop: 2 }}>
-                  {excluindo.nome || 'Este item'} será removido permanentemente.
-                </div>
-              </div>
-            </div>
-            <div style={{ fontSize: FONT.xs, color: C.red, background: `${C.red}08`,
-              border: `1px solid ${C.red}20`, borderRadius: RADIUS.md, padding: '8px 12px' }}>
-              ⚠ Esta ação não pode ser desfeita.
-            </div>
-            <div style={{ display: 'flex', gap: SPACE.md }}>
-              <DSBtn variant="ghost" style={{ flex: 1 }} onClick={() => setExcluindo(null)}>Cancelar</DSBtn>
-              <DSBtn style={{ flex: 1, background: C.red, borderColor: C.red, color: '#fff', fontWeight: 700 }}
-                onClick={handleExcluir}>
-                <AdminIcon name="trash" size={12} /> Excluir
-              </DSBtn>
-            </div>
-          </div>
+      {/* Modal de exclusão padronizado */}
+      <DSModal
+        open={!!excluindo}
+        onClose={() => setExcluindo(null)}
+        title={`Excluir ${excluindo?.tipo === 'usuario' ? 'usuário' : 'perfil'}?`}
+        size="sm"
+        footer={
+          <>
+            <DSBtn variant="danger" onClick={handleExcluir}>
+              <AdminIcon name="trash" size={12} /> Excluir
+            </DSBtn>
+            <DSBtn onClick={() => setExcluindo(null)}>Cancelar</DSBtn>
+          </>
+        }
+      >
+        <div style={{ display:'grid', gap:SPACE.md }}>
+          <p style={{ margin:0, color:C.text, fontSize:FONT.md }}>
+            <strong>{excluindo?.nome || 'Este item'}</strong> será removido permanentemente.
+          </p>
+          <p style={{ margin:0, color:C.red, fontSize:FONT.base }}>Esta ação não pode ser desfeita.</p>
         </div>
-      )}
+      </DSModal>
 
-      {/* ── Header ─────────────────────────────────────────── */}
-      <div className="adm-page-header">
-        <div>
-          <div className="adm-page-title">Usuários &amp; Perfis</div>
-          <div className="adm-page-sub">
-            {aba === 'usuarios'
-              ? `${stats.ativos} ativo${stats.ativos !== 1 ? 's' : ''} · ${stats.inativos} inativo${stats.inativos !== 1 ? 's' : ''}`
-              : `${perfis.length} perfil${perfis.length !== 1 ? 's' : ''} de acesso`
-            }
-          </div>
-        </div>
-        <DSBtn variant="primary" onClick={() => aba === 'usuarios' ? setModalUsr('novo') : setModalPrf('novo')}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
-          {aba === 'usuarios' ? 'Novo usuário' : 'Novo perfil'}
-        </DSBtn>
-      </div>
-
-      {/* ── Abas ───────────────────────────────────────────── */}
-      <div className="adm-tabs">
-        {[['usuarios', 'Usuários'], ['perfis', 'Perfis de Acesso']].map(([id, label]) => (
-          <button key={id} onClick={() => setAba(id)} className={`adm-tab-btn${aba === id ? ' active' : ''}`}>
-            {label}
-            {id === 'usuarios' && <span style={{ marginLeft: 6, fontSize: FONT.xs, color: C.muted }}>({usuarios.length})</span>}
-            {id === 'perfis'   && <span style={{ marginLeft: 6, fontSize: FONT.xs, color: C.muted }}>({perfis.length})</span>}
-          </button>
-        ))}
-      </div>
+      {/* ── Header + abas ─────────────────────────────────── */}
+      <DSPageHeader
+        title="Usuários e acessos"
+        sub={aba === 'usuarios'
+          ? `${stats.ativos} ativo${stats.ativos !== 1 ? 's' : ''} · ${stats.inativos} inativo${stats.inativos !== 1 ? 's' : ''}`
+          : `${perfis.length} perfil${perfis.length !== 1 ? 's' : ''} de acesso`}
+        actions={
+          <DSBtn variant="primary" onClick={() => aba === 'usuarios' ? setModalUsr('novo') : setModalPrf('novo')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
+            {aba === 'usuarios' ? 'Novo usuário' : 'Novo perfil'}
+          </DSBtn>
+        }
+      />
+      <DSTabs style={{ width:'100%', maxWidth:520 }}>
+        <DSTab id="usuarios" ativo={aba} onClick={setAba}>Usuários <span style={{ opacity:.7 }}>({usuarios.length})</span></DSTab>
+        <DSTab id="perfis" ativo={aba} onClick={setAba}>Perfis de acesso <span style={{ opacity:.7 }}>({perfis.length})</span></DSTab>
+      </DSTabs>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '60px 0', color: C.muted }}>Carregando…</div>
       ) : aba === 'usuarios' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.xl }}>
 
-          {/* Estatísticas */}
-          <div style={{ display: 'flex', gap: SPACE.md, flexWrap: 'wrap' }}>
-            <StatCard label="Total"     value={stats.total}     />
-            <StatCard label="Ativos"    value={stats.ativos}    cor="#22c55e" />
-            <StatCard label="Inativos"  value={stats.inativos}  cor={C.muted} />
-            {stats.bloqueados > 0 && <StatCard label="Bloqueados" value={stats.bloqueados} cor={C.red} />}
-            {stats.nuncaAcessaram > 0 && <StatCard label="Nunca acessaram" value={stats.nuncaAcessaram} cor={C.amber} />}
-          </div>
+          {/* Estatísticas compactas e temáticas */}
+          <DSStatGrid columns={5} mobileColumns={3} compact>
+            <DSStatCard compact label="Total" value={stats.total} tone="neutral" />
+            <DSStatCard compact label="Ativos" value={stats.ativos} tone="success" />
+            <DSStatCard compact label="Inativos" value={stats.inativos} tone="neutral" />
+            <DSStatCard compact label="Bloqueados" value={stats.bloqueados} tone={stats.bloqueados ? 'danger' : 'neutral'} />
+            <DSStatCard compact label="Sem acesso" value={stats.nuncaAcessaram} tone={stats.nuncaAcessaram ? 'warning' : 'neutral'} />
+          </DSStatGrid>
 
           {/* Filtros + Busca */}
           <div style={{ display: 'flex', gap: SPACE.md, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -667,14 +627,16 @@ export default function AdminUsuarios() {
             </div>
 
             {/* Filtro status */}
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap:'wrap' }}>
               {FILTROS_STATUS.map(f => (
                 <button key={f.id} onClick={() => setFiltroStatus(f.id)}
                   style={{
-                    padding: '5px 10px', borderRadius: 20, cursor: 'pointer', border: 'none',
+                    padding: '5px 10px', borderRadius: 20, cursor: 'pointer',
                     fontSize: FONT.xs, fontWeight: filtroStatus === f.id ? 700 : 500,
-                    background: filtroStatus === f.id ? C.blue : C.surface2,
+                    background: filtroStatus === f.id ? 'var(--adm-accent)' : C.surface2,
                     color:      filtroStatus === f.id ? '#fff' : C.muted,
+                    border: `1px solid ${filtroStatus === f.id ? 'var(--adm-accent)' : C.border}`,
+                    boxShadow: filtroStatus === f.id ? '0 1px 4px color-mix(in srgb,var(--adm-accent) 18%,transparent)' : 'none',
                   }}>
                   {f.label} {f.count > 0 && <span style={{ opacity: .7 }}>({f.count})</span>}
                 </button>
@@ -709,18 +671,17 @@ export default function AdminUsuarios() {
                 {listaFinal.map((u, idx) => {
                   const uid    = u.id || u._id
                   const perfil = u.perfil_id
-                  const acCor  = perfil?.cor || 'var(--adm-accent)'
                   const isBloqueado = u.bloqueado_ate && new Date(u.bloqueado_ate) > new Date()
                   const isToggling  = togglingId === uid
 
                   return (
-                    <div key={uid} style={{
+                    <div key={uid} className="adm-user-row" style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       gap: SPACE.md, padding: `${SPACE.lg}px 16px`, flexWrap: 'wrap',
                       borderBottom: idx < listaFinal.length - 1 ? `1px solid ${C.border}` : 'none',
-                      borderLeft: `3px solid ${u.ativo !== false ? acCor : C.red}`,
+                      borderLeft: `3px solid ${isBloqueado ? C.red : 'var(--adm-accent)'}`, 
                       opacity: u.ativo !== false ? 1 : 0.7,
-                      background: isToggling ? `${C.blue}05` : 'transparent',
+                      background: isToggling ? 'color-mix(in srgb,var(--adm-accent) 5%,transparent)' : 'transparent',
                       transition: 'background .3s',
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.lg, flex: 1, minWidth: 0 }}>
@@ -754,7 +715,7 @@ export default function AdminUsuarios() {
                                 fontSize: FONT.xs, fontWeight: 700,
                                 background: `${perfil.cor || '#6366f1'}18`,
                                 color: perfil.cor || '#6366f1',
-                                border: `1px solid ${perfil.cor || '#6366f1'}30`,
+                                border: `1px solid ${perfil.cor || '#6366f1'}30`, whiteSpace:'nowrap', maxWidth:'100%',
                               }}>
                                 <span style={{ width: 5, height: 5, borderRadius: '50%',
                                   background: perfil.cor || '#6366f1' }} />
@@ -774,7 +735,7 @@ export default function AdminUsuarios() {
                       </div>
 
                       {/* Ações */}
-                      <div style={{ display: 'flex', gap: SPACE.xs, flexShrink: 0, flexWrap: 'wrap' }}>
+                      <div className="adm-user-actions" style={{ display: 'flex', gap: SPACE.xs, flexShrink: 0, flexWrap: 'wrap' }}>
                         {/* Toggle ativo */}
                         <button
                           onClick={() => toggleAtivo(u)}
@@ -782,9 +743,9 @@ export default function AdminUsuarios() {
                           title={u.ativo !== false ? 'Desativar usuário' : 'Ativar usuário'}
                           style={{
                             padding: '5px 8px', borderRadius: RADIUS.sm, cursor: 'pointer',
-                            background: u.ativo !== false ? '#22c55e12' : `${C.red}12`,
-                            border: `1px solid ${u.ativo !== false ? '#22c55e30' : `${C.red}30`}`,
-                            color: u.ativo !== false ? '#16a34a' : C.red,
+                            background: u.ativo !== false ? 'color-mix(in srgb,var(--adm-success,#22c55e) 10%,transparent)' : `${C.red}12`,
+                            border: `1px solid ${u.ativo !== false ? 'color-mix(in srgb,var(--adm-success,#22c55e) 28%,transparent)' : `${C.red}30`}`,
+                            color: u.ativo !== false ? 'var(--adm-success,#22c55e)' : C.red,
                             fontSize: FONT.xs, fontWeight: 700,
                           }}>
                           {isToggling ? '…' : u.ativo !== false ? '✓ Ativo' : '✗ Inativo'}

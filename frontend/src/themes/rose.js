@@ -21,6 +21,7 @@ const roseTheme = {
     '--adm-red':       '#dc2626',
     '--adm-amber':     '#d97706',
     '--adm-blue':      '#2563eb',
+    '--adm-success':   '#16a34a',
     '--adm-topnav-bg': '#ffffff',
     '--adm-shadow':    '0 1px 3px rgba(225,29,72,.08)',
     '--adm-shadow-md': '0 4px 12px rgba(225,29,72,.1)',

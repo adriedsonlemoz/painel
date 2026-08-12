@@ -15,7 +15,6 @@ import SetupStartupDiagnostics from './components/SetupStartupDiagnostics'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import GlobalMeta from './components/GlobalMeta'
-import { ThemeProvider } from './context/ThemeContext'
 import { setupService } from './services/api'
 
 // ── Autenticação (carregadas no bundle principal — pequenas, sempre necessárias)
@@ -263,9 +262,7 @@ export default function App() {
         path="/admin"
         element={
           <AdminRoute>
-            <ThemeProvider>
-              <S><AdminLayout /></S>
-            </ThemeProvider>
+            <S><AdminLayout /></S>
           </AdminRoute>
         }
       >

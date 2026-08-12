@@ -3,8 +3,10 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { errosService } from '../../services/api'
 import { useTheme } from '../../context/ThemeContext'
+import { useBranding } from '../../context/BrandingContext'
 import toast from 'react-hot-toast'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
+import { DSModal, DSBtn } from '../../components/admin/ui/DS'
 
 /**
  * Estrutura de navegação.
@@ -105,6 +107,7 @@ export default function AdminLayout() {
   const { user, logout: doLogout, temPermissao } = useAuth()
   const nav                                      = useNavigate()
   const { tema }                                 = useTheme()
+  const { siteName }                              = useBranding()
 
   // Aplica variáveis do tema ao shell
   useEffect(() => {
@@ -178,10 +181,9 @@ export default function AdminLayout() {
   const labelAtual = labelAtualFromNav(pathname, navVisivel)
 
   useEffect(() => {
-    const appName = import.meta.env.VITE_APP_NAME || 'AL Sistemas'
-    document.title = `${labelAtual} | ${appName}`
-    return () => { document.title = appName }
-  }, [labelAtual])
+    document.title = `${labelAtual} | ${siteName}`
+    return () => { document.title = siteName }
+  }, [labelAtual, siteName])
 
   /* ── helpers de renderização ── */
   function badgeErros(style = {}) {
@@ -298,32 +300,21 @@ export default function AdminLayout() {
         }
       `}</style>
 
-      {/* ── Modal logout ── */}
-      {confirmLogout && (
-        <div style={{ position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,.65)',
-          backdropFilter:'blur(4px)', display:'flex', alignItems:'center',
-          justifyContent:'center', padding:20 }}
-          onClick={e => { if (e.target === e.currentTarget) setConfirmLogout(false) }}>
-          <div style={{ background:'var(--adm-surface)', border:'1px solid var(--adm-border)',
-            borderRadius:RADIUS.xl2, padding:24, width:'100%', maxWidth:340,
-            boxShadow:'0 20px 60px rgba(0,0,0,.5)' }}>
-            <div style={{ fontSize:15, fontWeight:700, color:'var(--adm-text)', marginBottom:8 }}>Sair da conta?</div>
-            <div style={{ fontSize:13, color:'var(--adm-muted)', marginBottom:20, lineHeight:1.5 }}>
-              Você será redirecionado para a página de login.
-            </div>
-            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-              <button onClick={() => setConfirmLogout(false)} className="adm-btn adm-btn-secondary" disabled={saindo}>
-                Cancelar
-              </button>
-              <button onClick={handleLogout} className="adm-btn adm-btn-danger" disabled={saindo}>
-                {saindo
-                  ? <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13" className="adm-spin"><path d="M21 12a9 9 0 11-18 0"/></svg> Saindo...</>
-                  : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg> Sair</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Confirmação global padronizada ── */}
+      <DSModal
+        open={confirmLogout}
+        onClose={() => !saindo && setConfirmLogout(false)}
+        title="Sair da conta?"
+        size="sm"
+        footer={<>
+          <DSBtn onClick={() => setConfirmLogout(false)} disabled={saindo}>Cancelar</DSBtn>
+          <DSBtn variant="danger" onClick={handleLogout} loading={saindo}>Sair</DSBtn>
+        </>}
+      >
+        <p style={{ margin:0, color:'var(--adm-muted)', fontSize:13, lineHeight:1.55 }}>
+          Você será redirecionado para a página de login.
+        </p>
+      </DSModal>
 
       {/* ── Overlay drawer ── */}
       {drawerAberto && (
@@ -348,7 +339,7 @@ export default function AdminLayout() {
               <path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>
             </svg>
           </div>
-          <span style={{ fontWeight:700, fontSize:14, color:'var(--adm-text)', flex:1 }}>{import.meta.env.VITE_APP_NAME || 'SaaS Admin'}</span>
+          <span style={{ fontWeight:700, fontSize:14, color:'var(--adm-text)', flex:1 }}>{siteName}</span>
           <button onClick={() => setDrawerAberto(false)}
             className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" aria-label="Fechar menu">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
@@ -402,7 +393,7 @@ export default function AdminLayout() {
               <path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>
             </svg>
           </div>
-          <span>{import.meta.env.VITE_APP_NAME || 'SaaS Admin'}</span>
+          <span>{siteName}</span>
         </Link>
 
         <div className="adm-nav-divider adm-only-desktop" aria-hidden="true"/>

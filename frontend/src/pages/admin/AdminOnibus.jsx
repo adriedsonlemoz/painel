@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import { onibusService } from '../../services/api'
 import ConfirmModal from '../../components/ConfirmModal'
 import { SPACE, RADIUS, FONT } from '../../themes/tokens'
-import { DSModal } from '../../components/admin/ui/DS'
+import { DSModal, DSPageHeader, DSStatGrid, DSStatCard, DSBtn } from '../../components/admin/ui/DS'
 
 const TODOS_DIAS = ['seg','ter','qua','qui','sex','sab','dom']
 const DIAS_LABEL = { seg:'Seg',ter:'Ter',qua:'Qua',qui:'Qui',sex:'Sex',sab:'Sáb',dom:'Dom' }
@@ -47,7 +47,7 @@ function LinhaForm({ linha, onSave, onCancel }) {
   }
 
   return <div className="adm-card" style={{padding:SPACE.xl3,marginBottom:24}}>
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:20}}><div><h3 style={{fontSize:18,fontWeight:800,color:'var(--adm-text)'}}>{linha?'Editar linha':'Nova linha'}</h3><p style={{fontSize:FONT.base,color:'var(--adm-muted)',marginTop:3}}>Cadastre a rota e as informações úteis para o passageiro.</p></div><label style={{display:'flex',alignItems:'center',gap:8,fontSize:FONT.base,fontWeight:700,color:form.ativo?'var(--adm-green)':'var(--adm-muted)'}}><input type="checkbox" checked={form.ativo} onChange={e=>set('ativo',e.target.checked)}/>{form.ativo?'Linha ativa':'Linha oculta'}</label></div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:20}}><div><h3 style={{fontSize:18,fontWeight:800,color:'var(--adm-text)'}}>{linha?'Editar linha':'Nova linha'}</h3><p style={{fontSize:FONT.base,color:'var(--adm-muted)',marginTop:3}}>Cadastre a rota e as informações úteis para o passageiro.</p></div><label style={{display:'flex',alignItems:'center',gap:8,fontSize:FONT.base,fontWeight:700,color:form.ativo?'var(--adm-success,#22c55e)':'var(--adm-muted)'}}><input type="checkbox" checked={form.ativo} onChange={e=>set('ativo',e.target.checked)}/>{form.ativo?'Linha ativa':'Linha oculta'}</label></div>
 
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:SPACE.lg}}>
       <div><label className="adm-label">Código / Nº da linha</label><input value={form.codigo} onChange={e=>set('codigo',e.target.value)} placeholder="Ex: 301" maxLength={30} className="adm-input"/></div>
@@ -90,20 +90,34 @@ export default function AdminOnibus(){
   const totalHorarios=linhas.reduce((n,l)=>n+(l.horarios?.length||0),0)
 
   return <><ConfirmModal aberto={confirm.aberto} titulo="Excluir linha?" mensagem="Todos os horários desta linha serão removidos permanentemente." labelConfirmar="Excluir" carregando={confirm.carregando} onConfirmar={excluir} onCancelar={()=>setConfirm({aberto:false,id:null,carregando:false})}/>
-    <div className="adm-page-header"><div><div className="adm-page-title">Horários de Ônibus</div><div className="adm-page-sub">Gerencie linhas, dados da viagem e horários publicados no site.</div></div>{editando===null&&<div className="adm-page-actions"><button onClick={()=>{setEditando('novo');setEditLinha(null)}} className="adm-btn adm-btn-primary"><Plus size={16} style={{marginRight:6}}/>Nova linha</button></div>}</div>
+    <DSPageHeader
+      title="Horários de ônibus"
+      sub="Gerencie linhas, dados da viagem e horários publicados no portal."
+      actions={editando===null ? <DSBtn variant="primary" onClick={()=>{setEditando('novo');setEditLinha(null)}}><Plus size={16}/>Nova linha</DSBtn> : null}
+    />
 
     {editando!==null&&<DSModal open onClose={()=>{setEditando(null);setEditLinha(null)}} title={editLinha?'Editar linha':'Nova linha'} size="xl"><LinhaForm linha={editLinha} onSave={salvar} onCancel={()=>{setEditando(null);setEditLinha(null)}}/></DSModal>}
 
     <>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:16}}>{[
-        ['Linhas',linhas.length],['Ativas',linhas.filter(l=>l.ativo).length],['Horários',totalHorarios]
-      ].map(([label,val])=><div key={label} className="adm-card" style={{padding:'14px 16px'}}><p style={{fontSize:FONT.sm,color:'var(--adm-muted)',fontWeight:700}}>{label}</p><p style={{fontSize:21,fontWeight:900,color:'var(--adm-text)',marginTop:2}}>{val}</p></div>)}</div>
-      <div className="adm-card" style={{padding:14,marginBottom:16}}><div style={{position:'relative',maxWidth:420}}><Search size={15} style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--adm-muted)'}}/><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar por destino, empresa ou código..." className="adm-input" style={{paddingLeft:36}}/></div></div>
+      <DSStatGrid columns={3} mobileColumns={3} compact style={{ marginBottom:12 }}>
+        <DSStatCard compact label="Linhas" value={linhas.length} />
+        <DSStatCard compact label="Ativas" value={linhas.filter(l=>l.ativo).length} tone="success" />
+        <DSStatCard compact label="Horários" value={totalHorarios} tone="info" />
+      </DSStatGrid>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,padding:'9px 10px',border:'1px solid var(--adm-border)',borderRadius:RADIUS.lg,background:'var(--adm-surface)'}}>
+        <Search size={15} style={{color:'var(--adm-muted)',flexShrink:0}}/>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar por destino, empresa ou código..." style={{flex:1,minWidth:0,border:0,outline:0,background:'transparent',color:'var(--adm-text)',font:'inherit'}}/>
+        {busca && <button type="button" onClick={()=>setBusca('')} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Limpar busca"><X size={14}/></button>}
+      </div>
     </>
 
-    <div className="adm-card" style={{padding:0,overflow:'hidden'}}>{loading?<div className="adm-empty"><p>Carregando...</p></div>:filtradas.length===0?<div className="adm-empty"><Bus size={32} style={{opacity:.2,marginBottom:SPACE.md}}/><p>{busca?'Nenhuma linha encontrada.':'Nenhuma linha cadastrada ainda.'}</p></div>:<div style={{padding:'16px 20px'}}>{filtradas.map(l=><div key={l.id} style={{background:'var(--adm-surface2)',border:'1px solid var(--adm-border)',borderRadius:RADIUS.lg,padding:16,marginBottom:SPACE.lg,opacity:l.ativo?1:.65}}>
-      <div style={{display:'flex',alignItems:'center',gap:SPACE.lg,flexWrap:'wrap'}}><div style={{width:44,height:44,borderRadius:RADIUS.lg,backgroundColor:`${l.cor||'#1B5E3B'}20`,display:'flex',alignItems:'center',justifyContent:'center'}}><Bus size={20} style={{color:l.cor||'#1B5E3B'}}/></div><div style={{flex:1,minWidth:180}}><div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}><p style={{fontWeight:800,color:'var(--adm-text)'}}>{l.origem||'Iguatama'} <ArrowRight size={11} style={{display:'inline'}}/> {l.destino}</p>{l.codigo&&<span style={{fontSize:10,fontWeight:800,padding:'2px 6px',border:'1px solid var(--adm-border)',borderRadius:6}}>{l.codigo}</span>}<span style={{fontSize:10,fontWeight:800,color:l.ativo?'var(--adm-green)':'var(--adm-muted)'}}>{l.ativo?'ATIVA':'OCULTA'}</span></div><p style={{fontSize:FONT.base,color:'var(--adm-muted)',marginTop:3}}>{l.empresa||'Empresa não informada'} · {l.horarios?.length||0} horários{l.embarque?` · ${l.embarque}`:''}</p></div><div style={{display:'flex',gap:4}}><button onClick={()=>alternar(l)} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title={l.ativo?'Ocultar linha':'Ativar linha'}><Power size={15}/></button><button onClick={()=>duplicar(l)} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Duplicar"><Copy size={15}/></button><button onClick={()=>{setEditLinha(l);setEditando(l.id)}} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Editar"><Edit2 size={15}/></button><button onClick={()=>setConfirm({aberto:true,id:l.id,carregando:false})} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" style={{color:'var(--adm-red)'}} title="Excluir"><Trash2 size={15}/></button></div></div>
+    <div className="adm-card onibus-list-card" style={{padding:0,overflow:'hidden'}}>{loading?<div className="adm-empty"><p>Carregando...</p></div>:filtradas.length===0?<div className="adm-empty"><Bus size={32} style={{opacity:.2,marginBottom:SPACE.md}}/><p>{busca?'Nenhuma linha encontrada.':'Nenhuma linha cadastrada ainda.'}</p></div>:<div className="onibus-list">{filtradas.map(l=><div key={l.id} style={{background:'var(--adm-surface2)',border:'1px solid var(--adm-border)',borderRadius:RADIUS.lg,padding:16,marginBottom:SPACE.lg,opacity:l.ativo?1:.65}}>
+      <div style={{display:'flex',alignItems:'center',gap:SPACE.lg,flexWrap:'wrap'}}><div style={{width:44,height:44,borderRadius:RADIUS.lg,backgroundColor:`${l.cor||'#1B5E3B'}20`,display:'flex',alignItems:'center',justifyContent:'center'}}><Bus size={20} style={{color:l.cor||'#1B5E3B'}}/></div><div style={{flex:1,minWidth:180}}><div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}><p style={{fontWeight:800,color:'var(--adm-text)'}}>{l.origem||'Iguatama'} <ArrowRight size={11} style={{display:'inline'}}/> {l.destino}</p>{l.codigo&&<span style={{fontSize:10,fontWeight:800,padding:'2px 6px',border:'1px solid var(--adm-border)',borderRadius:6}}>{l.codigo}</span>}<span style={{fontSize:10,fontWeight:800,color:l.ativo?'var(--adm-success,#22c55e)':'var(--adm-muted)'}}>{l.ativo?'ATIVA':'OCULTA'}</span></div><p style={{fontSize:FONT.base,color:'var(--adm-muted)',marginTop:3}}>{l.empresa||'Empresa não informada'} · {l.horarios?.length||0} horários{l.embarque?` · ${l.embarque}`:''}</p></div><div style={{display:'flex',gap:4}}><button onClick={()=>alternar(l)} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title={l.ativo?'Ocultar linha':'Ativar linha'}><Power size={15}/></button><button onClick={()=>duplicar(l)} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Duplicar"><Copy size={15}/></button><button onClick={()=>{setEditLinha(l);setEditando(l.id)}} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" title="Editar"><Edit2 size={15}/></button><button onClick={()=>setConfirm({aberto:true,id:l.id,carregando:false})} className="adm-btn adm-btn-ghost adm-btn-icon adm-btn-sm" style={{color:'var(--adm-red)'}} title="Excluir"><Trash2 size={15}/></button></div></div>
       {l.horarios?.length>0&&<div style={{marginTop:14,display:'flex',flexWrap:'wrap',gap:6}}>{[...l.horarios].sort((a,b)=>a.hora.localeCompare(b.hora)).slice(0,12).map((h,i)=><span key={i} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:FONT.sm,fontWeight:800,background:'var(--adm-surface)',border:'1px solid var(--adm-border)',padding:'4px 9px',borderRadius:RADIUS.pill}}><Clock size={10}/>{h.hora}</span>)}{l.horarios.length>12&&<span style={{fontSize:FONT.sm,color:'var(--adm-muted)',padding:'4px 7px'}}>+{l.horarios.length-12}</span>}</div>}
     </div>)}</div>}</div>
+    <style>{`
+      .onibus-list{padding:14px}
+      @media(max-width:640px){.onibus-list{padding:10px}.onibus-list>div{padding:12px!important}.onibus-list .adm-btn{min-width:32px}}
+    `}</style>
   </>
 }

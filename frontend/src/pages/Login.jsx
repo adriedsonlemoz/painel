@@ -16,10 +16,8 @@ import {
   Wifi, WifiOff,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useBranding } from '../context/BrandingContext'
 import toast from 'react-hot-toast'
-
-const APP_NAME    = import.meta.env.VITE_APP_NAME    || 'SaaS Admin'
-const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || 'Painel de Gerenciamento'
 
 const API_BASE    = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:3001/api' : '/api')
 const SERVER_ROOT = API_BASE.replace(/\/api\/?$/, '')
@@ -74,9 +72,15 @@ const VITE_VARS = [
 // ─────────────────────────────────────────────────────────────
 export default function Login() {
   const { user, login, ensureSession } = useAuth()
+  const { siteName, panelSubtitle, productName } = useBranding()
   const navigate = useNavigate()
 
   useEffect(() => { ensureSession() }, [ensureSession])
+
+  useEffect(() => {
+    document.title = `Entrar | ${siteName}`
+    return () => { document.title = siteName }
+  }, [siteName])
 
   const [email, setEmail]          = useState('')
   const [senha, setSenha]          = useState('')
@@ -86,7 +90,7 @@ export default function Login() {
   const [logEntries, setLogEntries]   = useState([])
   const [diagRunning, setDiagRunning] = useState(false)
   const [diagDone, setDiagDone]       = useState(false)
-  const [diagOpen, setDiagOpen]       = useState(true)
+  const [diagOpen, setDiagOpen]       = useState(false)
   const [copied, setCopied]           = useState(false)
   const [apiOnline, setApiOnline]     = useState(null)
 
@@ -406,11 +410,11 @@ export default function Login() {
   }
 
   function entryColor(icon) {
-    if (icon === '✓') return 'text-green-400'
-    if (icon === '✕') return 'text-red-400'
-    if (icon === '⚠') return 'text-yellow-400'
-    if (icon === '─') return 'text-blue-500'
-    return 'text-blue-400'
+    if (icon === '✓') return 'auth-diag__symbol--ok'
+    if (icon === '✕') return 'auth-diag__symbol--error'
+    if (icon === '⚠') return 'auth-diag__symbol--warn'
+    if (icon === '─') return 'auth-diag__symbol--sep'
+    return 'auth-diag__symbol--info'
   }
 
   if (user) return <Navigate to="/admin" replace />
@@ -431,178 +435,128 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50
-                    flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-4">
-
-        {/* Branding */}
-        <div className="text-center mb-2">
-          <div className="w-14 h-14 bg-green-600 rounded-2xl flex items-center justify-center
-                          mx-auto mb-3 shadow-lg">
-            <LayoutDashboard size={26} className="text-white" />
+    <div className="auth-shell">
+      <div className="auth-wrap">
+        <header className="auth-brand">
+          <div className="auth-brand__mark" aria-hidden="true">
+            <LayoutDashboard size={25} />
           </div>
-          <h1 className="font-heading text-2xl font-bold">{APP_NAME}</h1>
-          <p className="text-gray-500 text-sm mt-1">{APP_TAGLINE}</p>
-        </div>
+          <h1>{siteName}</h1>
+          <p>{panelSubtitle}</p>
+        </header>
 
-        {/* ── Painel de diagnóstico ──────────────────────────── */}
-        <div className="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden shadow-xl">
-
-          {/* Barra de título */}
-          <button
-            type="button"
-            onClick={() => setDiagOpen(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2
-                       bg-gray-900 hover:bg-gray-800 transition-colors select-none"
-          >
-            <span className="flex items-center gap-2 text-xs font-mono">
-              {diagRunning  && <RefreshCw size={12} className="animate-spin text-yellow-400" />}
-              {!diagRunning && apiOnline === true  && <Wifi    size={12} className="text-green-400" />}
-              {!diagRunning && apiOnline === false && <WifiOff size={12} className="text-red-400"   />}
-              <span className="text-gray-500">diagnóstico de conexão</span>
-              {diagDone && !diagRunning && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
-                  apiOnline ? 'bg-green-900/60 text-green-300' : 'bg-red-900/60 text-red-300'
-                }`}>
-                  {apiOnline ? 'API online' : 'API offline'}
-                </span>
-              )}
-            </span>
-
-            <span className="flex items-center gap-2">
-              {diagDone && (
-                <span
-                  role="button" tabIndex={0} title="Copiar log"
-                  onClick={e => { e.stopPropagation(); handleCopy() }}
-                  onKeyDown={e => e.key === 'Enter' && handleCopy()}
-                  className="text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
-                >
-                  {copied
-                    ? <ClipboardCheck size={13} className="text-green-400" />
-                    : <Clipboard size={13} />
-                  }
-                </span>
-              )}
-              {diagDone && !diagRunning && (
-                <span
-                  role="button" tabIndex={0} title="Repetir diagnóstico"
-                  onClick={e => { e.stopPropagation(); handleRerun() }}
-                  onKeyDown={e => e.key === 'Enter' && handleRerun()}
-                  className="text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
-                >
-                  <RefreshCw size={13} />
-                </span>
-              )}
-              {diagOpen
-                ? <ChevronUp   size={13} className="text-gray-500" />
-                : <ChevronDown size={13} className="text-gray-500" />
-              }
-            </span>
-          </button>
-
-          {/* Log */}
-          {diagOpen && (
-            <div className="px-3 py-2.5 max-h-64 overflow-y-auto font-mono text-[11px]
-                            leading-relaxed space-y-px">
-              {logEntries.length === 0 && diagRunning && (
-                <div className="text-gray-500 animate-pulse">Iniciando…</div>
-              )}
-              {logEntries.length === 0 && !diagRunning && (
-                <div className="py-2 space-y-2 text-gray-400">
-                  <div>O diagnóstico continua disponível. Ele confere API, CORS, MongoDB e o estado das plataformas sem alterar nenhuma configuração.</div>
-                  <button type="button" onClick={handleRerun}
-                    className="w-full rounded-lg border border-blue-800/70 bg-blue-950/40 px-3 py-2 text-blue-300 hover:bg-blue-900/50 transition-colors font-semibold">
-                    ▶ Executar diagnóstico
-                  </button>
-                </div>
-              )}
-              {logEntries.map((entry, i) => {
-                const isSep = entry.icon === '─'
-                if (isSep) return (
-                  <div key={i} className="flex items-center gap-1.5 pt-1.5 pb-0.5">
-                    <span className="text-blue-700 shrink-0">──</span>
-                    <span className="text-blue-400 font-semibold tracking-wide uppercase text-[10px]">
-                      {entry.text}
-                    </span>
-                    <span className="flex-1 border-t border-blue-900/50" />
-                  </div>
-                )
-                return (
-                  <div key={i} className={`flex gap-2 items-start ${entry.indent ? 'pl-6' : ''}`}>
-                    <span className="text-gray-600 shrink-0 select-none tabular-nums">[{entry.ts}]</span>
-                    <span className={`shrink-0 w-4 text-center select-none ${entryColor(entry.icon)}`}>
-                      {entry.icon}
-                    </span>
-                    <span className="text-gray-300 break-all">{entry.text}</span>
-                  </div>
-                )
-              })}
-              <div ref={logEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Card de login */}
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-7">
-          <h2 className="font-heading font-bold text-xl text-gray-800 mb-5">Entrar</h2>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="label" htmlFor="email">Email</label>
+        <section className="auth-card" aria-labelledby="login-title">
+          <h2 id="login-title">Entrar</h2>
+          <form onSubmit={handleSubmit}>
+            <div className="auth-field">
+              <label htmlFor="email">Email</label>
               <input
-                id="email" type="email"
-                className={`input transition-opacity${loading ? ' opacity-50 pointer-events-none' : ''}`}
-                placeholder="admin@empresa.com"
-                value={email} onChange={e => setEmail(e.target.value)} readOnly={loading}
+                id="email"
+                type="email"
+                autoComplete="username"
+                className="auth-input"
+                placeholder="seu@email.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                readOnly={loading}
               />
             </div>
 
-            <div>
-              <label className="label" htmlFor="senha">Senha</label>
-              <div className="relative">
+            <div className="auth-field">
+              <label htmlFor="senha">Senha</label>
+              <div className="auth-input-wrap">
                 <input
-                  id="senha" type={mostrarSenha ? 'text' : 'password'}
-                  className={`input pr-10 transition-opacity${loading ? ' opacity-50 pointer-events-none' : ''}`}
+                  id="senha"
+                  type={mostrarSenha ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  className="auth-input auth-input--password"
                   placeholder="••••••••"
-                  value={senha} onChange={e => setSenha(e.target.value)} readOnly={loading}
+                  value={senha}
+                  onChange={e => setSenha(e.target.value)}
+                  readOnly={loading}
                 />
                 <button
                   type="button"
+                  className="auth-eye"
                   onClick={() => setMostrar(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
                 >
-                  {mostrarSenha ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {mostrarSenha ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
             </div>
 
-            <button
-              type="submit" disabled={loading}
-              className="btn-primary w-full justify-center py-2.5 mt-2"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Entrando...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <LogIn size={16} /> Entrar
-                </span>
-              )}
+            <button type="submit" disabled={loading} className="auth-submit">
+              {loading ? <><span className="auth-spinner" /> Entrando...</> : <><LogIn size={16} /> Entrar</>}
             </button>
 
-            <div className="text-center mt-3">
-              <Link to="/esqueci-senha"
-                className="text-xs text-gray-400 hover:text-green-600 transition-colors">
-                Esqueceu sua senha?
-              </Link>
+            <div className="auth-forgot">
+              <Link to="/esqueci-senha">Esqueceu sua senha?</Link>
             </div>
           </form>
-        </div>
+        </section>
 
-        <p className="text-center text-xs text-gray-400">
-          Acesso restrito a administradores
+        <section className="auth-diag" aria-label="Diagnóstico de conexão">
+          <button type="button" className="auth-diag__bar" onClick={() => setDiagOpen(v => !v)} aria-expanded={diagOpen}>
+            <span className="auth-diag__title">
+              {diagRunning && <RefreshCw size={14} className="animate-spin" />}
+              {!diagRunning && apiOnline === true && <Wifi size={14} className="auth-diag__symbol--ok" />}
+              {!diagRunning && apiOnline === false && <WifiOff size={14} className="auth-diag__symbol--error" />}
+              <span>Diagnóstico de conexão</span>
+              {!diagRunning && apiOnline !== null && (
+                <span className={`auth-diag__status ${apiOnline ? 'auth-diag__status--ok' : 'auth-diag__status--error'}`}>
+                  {apiOnline ? 'Online' : 'Atenção'}
+                </span>
+              )}
+            </span>
+            <span className="auth-diag__tools">
+              {diagDone && (
+                <span
+                  role="button" tabIndex={0} title="Copiar log" className="auth-diag__tool"
+                  onClick={e => { e.stopPropagation(); handleCopy() }}
+                  onKeyDown={e => e.key === 'Enter' && handleCopy()}
+                >
+                  {copied ? <ClipboardCheck size={15} className="auth-diag__symbol--ok" /> : <Clipboard size={15} />}
+                </span>
+              )}
+              {diagDone && !diagRunning && (
+                <span
+                  role="button" tabIndex={0} title="Repetir diagnóstico" className="auth-diag__tool"
+                  onClick={e => { e.stopPropagation(); handleRerun() }}
+                  onKeyDown={e => e.key === 'Enter' && handleRerun()}
+                >
+                  <RefreshCw size={15} />
+                </span>
+              )}
+              {diagOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </span>
+          </button>
+
+          {diagOpen && (
+            <div className="auth-diag__body">
+              {logEntries.length === 0 && diagRunning && <div className="auth-diag__empty">Iniciando diagnóstico…</div>}
+              {logEntries.length === 0 && !diagRunning && (
+                <div className="auth-diag__empty">
+                  <span>Confere API, CORS, banco, integrações essenciais e estado das plataformas sem alterar configurações.</span>
+                  <button type="button" className="auth-diag__run" onClick={handleRerun}>Executar diagnóstico</button>
+                </div>
+              )}
+              {logEntries.map((entry, i) => entry.icon === '─' ? (
+                <div key={i} className="auth-diag__separator"><span>{entry.text}</span></div>
+              ) : (
+                <div key={i} className={`auth-diag__line${entry.indent ? ' auth-diag__line--indent' : ''}`}>
+                  <span className="auth-diag__time">[{entry.ts}]</span>
+                  <span className={`auth-diag__symbol ${entryColor(entry.icon)}`}>{entry.icon}</span>
+                  <span className="auth-diag__text">{entry.text}</span>
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          )}
+        </section>
+
+        <p className="auth-version">
+          Acesso restrito · {productName}{import.meta.env.VITE_APP_VERSION ? ` ${import.meta.env.VITE_APP_VERSION}` : ''}
         </p>
       </div>
     </div>

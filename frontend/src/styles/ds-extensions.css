@@ -18,7 +18,7 @@
 /* ══════════════════════════════════════════════════════════════
    ESCALA DE ESPAÇAMENTO — Custom Properties
    ══════════════════════════════════════════════════════════════ */
-.admin-shell {
+:root, .admin-shell, .auth-shell {
   --ds-space-xs:   4px;
   --ds-space-sm:   6px;
   --ds-space-md:   8px;
@@ -250,13 +250,17 @@
 /* ══════════════════════════════════════════════════════════════
    FOCO ACESSÍVEL — anel de foco visível em navegação por teclado
    ══════════════════════════════════════════════════════════════ */
-.admin-shell :focus-visible {
+.admin-shell :focus-visible, .auth-shell :focus-visible, .ds-modal :focus-visible {
   outline: 2px solid var(--adm-accent);
   outline-offset: 2px;
   border-radius: var(--ds-radius-sm);
 }
 .admin-shell button:focus:not(:focus-visible),
-.admin-shell a:focus:not(:focus-visible) {
+.admin-shell a:focus:not(:focus-visible),
+.auth-shell button:focus:not(:focus-visible),
+.auth-shell a:focus:not(:focus-visible),
+.ds-modal button:focus:not(:focus-visible),
+.ds-modal a:focus:not(:focus-visible) {
   outline: none;
 }
 
