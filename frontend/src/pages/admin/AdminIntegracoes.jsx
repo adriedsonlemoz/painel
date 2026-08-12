@@ -42,14 +42,14 @@ const integrationHelp={
  },
  render:{
   title:'Render',
-  text:'A chave da Render alimenta o módulo Infraestrutura → Plataformas. Serviços e deploys passam a usar esta credencial central; o ambiente fica apenas como fallback de compatibilidade.',
+  text:'A chave da Render alimenta o módulo Projetos e Deploys. Serviços e deploys passam a usar esta credencial central; o ambiente fica apenas como fallback de compatibilidade.',
   steps:['Entre no Render Dashboard.','Abra Account Settings → API Keys.','Crie uma API key dedicada ao AL Sistemas.','Cole a chave abaixo, use Testar e depois Salvar.','Depois disso, o módulo Plataformas carrega serviços e deploys sem pedir a chave novamente.'],
   links:[['Abrir Render Dashboard','https://dashboard.render.com'],['Documentação oficial da API','https://api-docs.render.com/reference/authentication']],
   expected:'Render API Key criada nas configurações da conta',
  },
  vercel:{
   title:'Vercel',
-  text:'O token da Vercel alimenta o módulo Infraestrutura → Plataformas para listar projetos e deploys. Configure uma vez aqui; os demais módulos apenas consomem a credencial central.',
+  text:'O token da Vercel alimenta o módulo Projetos e Deploys para listar projetos e deploys. Configure uma vez aqui; os demais módulos apenas consomem a credencial central.',
   steps:['Entre na Vercel.','Abra Account Settings → Tokens e crie um Access Token.','Cole o token abaixo.','Se os projetos estiverem em uma Team, informe o Team ID; para conta pessoal deixe vazio.','Use Testar e depois Salvar.'],
   links:[['Criar token na Vercel','https://vercel.com/account/tokens'],['Documentação oficial da REST API','https://vercel.com/docs/rest-api']],
   expected:'Vercel Access Token • Team ID opcional',
@@ -296,7 +296,7 @@ function RenderConnector({current,form,setForm}){
  return <div>
   <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
    <b>Fonte única para o módulo Plataformas</b>
-   <div style={{color:'var(--adm-muted)',marginTop:5}}>Serviços e deploys exibidos em <b>Infraestrutura → Plataformas</b> usam esta chave. Não é necessário configurar a Render em outra tela.</div>
+   <div style={{color:'var(--adm-muted)',marginTop:5}}>Serviços e deploys exibidos em <b>Projetos e Deploys</b> usam esta chave. Não é necessário configurar a Render em outra tela.</div>
   </div>
   <SecretField label={current?.configured?'Nova Render API Key (deixe vazio para manter)':'Render API Key'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole a API Key da Render'}/>
  </div>
@@ -307,7 +307,7 @@ function VercelConnector({current,form,setForm}){
  return <div>
   <div style={{padding:12,borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',marginBottom:14,fontSize:12,lineHeight:1.55}}>
    <b>Fonte única para projetos e deploys</b>
-   <div style={{color:'var(--adm-muted)',marginTop:5}}>O módulo <b>Infraestrutura → Plataformas</b> usa este token automaticamente. A configuração antiga dentro da própria página de plataformas foi desativada para evitar duas fontes diferentes.</div>
+   <div style={{color:'var(--adm-muted)',marginTop:5}}>O módulo <b>Projetos e Deploys</b> usa este token automaticamente. A configuração antiga dentro da própria página de plataformas foi desativada para evitar duas fontes diferentes.</div>
   </div>
   <SecretField label={current?.configured?'Novo Vercel Access Token (deixe vazio para manter)':'Vercel Access Token'} value={form.secret} onChange={v=>setForm({...form,secret:v})} placeholder={current?.configured?'Digite somente para substituir':'Cole o token da Vercel'}/>
   <Field label="Team ID (opcional)" value={form.metadata.teamId||''} onChange={v=>setMeta('teamId',v)} placeholder="team_xxxxxxxxxxxx"/>

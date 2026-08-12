@@ -40,6 +40,7 @@ const AdminSetup          = lazyWithRetry(() => import('./pages/admin/AdminSetup
 const AdminCloudinary      = lazyWithRetry(() => import('./pages/admin/AdminCloudinary'))
 const AdminSistema         = lazyWithRetry(() => import('./pages/admin/AdminSistema'))
 const AdminPlataformas     = lazyWithRetry(() => import('./pages/admin/AdminPlataformas'))
+const AdminProjetoPlataforma = lazyWithRetry(() => import('./pages/admin/AdminProjetoPlataforma'))
 const AdminAmbientes       = lazyWithRetry(() => import('./pages/admin/AdminAmbientes'))
 const AdminArquivos       = lazyWithRetry(() => import('./pages/admin/AdminArquivos'))
 const AdminTemas          = lazyWithRetry(() => import('./pages/admin/AdminTemas'))
@@ -277,6 +278,7 @@ export default function App() {
         <Route path="sistema"        element={<S><AdminSistema /></S>} />
         <Route path="infraestrutura"  element={<Navigate to="/admin/sistema" replace />} />
         <Route path="plataformas"      element={<S><AdminPlataformas /></S>} />
+        <Route path="plataformas/:projectId" element={<S><AdminProjetoPlataforma /></S>} />
         <Route path="ambientes"        element={<S><AdminAmbientes /></S>} />
         <Route path="arquivos"       element={<S><AdminArquivos /></S>} />
         <Route path="temas"          element={<S><AdminTemas /></S>} />

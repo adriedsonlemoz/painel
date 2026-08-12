@@ -889,7 +889,7 @@ function escapeRegex(value='') { return String(value).replace(/[.*+?^${}()|[\]\\
 
 async function smartRenderServices(apiKey) {
   if(!apiKey)return []
-  const r=await fetch('https://api.render.com/v1/services?limit=30',{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'}})
+  const r=await fetch('https://api.render.com/v1/services?limit=30',{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
   if(!r.ok)throw new Error(`Render API retornou ${r.status}`)
   const data=await r.json()
   return (Array.isArray(data)?data:[]).map(row=>{
@@ -904,9 +904,10 @@ async function smartRenderServices(apiKey) {
     atualizado:s.updatedAt,branch:s.branch||null,repo:s.repo||null,
   })}).filter(x=>x.id)
 }
-async function smartRenderDeploys(apiKey,serviceId) {
+async function smartRenderDeploys(apiKey,serviceId,limit=8) {
   if(!apiKey||!serviceId)return []
-  const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys?limit=8`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'}})
+  const safeLimit=Math.max(1,Math.min(20,Number(limit)||8))
+  const r=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}/deploys?limit=${safeLimit}`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
   if(!r.ok)throw new Error(`Render API retornou ${r.status}`)
   const data=await r.json()
   return (Array.isArray(data)?data:[]).map(row=>{
@@ -919,7 +920,7 @@ async function smartRenderDeploys(apiKey,serviceId) {
 }
 async function smartVercelProjects(token,teamId='') {
   if(!token)return []
-  const r=await fetch(vercelUrl('/v9/projects?limit=30',teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const r=await fetch(vercelUrl('/v9/projects?limit=30',teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
   if(!r.ok)throw new Error(`Vercel API retornou ${r.status}`)
   const data=await r.json()
   return (data.projects||[]).map(p=>{
@@ -929,14 +930,21 @@ async function smartVercelProjects(token,teamId='') {
       id:p.id,nome:p.name,framework:p.framework||'—',
       dominios:aliases,dominio:stable,
       atualizado:p.updatedAt,
-      git:p.link?{tipo:p.link.type,repositorio:p.link.repo,repoId:p.link.repoId||null}:null,
+      git:p.link?{
+        tipo:p.link.type,
+        repositorio:p.link.repo,
+        owner:p.link.org||p.link.repoOwner||p.link.owner||null,
+        slug:(p.link.org||p.link.repoOwner||p.link.owner)&&p.link.repo?`${p.link.org||p.link.repoOwner||p.link.owner}/${p.link.repo}`:(p.link.repo||null),
+        repoId:p.link.repoId||null,
+        branch:p.link.productionBranch||p.link.branch||null,
+      }:null,
     }
   })
 }
 
 async function smartVercelProjectDomains(token,teamId='',projectId='') {
   if(!token||!projectId)return []
-  const r=await fetch(vercelUrl(`/v9/projects/${encodeURIComponent(projectId)}/domains?limit=100`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const r=await fetch(vercelUrl(`/v9/projects/${encodeURIComponent(projectId)}/domains?limit=100`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
   const data=await r.json().catch(()=>({}))
   if(!r.ok)throw new Error(data.error?.message||`Vercel Domains API retornou ${r.status}`)
   return (data.domains||[]).map(d=>({
@@ -959,9 +967,10 @@ function chooseCanonicalVercelDomain(project,domains=[],storedOrigin='') {
   if(project?.dominio&&(!names.length||names.includes(String(project.dominio).toLowerCase())))return project.dominio
   return ''
 }
-async function smartVercelDeploys(token,teamId,projectId) {
+async function smartVercelDeploys(token,teamId,projectId,limit=8) {
   if(!token||!projectId)return []
-  const r=await fetch(vercelUrl(`/v6/deployments?projectId=${encodeURIComponent(projectId)}&limit=8`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const safeLimit=Math.max(1,Math.min(20,Number(limit)||8))
+  const r=await fetch(vercelUrl(`/v6/deployments?projectId=${encodeURIComponent(projectId)}&limit=${safeLimit}`,teamId),{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
   if(!r.ok)throw new Error(`Vercel API retornou ${r.status}`)
   const data=await r.json()
   return (data.deployments||[]).map(d=>({
@@ -1062,6 +1071,194 @@ async function smartRenderLogs(apiKey,ownerId,serviceId) {
 }
 
 
+
+
+// ── Central unificada de projetos Vercel + Render ─────────────
+function normalizeProjectName(value='') {
+  return String(value||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')
+}
+function normalizeRepoSlug(value='', owner='') {
+  let raw=String(value||'').trim()
+  if(!raw)return ''
+  raw=raw.replace(/^git@github\.com:/i,'').replace(/^https?:\/\/github\.com\//i,'').replace(/^ssh:\/\/git@github\.com\//i,'')
+  raw=raw.replace(/\.git$/i,'').replace(/^\/+|\/+$/g,'')
+  if(owner && !raw.includes('/')) raw=`${String(owner).trim()}/${raw}`
+  const parts=raw.split('/').filter(Boolean)
+  if(parts.length>=2)return `${parts[parts.length-2]}/${parts[parts.length-1]}`.toLowerCase()
+  return parts[0]?.toLowerCase()||''
+}
+function repoBase(value='') {
+  const slug=normalizeRepoSlug(value)
+  return slug.split('/').filter(Boolean).pop()||''
+}
+function platformProjectId(key='') {
+  return `prj_${Buffer.from(String(key)).toString('base64url')}`
+}
+function deploymentFailed(value='') { return /fail|error|cancel/i.test(String(value||'')) }
+function deploymentBusy(value='') { return /build|queue|progress|prepar|initializ|pending/i.test(String(value||'')) }
+function deploymentReady(value='') { return /ready|live|operational|deployed|success|succeed/i.test(String(value||'')) }
+function deploymentTime(d={}) {
+  const raw=d.criado??d.createdAt??d.updatedAt??0
+  const n=typeof raw==='number'?raw:new Date(raw||0).getTime()
+  return Number.isFinite(n)?n:0
+}
+function compactDeploy(provider,d) {
+  if(!d)return null
+  return provider==='vercel'
+    ? {provider,id:d.id,status:d.estado,criado:d.criado,duracao:d.duracao,url:d.url,ambiente:d.ambiente,branch:d.branch,hash:d.hash,mensagem:d.commit||'Deploy Vercel'}
+    : {provider,id:d.id,status:d.status,criado:d.criado,duracao:d.duracao,url:null,ambiente:'production',branch:null,hash:d.commit?.hash||null,mensagem:d.commit?.mensagem||'Deploy Render'}
+}
+function analyzeUnifiedProject(project, renderDeploys=[], vercelDeploys=[]) {
+  const alerts=[]
+  const all=[...renderDeploys.map(d=>compactDeploy('render',d)),...vercelDeploys.map(d=>compactDeploy('vercel',d))].filter(Boolean).sort((a,b)=>deploymentTime(b)-deploymentTime(a))
+  const latest=all[0]||null
+  const failures=all.filter(d=>deploymentFailed(d.status)).length
+  const busy=all.some(d=>deploymentBusy(d.status))
+  const ready=latest ? deploymentReady(latest.status) : false
+  if(latest&&deploymentFailed(latest.status))alerts.push({nivel:'erro',titulo:'Último deploy com problema',descricao:`${latest.provider==='vercel'?'Vercel':'Render'} informou ${latest.status}.`})
+  if(project.render&&project.vercel){
+    const rd=renderDeploys[0], vc=vercelDeploys[0]
+    const renderRepo=normalizeRepoSlug(project.render.repo||'')
+    const vercelRepo=normalizeRepoSlug(project.vercel.git?.slug||project.vercel.git?.repositorio||'',project.vercel.git?.owner||'')
+    const sameRepo=Boolean(renderRepo&&vercelRepo&&(renderRepo===vercelRepo||((!renderRepo.includes('/')||!vercelRepo.includes('/'))&&repoBase(renderRepo)===repoBase(vercelRepo))))
+    if(sameRepo){
+      const rh=String(rd?.commit?.hash||'').toLowerCase(), vh=String(vc?.hash||'').toLowerCase()
+      if(rh&&vh&&!vh.startsWith(rh)&&!rh.startsWith(vh))alerts.push({nivel:'aviso',titulo:'Commits diferentes entre frontend e backend',descricao:`Vercel ${vh} · Render ${rh}. Verifique se os dois pertencem à mesma release.`})
+      const rb=String(project.render.branch||'').trim(), vb=String(project.vercel.git?.branch||vc?.branch||'').trim()
+      if(rb&&vb&&rb!==vb)alerts.push({nivel:'aviso',titulo:'Branches diferentes',descricao:`Vercel usa ${vb}; Render usa ${rb}.`})
+    }
+  }
+  if(!project.render&&!project.vercel)alerts.push({nivel:'aviso',titulo:'Projeto sem provedor',descricao:'Nenhum recurso Vercel ou Render foi associado.'})
+  if(!all.length)alerts.push({nivel:'info',titulo:'Sem histórico de deploy',descricao:'Ainda não foi possível obter deploys recentes para este projeto.'})
+  const newest=all[0]?.criado
+  if(newest){
+    const age=Date.now()-deploymentTime(all[0])
+    if(age>45*24*60*60*1000)alerts.push({nivel:'info',titulo:'Projeto sem deploy recente',descricao:'O último deploy encontrado tem mais de 45 dias.'})
+  }
+  let estado='desconhecido'
+  if(busy)estado='deploy'
+  else if(latest&&deploymentFailed(latest.status))estado='erro'
+  else if(ready||(!latest&&project.render&&/live/i.test(String(project.render.estado||''))))estado='online'
+  else if(latest)estado='atencao'
+  const durations=all.map(d=>Number(d.duracao)).filter(n=>Number.isFinite(n)&&n>0)
+  return {
+    estado,latest,alerts,
+    stats:{amostra:all.length,falhas:failures,sucessos:all.filter(d=>deploymentReady(d.status)).length,duracaoMedia:durations.length?Math.round(durations.reduce((a,b)=>a+b,0)/durations.length):null},
+    timeline:all,
+  }
+}
+function buildUnifiedPlatformProjects(renderServices=[],vercelProjects=[],primary={}) {
+  const records=[]
+  for(const s of renderServices){
+    const repo=normalizeRepoSlug(s.repo)
+    records.push({provider:'render',item:s,repo,base:repoBase(repo),name:normalizeProjectName(s.nome)})
+  }
+  for(const p of vercelProjects){
+    const repo=normalizeRepoSlug(p.git?.slug||p.git?.repositorio||'',p.git?.owner||'')
+    records.push({provider:'vercel',item:p,repo,base:repoBase(repo),name:normalizeProjectName(p.nome)})
+  }
+  const fullByBase=new Map()
+  for(const r of records){
+    if(r.repo&&r.repo.includes('/')){
+      const set=fullByBase.get(r.base)||new Set();set.add(r.repo);fullByBase.set(r.base,set)
+    }
+  }
+  const groups=new Map()
+  for(const r of records){
+    let repo=r.repo
+    if(repo&&!repo.includes('/')&&fullByBase.get(r.base)?.size===1)repo=[...fullByBase.get(r.base)][0]
+    const isPrimary=(r.provider==='render'&&primary.renderServiceId&&r.item.id===primary.renderServiceId)||(r.provider==='vercel'&&primary.vercelProjectId&&r.item.id===primary.vercelProjectId)
+    const key=isPrimary?'special:painel':(repo?`repo:${repo}`:`name:${r.name||r.item.id}`)
+    const group=groups.get(key)||{key,id:platformProjectId(key),render:null,vercel:null,repo:repo||'',repoBase:repoBase(repo),linkedBy:isPrimary?'producao':repo?'repositorio':'nome'}
+    group[r.provider]=r.item
+    if(repo&&!group.repo)group.repo=repo
+    groups.set(key,group)
+  }
+  return [...groups.values()].map(g=>{
+    const especial=Boolean((primary.renderServiceId&&g.render?.id===primary.renderServiceId)||(primary.vercelProjectId&&g.vercel?.id===primary.vercelProjectId))
+    const nome=especial?'Painel':(g.vercel?.nome||g.render?.nome||g.repoBase||'Projeto')
+    const gitSlug=g.repo||normalizeRepoSlug(g.vercel?.git?.slug||g.vercel?.git?.repositorio||'',g.vercel?.git?.owner||'')||normalizeRepoSlug(g.render?.repo||'')
+    const updated=Math.max(new Date(g.vercel?.atualizado||0).getTime()||0,new Date(g.render?.atualizado||0).getTime()||0)
+    return {...g,nome,especial:especial?'painel':null,git:gitSlug?{slug:gitSlug,url:`https://github.com/${gitSlug}`} : null,atualizado:updated?new Date(updated).toISOString():null}
+  })
+}
+async function mapLimit(items,limit,worker){
+  const output=new Array(items.length);let next=0
+  async function run(){while(true){const i=next++;if(i>=items.length)return;try{output[i]=await worker(items[i],i)}catch(error){output[i]={error}}}}
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},run));return output
+}
+async function loadUnifiedPlatformSource(){
+  const [renderCred,vercelCred]=await Promise.all([getCredential('render','RENDER_API_KEY'),getCredential('vercel','VERCEL_TOKEN')])
+  const result={renderCred,vercelCred,renderServices:[],vercelProjects:[],errors:{}}
+  if(renderCred.value)try{result.renderServices=await smartRenderServices(renderCred.value)}catch(error){result.errors.render=error.message}
+  if(vercelCred.value)try{result.vercelProjects=await smartVercelProjects(vercelCred.value,vercelCred.metadata?.teamId||'')}catch(error){result.errors.vercel=error.message}
+  result.projects=buildUnifiedPlatformProjects(result.renderServices,result.vercelProjects,{renderServiceId:renderCred.metadata?.primaryServiceId||'',vercelProjectId:vercelCred.metadata?.primaryProjectId||''})
+  return result
+}
+
+router.get('/plataformas/projetos-central', async (_req,res,next)=>{
+  try{
+    const src=await loadUnifiedPlatformSource()
+    const enriched=await mapLimit(src.projects,6,async project=>{
+      const [rd,vc]=await Promise.all([
+        project.render&&src.renderCred.value?smartRenderDeploys(src.renderCred.value,project.render.id,1).catch(()=>[]):[],
+        project.vercel&&src.vercelCred.value?smartVercelDeploys(src.vercelCred.value,src.vercelCred.metadata?.teamId||'',project.vercel.id,1).catch(()=>[]):[],
+      ])
+      const analise=analyzeUnifiedProject(project,rd,vc)
+      return {...project,estado:analise.estado,ultimoDeploy:analise.latest,alertas:analise.alerts,stats:analise.stats}
+    })
+    enriched.sort((a,b)=>Number(b.especial==='painel')-Number(a.especial==='painel')||Number(b.estado==='erro')-Number(a.estado==='erro')||deploymentTime(b.ultimoDeploy||{})-deploymentTime(a.ultimoDeploy||{}))
+    const problems=enriched.flatMap(p=>(p.alertas||[]).filter(a=>a.nivel==='erro'||a.nivel==='aviso').map((a,i)=>({...a,id:`${p.id}-${i}`,projetoId:p.id,projeto:p.nome})))
+    res.json({
+      sincronizadoEm:new Date().toISOString(),
+      projetos:enriched,
+      resumo:{total:enriched.length,online:enriched.filter(p=>p.estado==='online').length,deploy:enriched.filter(p=>p.estado==='deploy').length,problemas:enriched.filter(p=>p.estado==='erro'||(p.alertas||[]).some(a=>a.nivel==='erro'||a.nivel==='aviso')).length},
+      problemas:problems.slice(0,20),
+      provedores:{
+        render:{configurado:Boolean(src.renderCred.value)||Boolean(src.renderCred.locked),utilizavel:Boolean(src.renderCred.value),erro:src.errors.render||null,servicos:src.renderServices},
+        vercel:{configurado:Boolean(src.vercelCred.value)||Boolean(src.vercelCred.locked),utilizavel:Boolean(src.vercelCred.value),erro:src.errors.vercel||null,projetos:src.vercelProjects},
+      },
+      producao:{renderServiceId:src.renderCred.metadata?.primaryServiceId||'',vercelProjectId:src.vercelCred.metadata?.primaryProjectId||'',frontendOrigin:src.vercelCred.metadata?.productionOrigin||'',backendUrl:src.renderCred.metadata?.backendUrl||''},
+    })
+  }catch(err){next(err)}
+})
+
+router.get('/plataformas/projetos-central/:projectId', async (req,res,next)=>{
+  try{
+    const src=await loadUnifiedPlatformSource()
+    const project=src.projects.find(p=>p.id===req.params.projectId)
+    if(!project)return res.status(404).json({erro:'Projeto não encontrado nas contas Vercel/Render conectadas.'})
+    const [renderDeploys,vercelDeploys,domains]=await Promise.all([
+      project.render&&src.renderCred.value?smartRenderDeploys(src.renderCred.value,project.render.id,12).catch(()=>[]):[],
+      project.vercel&&src.vercelCred.value?smartVercelDeploys(src.vercelCred.value,src.vercelCred.metadata?.teamId||'',project.vercel.id,12).catch(()=>[]):[],
+      project.vercel&&src.vercelCred.value?smartVercelProjectDomains(src.vercelCred.value,src.vercelCred.metadata?.teamId||'',project.vercel.id).catch(()=>[]):[],
+    ])
+    const analise=analyzeUnifiedProject(project,renderDeploys,vercelDeploys)
+    const vercelDomain=project.vercel?chooseCanonicalVercelDomain(project.vercel,domains,project.especial==='painel'?(src.vercelCred.metadata?.productionOrigin||''):''):''
+    const frontendUrl=vercelDomain?`https://${vercelDomain}`:(vercelDeploys[0]?.url||null)
+    const renderUrl=project.render?.url||null
+    const painel=project.especial==='painel'?{
+      frontendOrigin:normalizeOrigin(src.vercelCred.metadata?.productionOrigin||frontendUrl||''),
+      backendUrl:normalizeOrigin(src.renderCred.metadata?.backendUrl||renderUrl||''),
+      corsOk:Boolean(normalizeOrigin(src.vercelCred.metadata?.productionOrigin||frontendUrl||'')&&isPlatformOriginAllowed(normalizeOrigin(src.vercelCred.metadata?.productionOrigin||frontendUrl||''))),
+      mongo:{conectado:mongoose.connection.readyState===1,banco:mongoose.connection.name||null},
+      backendVersion:BACKEND_VERSION,
+      runtime:runtimeLabel(),
+    }:null
+    res.json({
+      projeto:{...project,estado:analise.estado,ultimoDeploy:analise.latest,alertas:analise.alerts,stats:analise.stats},
+      provedores:{
+        render:project.render?{...project.render,url:renderUrl,deploys:renderDeploys}:null,
+        vercel:project.vercel?{...project.vercel,url:frontendUrl,domains,deploys:vercelDeploys}:null,
+      },
+      timeline:analise.timeline,
+      analise:{alertas:analise.alerts,stats:analise.stats,linkedBy:project.linkedBy,repo:project.git||null},
+      painel,
+      links:{site:frontendUrl,api:renderUrl,github:project.git?.url||null},
+      sincronizadoEm:new Date().toISOString(),
+    })
+  }catch(err){next(err)}
+})
 
 // ── GET /plataformas/compatibilidade ─────────────────────────────
 // Diagnóstico unificado do mesmo pacote em Termux/VPS e Vercel/Render.

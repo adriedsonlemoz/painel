@@ -40,7 +40,7 @@ const HUBS = {
     desc:'GitHub primeiro; Vercel, Render e R2 entram conforme cada projeto.',
     items:[
       ['/admin/github','GitHub','Repositórios, commits, Actions e publicação','◈','github.gerenciar'],
-      ['/admin/plataformas','Plataformas','Vercel e Render em produção','⌁','plataformas.gerenciar'],
+      ['/admin/plataformas','Projetos e Deploys','Central para Vercel, Render, saúde e histórico','⌁','plataformas.gerenciar'],
       ['/admin/cloudflare','Cloudflare / R2','Buckets, snapshots e armazenamento cloud','☁','cloudflare.gerenciar'],
       ['/admin/projetos','Projetos','Projetos cloud e modo local legado','▣','projetos.ver'],
     ],

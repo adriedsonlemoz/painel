@@ -1,13 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.121",
+  "version": "1.0.122",
   "packageFormat": 2,
   "changelog": [
-    "Corrige a publicação pelo módulo GitHub quando o repositório de destino ainda não possui nenhum commit.",
-    "O primeiro commit passa a inicializar o repositório pela Contents API antes de usar blobs, trees, commits e refs.",
-    "A inicialização não força uma branch inexistente no primeiro PUT; a branch padrão nasce primeiro e branches alternativas partem desse commit.",
-    "A publicação continua diretamente a partir do SHA retornado pelo GitHub, sem depender de uma reconsulta imediata da nova branch.",
-    "Mantém Mesclar/Substituir, Snapshot R2, metadados e AuditLog no mesmo fluxo de publicação."
+    "Transforma Vercel / Render em uma Central de Projetos e Deploys para monitorar vários projetos.",
+    "Agrupa automaticamente frontend Vercel e backend Render pelo repositório GitHub, mantendo o Painel como projeto principal.",
+    "Adiciona página individual por projeto com visão geral, deploys, variáveis mascaradas, logs sob demanda e análise automática.",
+    "Detecta falhas recentes, branches/commits divergentes, projetos sem deploy recente e problemas por provedor.",
+    "Permite redefinir quais recursos Vercel e Render formam o Painel sem esconder os demais projetos da conta."
   ],
   "updatePackages": {
     "full": true,

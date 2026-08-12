@@ -56,6 +56,8 @@ export const infraestruturaService = {
   async limparCache()         { return api('/admin/infraestrutura/sistema/limpar-cache', { method: 'POST', body: '{}' }) },
   // ── Plataformas (Render + Vercel) ───────────────────────────
   async plataformasStatus()      { return api('/admin/infraestrutura/plataformas/status') },
+  async plataformasProjetosCentral() { return api('/admin/infraestrutura/plataformas/projetos-central', { timeoutMs: 30000 }) },
+  async plataformaProjetoDetalhe(projectId) { return api(`/admin/infraestrutura/plataformas/projetos-central/${encodeURIComponent(projectId)}`, { timeoutMs: 30000 }) },
   async plataformasCentral()      { return api('/admin/infraestrutura/plataformas/central') },
   async plataformasCompatibilidade() { return api('/admin/infraestrutura/plataformas/compatibilidade', { timeoutMs: 20000 }) },
   async salvarProducaoPlataformas(renderServiceId, vercelProjectId, frontendOrigin = '') {

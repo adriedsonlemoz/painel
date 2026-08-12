@@ -51,7 +51,7 @@ const NAV = [
     group: true, to: '/admin/publicacao', label: 'Publicação', icon: IconGitHub, perm: null,
     children: [
       { to: '/admin/github',      label: 'GitHub',          icon: IconGitHub,     perm: 'github.gerenciar' },
-      { to: '/admin/plataformas', label: 'Vercel / Render', icon: IconPlatform,   perm: 'plataformas.gerenciar' },
+      { to: '/admin/plataformas', label: 'Projetos e Deploys', icon: IconPlatform, perm: 'plataformas.gerenciar' },
       { to: '/admin/cloudflare',  label: 'Cloudflare / R2', icon: IconCF,         perm: 'cloudflare.gerenciar' },
       { to: '/admin/projetos',    label: 'Projetos',        icon: IconFolderCode, perm: 'projetos.ver' },
     ],

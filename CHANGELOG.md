@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.122 — Central de Projetos e Deploys
+
+- Vercel e Render deixam de ser tratados apenas como uma dupla fixa e passam a alimentar uma central de múltiplos projetos.
+- Recursos são vinculados automaticamente pelo repositório GitHub; o projeto principal continua identificado como **Painel**.
+- Cada projeto ganhou página própria com visão geral, deploys, variáveis mascaradas, logs sob demanda e análise de saúde.
+- A central resume projetos online, em deploy e com problemas, além de exibir alertas por projeto.
+- O Painel mantém configuração própria para definir frontend Vercel + backend Render e continua exibindo MongoDB/CORS/runtime na página detalhada.
+- Navegação renomeada para **Projetos e Deploys**.
+- Frontend, backend, Setup, exportação e manifesto sincronizados em **1.0.122**.
+
 ## 1.0.121 — Primeiro commit unificado no módulo GitHub
 - Corrige a opção **GitHub → Publicar projeto** quando o repositório escolhido está totalmente vazio.
 - A publicação inicializa o repositório com um arquivo real pela **Contents API** antes de usar a Git Database API, evitando `409 Git Repository is empty.`.
