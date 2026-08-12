@@ -258,7 +258,7 @@ router.get('/export', autenticar, verificarPermissao('erros.ver'), async (_req, 
     const geradoEm = new Date().toISOString()
     const payload = {
       produto: 'AL Sistemas',
-      versao: '1.0.123',
+      versao: '1.0.124',
       gerado_em: geradoEm,
       total: erros.length,
       erros,

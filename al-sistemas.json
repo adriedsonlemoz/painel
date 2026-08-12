@@ -1,13 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.123",
+  "version": "1.0.124",
   "packageFormat": 2,
   "changelog": [
-    "Integrações e APIs ganham cards no padrão visual da Central de Atualizações e modais centralizados.",
-    "Diagnóstico da IA foi reorganizado com provedores, fila, latência, cooldowns e uso recente.",
-    "Cloudinary passa a usar corretamente o cofre central para salvar, testar e abrir a galeria.",
-    "Central Cloudflare ganha resumo de conta, planos/assinaturas quando a API permitir, zonas e métricas R2.",
-    "R2 vira um Explorer com múltiplos uploads, pastas, prévia, download, mover/renomear e exclusão em lote."
+    "GitHub Publicar ganha verificação obrigatória antes do upload e pós-checagem do commit na branch.",
+    "Publicação passa a exibir log real por etapa, progresso do job e resultado final verificável.",
+    "Versões do projeto são comparadas como atual → enviada; frontend/backend divergentes no ZIP bloqueiam o envio.",
+    "Explorer de arquivos ganha seleção múltipla, exclusão em lote ou total em um único commit e layout mais compacto.",
+    "Detalhes mostram SHA, última alteração, autor, data, tipo, tamanho e prévia de arquivos de texto."
   ],
   "updatePackages": {
     "full": true,

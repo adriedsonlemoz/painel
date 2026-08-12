@@ -39,7 +39,9 @@ export const githubService = {
   sugerirDescricao: (owner, repo, provedor = '') => api(`/github/repos/${owner}/${repo}/descricao-ia`, { method: 'POST', body: JSON.stringify({ provedor }) }),
   insight: (owner, repo, branch = 'main') => api(`/github/repos/${owner}/${repo}/insight?branch=${encodeURIComponent(branch)}`),
   contents: (owner, repo, path = '', branch = '') => api(`/github/repos/${owner}/${repo}/contents?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`),
+  contentInfo: (owner, repo, path = '', branch = '') => api(`/github/repos/${owner}/${repo}/content-info?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`),
   excluirConteudo: (owner, repo, path, branch = '') => api(`/github/repos/${owner}/${repo}/contents`, { method: 'DELETE', body: JSON.stringify({ path, branch, confirmar: true, confirmarPath: path }) }),
+  excluirConteudoLote: (owner, repo, payload = {}) => api(`/github/repos/${owner}/${repo}/contents/batch`, { method: 'DELETE', body: JSON.stringify(payload) }),
   analisarResiduos: (owner, repo, branch = '') => api(`/github/repos/${owner}/${repo}/cleanup-preview?branch=${encodeURIComponent(branch)}`),
   limparResiduos: (owner, repo, branch = '', confirmar = '') => api(`/github/repos/${owner}/${repo}/cleanup`, { method:'POST', body:JSON.stringify({ branch, confirmar }) }),
 
@@ -135,10 +137,14 @@ export const githubService = {
     return baixarAutenticado(`${BASE_URL}/github/repos/${owner}/${repo}/download-zip${q}`, `${repo || 'projeto'}-${branch || 'main'}.zip`)
   },
 
+  preflightPublicacao: (owner, repo, config = {}) => api(`/github/repos/${owner}/${repo}/publicar-pacote/preflight`, { method:'POST', body:JSON.stringify(config), timeoutMs:30000 }),
+  publicacaoJob: (owner, repo, jobId) => api(`/github/repos/${owner}/${repo}/publicar-pacote/jobs/${encodeURIComponent(jobId)}`),
+
   /** Publica um ZIP diretamente em repository/branch/path, sem depender do módulo Projetos. */
   async publicarPacote(owner, repo, file, config = {}, onProgress = null) {
     const form = new FormData()
     form.append('package', file)
+    form.append('async', 'true')
     for (const [k, v] of Object.entries(config)) form.append(k, String(v ?? ''))
 
     // XMLHttpRequest é usado aqui de propósito: fetch não expõe progresso de upload.

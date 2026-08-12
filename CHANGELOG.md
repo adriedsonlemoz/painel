@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.123 — Integrações e Cloudflare Explorer
+## 1.0.124 — Integrações e Cloudflare Explorer
 
 - Redesenha os cards de Integrações e APIs no padrão visual da Central de Atualizações e mantém os modais centralizados também no celular.
 - Reorganiza o Diagnóstico da IA com estado do motor, provedores, fila, latência, cooldowns e uso dos últimos 7 dias.

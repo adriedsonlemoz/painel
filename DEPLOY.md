@@ -128,7 +128,7 @@ Depois do deploy, abra **Admin → Infraestrutura → Ambientes**. A tela deve m
 
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
-VITE_APP_VERSION=1.0.123
+VITE_APP_VERSION=1.0.124
 VITE_APP_ENV=production
 VITE_MODULE_PORTAL=true
 VITE_MODULE_GITHUB=true

@@ -36,7 +36,7 @@ import JSZip            from 'jszip'
 import crypto           from 'node:crypto'
 import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient.js'
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
-import { storeProjectSnapshot } from '../services/cloudUpdateStorage.js'
+import { storeProjectSnapshot, testR2UpdateStorage } from '../services/cloudUpdateStorage.js'
 import { sugerirDescricaoRepositorio, analisarLogsWorkflow } from '../utils/aiClient.js'
 import { redactAiText } from '../services/aiRedactor.js'
 import { selectRelevantLogContext } from '../services/aiContext.js'
@@ -48,6 +48,55 @@ const publishUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: Number(process.env.AL_GITHUB_PACKAGE_MAX_BYTES || 80 * 1024 * 1024) },
 })
+
+// Jobs curtos de publicação. O ZIP continua somente em memória durante a operação;
+// o mapa guarda apenas estado/log/resultado para que o frontend acompanhe cada etapa.
+const githubPublishJobs = new Map()
+function pruneGithubPublishJobs() {
+  const limite = Date.now() - 60 * 60 * 1000
+  for (const [id, job] of githubPublishJobs) if (new Date(job.updatedAt || job.createdAt).getTime() < limite) githubPublishJobs.delete(id)
+}
+function criarGithubPublishJob({ owner, repo, usuarioId }) {
+  pruneGithubPublishJobs()
+  const now = new Date().toISOString()
+  const job = {
+    id: `ghpub_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+    owner, repo, usuarioId: String(usuarioId || ''), status: 'queued', phase: 'received',
+    progress: 0, createdAt: now, updatedAt: now, logs: [], result: null, error: null,
+  }
+  githubPublishJobs.set(job.id, job)
+  return job
+}
+function registrarGithubPublishLog(job, phase, label, message, state = 'active', progress = null, details = null) {
+  if (!job) return
+  const at = new Date().toISOString()
+  job.phase = phase || job.phase
+  job.updatedAt = at
+  if (Number.isFinite(progress)) job.progress = Math.max(0, Math.min(100, Number(progress)))
+  const entry = { at, phase, label, message, state, progress: Number.isFinite(progress) ? job.progress : null }
+  if (details && typeof details === 'object') entry.details = details
+  job.logs.push(entry)
+  if (job.logs.length > 160) job.logs.splice(0, job.logs.length - 160)
+}
+function versaoPartes(value = '') {
+  const match = String(value || '').trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$/)
+  return match ? [Number(match[1] || 0), Number(match[2] || 0), Number(match[3] || 0)] : null
+}
+function compararVersoes(a, b) {
+  const av = versaoPartes(a), bv = versaoPartes(b)
+  if (!av || !bv) return null
+  for (let i = 0; i < 3; i++) if (av[i] !== bv[i]) return av[i] > bv[i] ? 1 : -1
+  return 0
+}
+function fileKindInfo(name = '', size = 0) {
+  const ext = path.extname(String(name || '')).toLowerCase().replace(/^\./, '')
+  const map = {
+    js:'JavaScript', jsx:'React JSX', ts:'TypeScript', tsx:'React TSX', json:'JSON', md:'Markdown', html:'HTML', css:'CSS',
+    yml:'YAML', yaml:'YAML', sh:'Shell', cjs:'CommonJS', mjs:'JavaScript', png:'Imagem PNG', jpg:'Imagem JPEG', jpeg:'Imagem JPEG',
+    webp:'Imagem WebP', svg:'SVG', zip:'Arquivo ZIP', txt:'Texto', csv:'CSV', pdf:'PDF', env:'Configuração', lock:'Lockfile',
+  }
+  return { extensao: ext || null, tipoArquivo: map[ext] || (size === 0 ? 'Arquivo vazio' : 'Arquivo') }
+}
 
 function normalizarTargetPath(value='') {
   const raw=String(value||'').trim().replace(/\\/g,'/').replace(/^\/+|\/+$/g,'')
@@ -125,7 +174,8 @@ async function obterBranchBase(owner,repo,branch) {
   }
 }
 
-async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false}) {
+async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false,onProgress=null}) {
+  onProgress?.({phase:'branch',label:'Destino GitHub',message:`Conferindo branch ${branch || 'main'}…`,progress:42})
   let base=await obterBranchBase(owner,repo,branch)
   const prefix=normalizarTargetPath(targetPath)
   let initializedRepository=false
@@ -137,6 +187,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   // 3) se o destino pedido for outra branch, cria essa branch a partir do commit inicial;
   // 4) publica o projeto completo pela Git Database API.
   if(!base.parentSha){
+    onProgress?.({phase:'initialize',label:'Primeiro commit',message:'Repositório vazio detectado. Criando a base inicial…',progress:48})
     const defaultBranch=String(base.repoInfo.default_branch||'main').trim()||'main'
     const seed=files.find(f=>f.path==='README.md')||files.find(f=>f.path==='.gitignore')||files[0]
     const seedDest=prefix?`${prefix}/${seed.path}`:seed.path
@@ -174,6 +225,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
     }
 
     initializedRepository=true
+    onProgress?.({phase:'initialize',label:'Primeiro commit',message:`Base inicial criada em ${defaultBranch}${base.branch!==defaultBranch ? ` e branch ${base.branch} preparada` : ''}.`,progress:54})
     // Não reconsulta imediatamente a ref: o GitHub pode levar alguns instantes para
     // refletir a branch recém-criada. O SHA retornado pela Contents API já é a fonte
     // de verdade suficiente para continuar a publicação.
@@ -191,6 +243,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   const incomingPaths=new Set(files.map(file=>prefix?`${prefix}/${file.path}`:file.path))
   let removidos=0
   if(replacePath && base.baseTreeSha){
+    onProgress?.({phase:'diff',label:'Comparando conteúdo',message:'Calculando arquivos que serão substituídos ou removidos…',progress:57})
     const current=await githubFetch(`/repos/${owner}/${repo}/git/trees/${base.baseTreeSha}?recursive=1`)
     const pathPrefix=prefix?`${prefix}/`:''
     for(const item of current.tree||[]){
@@ -201,6 +254,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   }
 
   let enviados=0
+  onProgress?.({phase:'blobs',label:'Enviando arquivos',message:`Preparando ${files.length} arquivo(s) para a árvore Git…`,progress:60})
   for(const file of files){
     const blob=await githubFetch(`/repos/${owner}/${repo}/git/blobs`,{
       method:'POST',
@@ -209,8 +263,12 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
     const dest=prefix?`${prefix}/${file.path}`:file.path
     tree.push({path:dest,mode:'100644',type:'blob',sha:blob.sha})
     enviados++
+    if (enviados === files.length || enviados === 1 || enviados % Math.max(1, Math.floor(files.length / 8)) === 0) {
+      onProgress?.({phase:'blobs',label:'Enviando arquivos',message:`${enviados}/${files.length} arquivo(s) preparados`,progress:60 + Math.round((enviados / files.length) * 20)})
+    }
   }
 
+  onProgress?.({phase:'tree',label:'Árvore Git',message:'Montando a árvore final do projeto…',progress:82})
   const treeBody={tree}
   if(base.baseTreeSha) treeBody.base_tree=base.baseTreeSha
   const newTree=await githubFetch(`/repos/${owner}/${repo}/git/trees`,{
@@ -226,9 +284,12 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
       enviados:0,
       removidos:0,
       initializedRepository,
+      verified:true,
+      verifiedAt:new Date().toISOString(),
     }
   }
 
+  onProgress?.({phase:'commit',label:'Commit',message:'Criando o commit da publicação…',progress:88})
   const commitBody={
     message:String(message||'Publicação pelo AL Sistemas').slice(0,240),
     tree:newTree.sha,
@@ -239,6 +300,7 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
     body:JSON.stringify(commitBody),
   })
 
+  onProgress?.({phase:'ref',label:'Branch',message:`Atualizando ${base.branch} para o novo commit…`,progress:93})
   if(base.exists){
     await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
       method:'PATCH',
@@ -251,14 +313,27 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
     })
   }
 
+  onProgress?.({phase:'verify',label:'Verificação GitHub',message:'Confirmando o commit diretamente na branch publicada…',progress:96})
+  const verifyRef = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base.branch)}`)
+  const verifyCommit = await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`)
+  const verified = verifyRef?.object?.sha === commit.sha && Boolean(verifyCommit?.tree?.sha)
+  if (!verified) {
+    const e = new Error('O GitHub recebeu o commit, mas a verificação final da branch não confirmou a publicação.')
+    e.status = 502
+    throw e
+  }
+  onProgress?.({phase:'verify',label:'Verificação GitHub',message:`Commit ${commit.sha.slice(0,7)} confirmado na branch ${base.branch}.`,progress:99})
   return {
     changed:true,
     branch:base.branch,
     commitSha:commit.sha,
     commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,
+    treeSha:verifyCommit.tree?.sha || newTree.sha,
     enviados,
     removidos,
     initializedRepository,
+    verified:true,
+    verifiedAt:new Date().toISOString(),
   }
 }
 
@@ -605,13 +680,138 @@ router.get('/repos/:owner/:repo/contents', autenticar, async (req, res) => {
     const endpoint = `/repos/${owner}/${repo}/contents${rel ? '/' + rel.split('/').map(encodeURIComponent).join('/') : ''}?ref=${encodeURIComponent(ref)}`
     const data = await githubFetch(endpoint)
     const raw = Array.isArray(data) ? data : [data]
-    const itens = raw.map(i => ({
-      nome: i.name, path: i.path, tipo: i.type === 'dir' ? 'pasta' : 'arquivo',
-      tamanho: i.size || 0, sha: i.sha, url: i.html_url || null, downloadUrl: i.download_url || null,
-    })).sort((a,b) => a.tipo === b.tipo ? a.nome.localeCompare(b.nome) : (a.tipo === 'pasta' ? -1 : 1))
-    res.json({ itens, path: rel, branch: ref, repo: `${owner}/${repo}` })
+    const itens = raw.map(i => {
+      const tipo = i.type === 'dir' ? 'pasta' : 'arquivo'
+      const extra = tipo === 'arquivo' ? fileKindInfo(i.name, i.size || 0) : { extensao:null, tipoArquivo:'Pasta' }
+      return {
+        nome: i.name, path: i.path, tipo,
+        tamanho: i.size || 0, sha: i.sha, url: i.html_url || null, downloadUrl: i.download_url || null,
+        ...extra,
+      }
+    }).sort((a,b) => a.tipo === b.tipo ? a.nome.localeCompare(b.nome) : (a.tipo === 'pasta' ? -1 : 1))
+    const resumo = {
+      itens: itens.length,
+      pastas: itens.filter(i => i.tipo === 'pasta').length,
+      arquivos: itens.filter(i => i.tipo === 'arquivo').length,
+      bytesVisiveis: itens.filter(i => i.tipo === 'arquivo').reduce((n, i) => n + Number(i.tamanho || 0), 0),
+    }
+    res.json({
+      itens, path: rel, branch: ref, repo: `${owner}/${repo}`, resumo,
+      repositorio: {
+        defaultBranch: repoInfo.default_branch || 'main', privado: Boolean(repoInfo.private),
+        criadoEm: repoInfo.created_at || null, atualizadoEm: repoInfo.updated_at || null,
+        ultimoPushEm: repoInfo.pushed_at || null, tamanhoKb: Number(repoInfo.size || 0),
+      },
+    })
   } catch (err) {
     res.status(err.status || 500).json({ erro: err.message, itens: [] })
+  }
+})
+
+/* GET /api/github/repos/:owner/:repo/content-info?path=&branch=
+   Metadados sob demanda: evita uma chamada de commits para cada item da listagem. */
+router.get('/repos/:owner/:repo/content-info', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  const target = String(req.query.path || '').replace(/^\/+|\/+$/g, '')
+  const branchInput = String(req.query.branch || '').trim()
+  if (!target || target.includes('..')) return res.status(400).json({ erro: 'Caminho inválido.' })
+  try {
+    const repoInfo = await githubFetch(`/repos/${owner}/${repo}`)
+    const branch = branchInput || repoInfo.default_branch || 'main'
+    const encoded = target.split('/').map(encodeURIComponent).join('/')
+    const [content, commits] = await Promise.all([
+      githubFetch(`/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`),
+      githubFetch(`/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&path=${encodeURIComponent(target)}&per_page=1`).catch(() => []),
+    ])
+    const latest = Array.isArray(commits) ? commits[0] : null
+    const isDir = Array.isArray(content) || content?.type === 'dir'
+    const tipo = isDir ? 'pasta' : 'arquivo'
+    const folderItems = Array.isArray(content) ? content : []
+    const tamanho = isDir ? folderItems.reduce((n,i)=>n+Number(i.size||0),0) : Number(content?.size || 0)
+    const extra = tipo === 'arquivo' ? fileKindInfo(content?.name || target, tamanho) : { extensao:null, tipoArquivo:'Pasta' }
+    let preview = null, previewTruncated = false
+    const sensitivePreview = /(^|\/)(\.env(?:\.|$)|.*\.(?:pem|key|p12|pfx)|id_rsa|id_ed25519|credentials?\.json|secrets?\.(?:json|ya?ml))$/i.test(target)
+    if (!isDir && !sensitivePreview && tamanho <= 200 * 1024 && content?.content && content?.encoding === 'base64') {
+      try {
+        const buf = Buffer.from(content.content, 'base64')
+        const binary = buf.subarray(0, Math.min(buf.length, 4096)).includes(0)
+        if (!binary) {
+          const text = buf.toString('utf8')
+          previewTruncated = text.length > 12000
+          preview = text.slice(0, 12000)
+        }
+      } catch {}
+    }
+    res.json({
+      nome: isDir ? path.basename(target) : (content?.name || path.basename(target)), path: isDir ? target : (content?.path || target), tipo,
+      tamanho, sha: isDir ? null : (content?.sha || null), branch,
+      filhos: isDir ? { itens:folderItems.length, pastas:folderItems.filter(i=>i.type==='dir').length, arquivos:folderItems.filter(i=>i.type==='file').length } : null,
+      url: isDir ? `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${target}` : (content?.html_url || null),
+      downloadUrl: isDir ? null : (content?.download_url || null), preview, previewTruncated, previewBloqueada:sensitivePreview, ...extra,
+      ultimaAlteracao: latest ? {
+        sha: latest.sha || null, mensagem: latest.commit?.message || '',
+        autor: latest.commit?.author?.name || latest.author?.login || '',
+        email: latest.commit?.author?.email || '', data: latest.commit?.author?.date || latest.commit?.committer?.date || null,
+        url: latest.html_url || null,
+      } : null,
+      repositorio: { criadoEm: repoInfo.created_at || null, ultimoPushEm: repoInfo.pushed_at || null },
+    })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
+/* DELETE /api/github/repos/:owner/:repo/contents/batch
+   Remove vários arquivos/pastas ou todo o conteúdo da pasta atual em um único commit. */
+router.delete('/repos/:owner/:repo/contents/batch', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  const branchInput = String(req.body?.branch || '').trim()
+  const mode = String(req.body?.mode || 'selected')
+  const currentPath = String(req.body?.currentPath || '').replace(/^\/+|\/+$/g, '')
+  const requested = Array.isArray(req.body?.paths) ? req.body.paths.map(v => String(v || '').replace(/^\/+|\/+$/g, '')).filter(Boolean) : []
+  if (currentPath.includes('..') || requested.some(v => v.includes('..'))) return res.status(400).json({ erro: 'Caminho inválido.' })
+  if (!['selected', 'current'].includes(mode)) return res.status(400).json({ erro: 'Modo de exclusão inválido.' })
+  if (mode === 'selected' && (!requested.length || requested.length > 250)) return res.status(400).json({ erro: 'Selecione entre 1 e 250 itens.' })
+  const confirmation = String(req.body?.confirmar || '').trim().toUpperCase()
+  const expected = mode === 'current' ? 'APAGAR TUDO' : 'APAGAR SELECIONADOS'
+  if (confirmation !== expected) return res.status(400).json({ erro: `Digite ${expected} para confirmar.` })
+  try {
+    const repoInfo = await githubFetch(`/repos/${owner}/${repo}`)
+    const branch = branchInput || repoInfo.default_branch || 'main'
+    const ref = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)
+    const parentSha = ref.object?.sha
+    const parent = await githubFetch(`/repos/${owner}/${repo}/git/commits/${parentSha}`)
+    const treeSha = parent.tree?.sha
+    const tree = await githubFetch(`/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`)
+    const blobs = (tree.tree || []).filter(e => e.type === 'blob')
+    const selected = mode === 'current'
+      ? blobs.filter(e => !currentPath || e.path === currentPath || e.path.startsWith(currentPath + '/'))
+      : blobs.filter(e => requested.some(t => e.path === t || e.path.startsWith(t + '/')))
+    const unique = Array.from(new Map(selected.map(e => [e.path, e])).values())
+    if (!unique.length) return res.status(404).json({ erro: 'Nenhum arquivo correspondente foi encontrado nessa branch.' })
+    const deletionTree = await githubFetch(`/repos/${owner}/${repo}/git/trees`, {
+      method: 'POST', body: JSON.stringify({ base_tree: treeSha, tree: unique.map(e => ({ path: e.path, mode: '100644', type: 'blob', sha: null })) }),
+    })
+    const label = mode === 'current' ? (currentPath ? `conteúdo de ${currentPath}` : 'todo o conteúdo do repositório') : `${requested.length} item(ns) selecionado(s)`
+    const commit = await githubFetch(`/repos/${owner}/${repo}/git/commits`, {
+      method: 'POST', body: JSON.stringify({ message: `Remove ${label} via AL Sistemas`, tree: deletionTree.sha, parents: [parentSha] }),
+    })
+    await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      method: 'PATCH', body: JSON.stringify({ sha: commit.sha, force: false }),
+    })
+    const bytes = unique.reduce((n, e) => n + Number(e.size || 0), 0)
+    await AuditLog.create({
+      admin_id: req.usuario._id, admin_email: req.usuario.email, acao: 'excluir', recurso: 'github_conteudo_lote',
+      recurso_id: `${owner}/${repo}:${currentPath || '/'}`, payload: { owner, repo, branch, mode, currentPath, paths: requested, arquivos: unique.length, bytes },
+      ip: req.ip, request_id: req.requestId || null,
+    }).catch(() => {})
+    repoInsightCache.delete(`${owner}/${repo}@${branch}`)
+    res.json({ ok:true, removidos:unique.length, bytes, branch, mode, currentPath, commitSha:commit.sha,
+      commitUrl:`https://github.com/${owner}/${repo}/commit/${commit.sha}` })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
   }
 })
 
@@ -959,10 +1159,194 @@ router.get('/projetos-locais', autenticar, async (req, res) => {
   }
 })
 
+function parseGithubPublishConfig(body = {}, owner, repo) {
+  const repository = String(body?.repository || `${owner}/${repo}`).trim()
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    const e = new Error('Selecione um repositório GitHub válido.'); e.status = 400; throw e
+  }
+  const [destOwner, destRepo] = repository.split('/')
+  const branch = String(body?.branch || 'main').trim() || 'main'
+  if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch.includes('..')) {
+    const e = new Error('Branch de destino inválida.'); e.status = 400; throw e
+  }
+  const targetPath = normalizarTargetPath(body?.targetPath || '')
+  const replacePath = String(body?.replacePath || '').toLowerCase() === 'true' || body?.replacePath === true
+  const snapshotR2 = String(body?.snapshotR2 || '').toLowerCase() === 'true' || body?.snapshotR2 === true
+  const sentVersion = String(body?.sentVersion || '').trim().slice(0, 80)
+  const sentProduct = String(body?.sentProduct || '').trim().slice(0, 160)
+  return { repository, destOwner, destRepo, branch, targetPath, replacePath, snapshotR2, sentVersion, sentProduct }
+}
+
+async function githubPublishPreflight({ sourceOwner, sourceRepoName, config }) {
+  const checks = [], warnings = []
+  const pushCheck = (id, label, state, detail) => checks.push({ id, label, state, detail })
+  const [sourceRepo, destination] = await Promise.all([
+    githubFetch(`/repos/${sourceOwner}/${sourceRepoName}`),
+    githubFetch(`/repos/${config.destOwner}/${config.destRepo}`),
+  ])
+  pushCheck('source', 'Projeto de origem', 'ok', `${sourceRepo.full_name || `${sourceOwner}/${sourceRepoName}`} acessível`)
+  const writable = Boolean(destination.permissions?.push || destination.permissions?.maintain || destination.permissions?.admin)
+  if (!writable) {
+    pushCheck('write', 'Permissão de escrita', 'error', `O token não possui escrita em ${config.repository}`)
+  } else pushCheck('write', 'Permissão de escrita', 'ok', 'Contents: escrita disponível')
+
+  let base = null
+  try {
+    base = await obterBranchBase(config.destOwner, config.destRepo, config.branch)
+    pushCheck('branch', 'Branch', 'ok', base.parentSha
+      ? (base.exists ? `${config.branch} pronta para receber commit` : `${config.branch} será criada a partir de ${base.repoInfo?.default_branch || 'main'}`)
+      : `Repositório vazio; ${config.branch} será inicializada com o primeiro commit`)
+  } catch (e) {
+    pushCheck('branch', 'Branch', 'error', e.message || 'Não foi possível conferir a branch')
+  }
+
+  let insight = null
+  if (base?.parentSha) {
+    const insightBranch = base.exists ? config.branch : (base.repoInfo?.default_branch || config.branch)
+    try { insight = await montarRepoInsight(config.destOwner, config.destRepo, insightBranch) }
+    catch { insight = null }
+  }
+  pushCheck('path', 'Pasta de destino', 'ok', config.targetPath ? `/${config.targetPath}` : '/ (raiz)')
+
+  if (config.snapshotR2) {
+    try {
+      const r2 = await testR2UpdateStorage()
+      pushCheck('r2', 'Snapshot R2', 'ok', `${r2.bucket} acessível`)
+    } catch (e) {
+      pushCheck('r2', 'Snapshot R2', 'error', e.message || 'R2 indisponível')
+    }
+  } else {
+    pushCheck('r2', 'Snapshot R2', 'warn', 'Desativado para esta publicação')
+    warnings.push('A publicação será feita sem snapshot no R2.')
+  }
+
+  const currentVersion = String(insight?.versao || '')
+  const currentProduct = String(insight?.produto || '')
+  if (config.sentVersion && currentVersion) {
+    const cmp = compararVersoes(config.sentVersion, currentVersion)
+    if (cmp === 1) pushCheck('version', 'Versão', 'ok', `${currentVersion} → ${config.sentVersion}`)
+    else if (cmp === 0) {
+      pushCheck('version', 'Versão', 'warn', `${currentVersion} → ${config.sentVersion} (mesma versão)`)
+      warnings.push(`O pacote informa a mesma versão já encontrada no GitHub (${currentVersion}).`)
+    } else if (cmp === -1) {
+      pushCheck('version', 'Versão', 'warn', `${currentVersion} → ${config.sentVersion} (versão anterior)`)
+      warnings.push(`O pacote parece reduzir a versão de ${currentVersion} para ${config.sentVersion}.`)
+    } else pushCheck('version', 'Versão', 'ok', `${currentVersion} → ${config.sentVersion}`)
+  } else if (config.sentVersion) pushCheck('version', 'Versão', 'ok', `Destino sem versão detectada → ${config.sentVersion}`)
+  else pushCheck('version', 'Versão', 'warn', 'O pacote não informou uma versão reconhecível')
+
+  if (config.sentProduct && currentProduct && config.sentProduct.toLowerCase() !== currentProduct.toLowerCase()) {
+    pushCheck('product', 'Identidade do projeto', 'warn', `${currentProduct} → ${config.sentProduct}`)
+    warnings.push(`O pacote identifica o projeto como “${config.sentProduct}”, mas o destino parece ser “${currentProduct}”.`)
+  } else pushCheck('product', 'Identidade do projeto', 'ok', config.sentProduct || currentProduct || 'Projeto genérico')
+
+  if (config.replacePath && !config.targetPath) {
+    pushCheck('replace', 'Modo substituir', 'warn', 'Arquivos ausentes no ZIP serão removidos da raiz inteira')
+    warnings.push('“Substituir” na raiz pode remover qualquer arquivo que não exista no ZIP enviado.')
+  } else if (config.replacePath) pushCheck('replace', 'Modo substituir', 'ok', `Limitado a /${config.targetPath}`)
+  else pushCheck('replace', 'Modo mesclar', 'ok', 'Arquivos extras existentes serão preservados')
+
+  const errors = checks.filter(c => c.state === 'error')
+  return {
+    ok: errors.length === 0, checks, warnings,
+    destination: { repository: config.repository, branch: config.branch, path: config.targetPath || '/', repositoryEmpty: !base?.parentSha, branchExists: Boolean(base?.exists) },
+    version: { current: currentVersion || null, incoming: config.sentVersion || null, productCurrent: currentProduct || null, productIncoming: config.sentProduct || null },
+    sourceRepo,
+  }
+}
+
+function publicGithubPublishJob(job) {
+  return {
+    id:job.id,status:job.status,phase:job.phase,progress:job.progress,createdAt:job.createdAt,updatedAt:job.updatedAt,
+    logs:job.logs,result:job.result,error:job.error,
+  }
+}
+
+async function executarGithubPublish({ sourceOwner, sourceRepoName, fileBuffer, original, body, usuario, ip, requestId, onLog }) {
+  const config = parseGithubPublishConfig(body, sourceOwner, sourceRepoName)
+  onLog?.({phase:'preflight',label:'Verificação final',message:'Revalidando permissões, branch, destino, versão e snapshot…',progress:20})
+  const preflight = await githubPublishPreflight({ sourceOwner, sourceRepoName, config })
+  if (!preflight.ok) {
+    const first = preflight.checks.find(c => c.state === 'error')
+    const e = new Error(first?.detail || 'A verificação obrigatória encontrou um problema.'); e.status = 409; e.preflight = preflight; throw e
+  }
+  onLog?.({phase:'preflight',label:'Verificação final',message:`${preflight.checks.filter(c=>c.state==='ok').length} verificação(ões) aprovada(s).`,progress:30})
+
+  onLog?.({phase:'package',label:'Validando pacote',message:'Abrindo ZIP, validando CRC, caminhos, limites e arquivos publicáveis…',progress:33})
+  const unpacked = await extrairZipPublicavel(fileBuffer)
+  const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex')
+  onLog?.({phase:'package',label:'Pacote validado',message:`${unpacked.files.length} arquivo(s) · ${unpacked.totalBytes} bytes · SHA-256 ${sha256.slice(0,12)}…`,progress:38})
+
+  let snapshot = null
+  if (config.snapshotR2) {
+    onLog?.({phase:'snapshot',label:'Snapshot R2',message:'Salvando uma cópia do ZIP antes do commit…',progress:40})
+    snapshot = await storeProjectSnapshot(fileBuffer, {
+      owner: config.destOwner, repo: config.destRepo, branch: config.branch, filename: original, sha256,
+    })
+    onLog?.({phase:'snapshot',label:'Snapshot R2',message:`Snapshot confirmado em ${snapshot.bucket}.`,progress:41})
+  } else onLog?.({phase:'snapshot',label:'Snapshot R2',message:'Snapshot desativado para esta publicação.',progress:41,state:'off'})
+
+  const commitMessage = String(body?.commitMessage || `Publica ${original} pelo AL Sistemas`).trim().slice(0, 240)
+  const result = await publicarPacoteNoGitHub({
+    owner: config.destOwner, repo: config.destRepo, branch: config.branch, targetPath: config.targetPath,
+    files: unpacked.files, message: commitMessage, replacePath: config.replacePath,
+    onProgress: onLog,
+  })
+
+  const sourceRepo = preflight.sourceRepo
+  await GitHubMeta.findOneAndUpdate(
+    { repoId: Number(sourceRepo.id) },
+    { $set: { nomeCompleto: sourceRepo.full_name, publicacao: { repository:config.repository, branch:result.branch || config.branch, path:config.targetPath, snapshotR2:config.snapshotR2 } } },
+    { upsert:true, setDefaultsOnInsert:true }
+  ).catch(() => {})
+
+  await AuditLog.create({
+    admin_id: usuario?._id, admin_email: usuario?.email,
+    acao:'publicar', recurso:'github_pacote', recurso_id:config.repository,
+    payload:{ source:`${sourceOwner}/${sourceRepoName}`, repository:config.repository, branch:result.branch || config.branch, targetPath:config.targetPath,
+      replacePath:config.replacePath, snapshotR2:config.snapshotR2, initializedRepository:Boolean(result.initializedRepository), files:unpacked.files.length,
+      bytes:unpacked.totalBytes, sha256, verified:Boolean(result.verified), fromVersion:preflight.version.current, toVersion:preflight.version.incoming },
+    ip, request_id:requestId || null,
+  }).catch(() => {})
+
+  repoInsightCache.delete(`${config.destOwner}/${config.destRepo}@${result.branch || config.branch}`)
+  onLog?.({phase:'done',label:'Publicação verificada',message:result.changed
+    ? `Commit ${result.commitSha?.slice(0,7)} confirmado no GitHub.`
+    : 'O conteúdo já estava idêntico ao GitHub; nenhum novo commit foi necessário.',progress:100,state:'done'})
+  return {
+    ok:true,
+    mensagem:result.changed ? `Pacote publicado em ${config.repository} com sucesso.` : 'O conteúdo enviado já corresponde ao conteúdo do GitHub.',
+    destino:{ repository:config.repository, branch:result.branch || config.branch, path:config.targetPath || '/', replacePath:config.replacePath },
+    pacote:{ nome:original, sha256, arquivos:unpacked.files.length, bytes:unpacked.totalBytes, raizRemovida:unpacked.commonRoot || null },
+    snapshot, commit:result,
+    verificacao:{ ok:Boolean(result.verified), verificadoEm:result.verifiedAt || new Date().toISOString(), checks:preflight.checks, warnings:preflight.warnings },
+    versao:preflight.version,
+  }
+}
+
+/* POST /api/github/repos/:owner/:repo/publicar-pacote/preflight
+   Verificação obrigatória antes de transferir o ZIP. */
+router.post('/repos/:owner/:repo/publicar-pacote/preflight', autenticar, async (req,res) => {
+  const {owner,repo}=req.params
+  if(!validarNome(owner)||!validarNome(repo)) return res.status(400).json({erro:'Repositório de origem inválido.'})
+  try{
+    const config=parseGithubPublishConfig(req.body||{},owner,repo)
+    const result=await githubPublishPreflight({sourceOwner:owner,sourceRepoName:repo,config})
+    const {sourceRepo:_sourceRepo,...safe}=result
+    res.json(safe)
+  }catch(err){res.status(err.status||500).json({erro:err.message})}
+})
+
+/* GET /api/github/repos/:owner/:repo/publicar-pacote/jobs/:jobId */
+router.get('/repos/:owner/:repo/publicar-pacote/jobs/:jobId', autenticar, async(req,res)=>{
+  const job=githubPublishJobs.get(String(req.params.jobId||''))
+  if(!job || job.owner!==req.params.owner || job.repo!==req.params.repo || (job.usuarioId && job.usuarioId!==String(req.usuario?._id||''))) return res.status(404).json({erro:'Publicação não encontrada ou expirada.'})
+  res.json({job:publicGithubPublishJob(job)})
+})
+
 /* POST /api/github/repos/:owner/:repo/publicar-pacote
-   Publicação independente do módulo Projetos. O arquivo ZIP é enviado pelo
-   navegador, descompactado apenas em memória e aplicado ao caminho GitHub
-   escolhido. Vercel/Render permanecem uma etapa posterior e opcional. */
+   Recebe o ZIP. Com async=true, devolve um job e o frontend acompanha o log real
+   enquanto o backend valida, cria snapshot, publica e confirma o commit. */
 router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.single('package'), async (req, res) => {
   const { owner, repo } = req.params
   if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Repositório de origem inválido.' })
@@ -970,69 +1354,35 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
   const original = String(req.file.originalname || 'projeto.zip')
   if (!/\.zip$/i.test(original)) return res.status(400).json({ erro: 'O pacote precisa ser um arquivo .zip.' })
 
-  const repository = String(req.body?.repository || `${owner}/${repo}`).trim()
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return res.status(400).json({ erro: 'Selecione um repositório GitHub válido.' })
-  const [destOwner, destRepo] = repository.split('/')
-  const branch = String(req.body?.branch || 'main').trim() || 'main'
-  if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch.includes('..')) return res.status(400).json({ erro: 'Branch de destino inválida.' })
-  let targetPath = ''
-  try { targetPath = normalizarTargetPath(req.body?.targetPath || '') } catch (e) { return res.status(e.status || 400).json({ erro: e.message }) }
-  const replacePath = String(req.body?.replacePath || '').toLowerCase() === 'true'
-  const snapshotR2 = String(req.body?.snapshotR2 || '').toLowerCase() === 'true'
-  const commitMessage = String(req.body?.commitMessage || `Publica ${original} pelo AL Sistemas`).trim().slice(0, 240)
-
-  try {
-    const [sourceRepo, destination] = await Promise.all([
-      githubFetch(`/repos/${owner}/${repo}`),
-      githubFetch(`/repos/${destOwner}/${destRepo}`),
-    ])
-    const writable = Boolean(destination.permissions?.push || destination.permissions?.maintain || destination.permissions?.admin)
-    if (!writable) return res.status(403).json({ erro: `O token salvo em Integrações e APIs não possui escrita em ${repository}.` })
-
-    const unpacked = await extrairZipPublicavel(req.file.buffer)
-    const sha256 = crypto.createHash('sha256').update(req.file.buffer).digest('hex')
-    let snapshot = null
-    if (snapshotR2) {
-      snapshot = await storeProjectSnapshot(req.file.buffer, {
-        owner: destOwner, repo: destRepo, branch, filename: original, sha256,
-      })
-    }
-
-    const result = await publicarPacoteNoGitHub({
-      owner: destOwner, repo: destRepo, branch, targetPath,
-      files: unpacked.files, message: commitMessage, replacePath,
+  const asyncMode=String(req.body?.async||'').toLowerCase()==='true'
+  if(asyncMode){
+    const job=criarGithubPublishJob({owner,repo,usuarioId:req.usuario?._id})
+    registrarGithubPublishLog(job,'received','Pacote recebido',`${original} chegou ao backend (${req.file.size || req.file.buffer.length} bytes).`,'done',12)
+    const buffer=req.file.buffer
+    const body={...req.body}
+    const usuario=req.usuario, ip=req.ip, requestId=req.requestId
+    setImmediate(async()=>{
+      job.status='running'; job.updatedAt=new Date().toISOString()
+      try{
+        const result=await executarGithubPublish({sourceOwner:owner,sourceRepoName:repo,fileBuffer:buffer,original,body,usuario,ip,requestId,
+          onLog:e=>registrarGithubPublishLog(job,e.phase,e.label,e.message,e.state||'active',e.progress,e.details)})
+        job.result=result; job.status='succeeded'; job.progress=100; job.phase='done'; job.updatedAt=new Date().toISOString()
+      }catch(err){
+        job.status='failed'; job.phase='error'; job.error={message:err.status===403
+          ? `GitHub recusou a gravação. Confira Contents: Read and write para o token salvo em Integrações e APIs.`
+          : err.message, status:err.status||500, preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined}
+        registrarGithubPublishLog(job,'error','Publicação interrompida',job.error.message,'error',job.progress)
+      }
     })
+    return res.status(202).json({ok:true,async:true,job:publicGithubPublishJob(job)})
+  }
 
-    await GitHubMeta.findOneAndUpdate(
-      { repoId: Number(sourceRepo.id) },
-      { $set: {
-        nomeCompleto: sourceRepo.full_name,
-        publicacao: { repository, branch: result.branch || branch, path: targetPath, snapshotR2 },
-      } },
-      { upsert: true, setDefaultsOnInsert: true }
-    ).catch(() => {})
-
-    await AuditLog.create({
-      admin_id: req.usuario._id, admin_email: req.usuario.email,
-      acao: 'publicar', recurso: 'github_pacote', recurso_id: repository,
-      payload: { source: `${owner}/${repo}`, repository, branch: result.branch || branch, targetPath, replacePath, snapshotR2, initializedRepository: Boolean(result.initializedRepository), files: unpacked.files.length, bytes: unpacked.totalBytes, sha256 },
-      ip: req.ip, request_id: req.requestId || null,
-    }).catch(() => {})
-
-    repoInsightCache.delete(`${destOwner}/${destRepo}@${result.branch || branch}`)
-    res.status(201).json({
-      ok: true,
-      mensagem: result.changed ? `Pacote publicado em ${repository} com sucesso.` : 'O conteúdo enviado já corresponde ao conteúdo do GitHub.',
-      destino: { repository, branch: result.branch || branch, path: targetPath || '/', replacePath },
-      pacote: { nome: original, sha256, arquivos: unpacked.files.length, bytes: unpacked.totalBytes, raizRemovida: unpacked.commonRoot || null },
-      snapshot,
-      commit: result,
-    })
-  } catch (err) {
-    const msg = err.status === 403
-      ? `GitHub recusou a gravação em ${repository}. Confira Contents: Read and write para o token salvo em Integrações e APIs.`
-      : err.message
-    res.status(err.status || 500).json({ erro: msg })
+  try{
+    const result=await executarGithubPublish({sourceOwner:owner,sourceRepoName:repo,fileBuffer:req.file.buffer,original,body:req.body||{},usuario:req.usuario,ip:req.ip,requestId:req.requestId})
+    res.status(201).json(result)
+  }catch(err){
+    const msg=err.status===403 ? 'GitHub recusou a gravação. Confira Contents: Read and write para o token salvo em Integrações e APIs.' : err.message
+    res.status(err.status||500).json({erro:msg,preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined})
   }
 })
 
