@@ -343,7 +343,7 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
       manifest = await json(manifestPath)
       if (manifest.product !== 'AL Sistemas' || manifest.version !== backendPkg.version) throw new Error('Manifesto al-sistemas.json inválido.')
     }
-    if (compareVersions(backendPkg.version, current.version) <= 0) throw new Error(`A versão ${backendPkg.version} não é superior à instalada (${current.version}).`)
+    if (compareVersions(backendPkg.version, current.version) < 0) throw new Error(`A versão ${backendPkg.version} é anterior à instalada (${current.version}). Downgrade continua bloqueado.`)
 
     const target = persist ? path.join(STAGING_DIR, id) : packageRoot
     if (persist) await fs.cp(packageRoot, target, { recursive: true, force: true })
@@ -359,6 +359,7 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
       changelog, dependencies: deps, ...(await detectMigrations(target)), removedFiles:[],
       frontendCacheResetRequired: Boolean(deps.frontend?.installRequired || currentViteConfig !== nextViteConfig || currentFrontendPkg !== nextFrontendPkg),
       sha256: await hashFile(zipPath), integrity, status: 'ready', ephemeral: !persist,
+      sameVersion: compareVersions(backendPkg.version,current.version)===0,
     }
     if (persist) {
       await atomicJson(path.join(target, '.update-meta.json'), meta)
@@ -607,6 +608,12 @@ async function sameFile(a,b){
   return ha===hb
 }
 
+async function sameFileStrict(a,b){
+  if(a.size!==b.size) return false
+  const [ha,hb]=await Promise.all([hashFile(a.full),hashFile(b.full)])
+  return Boolean(ha&&hb&&ha===hb)
+}
+
 async function dirBytes(map){
   let total=0
   for(const v of map.values()) total+=Number(v.size||0)
@@ -693,6 +700,8 @@ export async function getUpdatePreflight(stageId){
   const updaterDiagnostics=await getUpdaterDiagnostics()
   await verifyStageIntegrity(stageId)
   const meta=await getStage(stageId)
+  const installed=await installedVersion()
+  const sameVersion=compareVersions(meta.version,installed.version)===0
   const stageDir=path.join(STAGING_DIR,stageId)
   const [backendPkg,frontendPkg]=await Promise.all([json(path.join(stageDir,'backend/package.json')),json(path.join(stageDir,'frontend/package.json'))])
   const nodeEngine=nodeEngineCheck(backendPkg.engines?.node||frontendPkg.engines?.node)
@@ -710,7 +719,7 @@ export async function getUpdatePreflight(stageId){
   for(const [rel,next] of nextFiles){
     const cur=currentFiles.get(rel)
     if(!cur) added.push(rel)
-    else if(await sameFile(cur,next)) unchanged.push(rel)
+    else if(await (sameVersion?sameFileStrict(cur,next):sameFile)(cur,next)) unchanged.push(rel)
     else changed.push(rel)
   }
   if(meta.packageType==='incremental'){
@@ -735,7 +744,12 @@ export async function getUpdatePreflight(stageId){
   const estimatedRequiredBytes=estimatedBackupBytes+estimatedWorkingBytes+32*1024*1024
   const diskOk=freeBytes===null?true:freeBytes>estimatedRequiredBytes
   const dependencyChanges=['backend','frontend'].filter(a=>meta.dependencies?.[a]?.installRequired)
+  const operations=added.length+changed.length+removed.length
+  const repairNeeded=sameVersion&&(operations>0||dependencyChanges.length>0)
+  const noChanges=sameVersion&&!repairNeeded
   const warnings=[]
+  if(sameVersion&&repairNeeded) warnings.push(`Modo reparo: a versão ${meta.version} é a mesma já registrada, mas a verificação SHA-256 arquivo por arquivo encontrou diferenças reais ou dependências que precisam de reparo.`)
+  if(noChanges) warnings.push(`A versão ${meta.version} já está íntegra: nenhum arquivo ou dependência precisa ser reaplicado.`)
   if(!diskOk) warnings.push('Espaço livre possivelmente insuficiente para snapshot + atualização.')
   if(!rootWritable||!stateWritable) warnings.push('O processo não possui permissão de escrita suficiente para atualizar/armazenar o snapshot.')
   if(!nodeEngine.ok) warnings.push(`Node.js incompatível com o pacote: exige ${nodeEngine.spec}, atual ${nodeEngine.current}.`)
@@ -745,7 +759,9 @@ export async function getUpdatePreflight(stageId){
   if(dependencyChanges.length) warnings.push(`Dependências serão processadas em: ${dependencyChanges.join(', ')}.`)
   if(removed.length>25) warnings.push(`${removed.length} arquivos gerenciados pelo AL Sistemas serão removidos porque deixaram de existir na nova versão.`)
   const notes=[
-    `Aplicação diferencial: ${unchanged.length} arquivo(s) já estão iguais e não serão regravados.`,
+    sameVersion
+      ? `Reaplicação segura: comparação SHA-256 completa executada arquivo por arquivo para confirmar divergências da mesma versão.`
+      : `Aplicação diferencial: ${unchanged.length} arquivo(s) já estão iguais e não serão regravados.`,
     localRuntime.fileCount
       ? `${localRuntime.fileCount} arquivo(s) locais do Termux/Manager (${Math.round(localRuntime.totalBytes/1024)} KB) foram preservados fora da comparação.`
       : 'Nenhum artefato local do Termux/Manager entrou na comparação.',
@@ -759,13 +775,15 @@ export async function getUpdatePreflight(stageId){
   if(!diskOk||!rootWritable||!stateWritable||!nodeEngine.ok||meta.migrationRollbackSafe===false||(meta.migrations?.length&&mongoose.connection.readyState!==1)||!updaterDiagnostics.ok) risk='alto'
   if(!updaterDiagnostics.ok) warnings.push('O diagnóstico do motor de atualização encontrou um bloqueio estrutural.')
 
+  const baseOk=updaterDiagnostics.ok && diskOk && rootWritable && stateWritable && nodeEngine.ok && meta.migrationRollbackSafe!==false && (!(meta.migrations?.length)||mongoose.connection.readyState===1)
   return {
-    ok:updaterDiagnostics.ok && diskOk && rootWritable && stateWritable && nodeEngine.ok && meta.migrationRollbackSafe!==false && (!(meta.migrations?.length)||mongoose.connection.readyState===1),
-    stageId,fromVersion:(await installedVersion()).version,toVersion:meta.version,packageType:meta.packageType||'full',baseVersion:meta.baseVersion||null,
+    ok:baseOk&&!noChanges,
+    stageId,fromVersion:installed.version,toVersion:meta.version,packageType:meta.packageType||'full',baseVersion:meta.baseVersion||null,
+    repair:{sameVersion,needed:repairNeeded,noChanges,strictHash:sameVersion,reason:repairNeeded?'files-or-dependencies-differ':noChanges?'already-integral':'normal-upgrade'},
     createdAt:new Date().toISOString(),
     files:{
       added:added.length,changed:changed.length,removed:removed.length,unchanged:unchanged.length,
-      operations:added.length+changed.length+removed.length,
+      operations,
       writes:added.length+changed.length,
       totalIncoming:nextFiles.size,
       managedCurrent:ownedFiles.size,
@@ -879,7 +897,13 @@ export async function listInterruptedJobs(){
 export async function createJob(stageId, options = {}) {
   await ensureUpdateDirs(); const integrity=await verifyStageIntegrity(stageId); const meta = await getStage(stageId)
   const current = await installedVersion()
-  if(compareVersions(meta.version,current.version)<=0) throw new Error(`A versão preparada (${meta.version}) não é superior à instalada (${current.version}). Valide um pacote mais recente.`)
+  const versionCmp=compareVersions(meta.version,current.version)
+  if(versionCmp<0) throw new Error(`A versão preparada (${meta.version}) é anterior à instalada (${current.version}). Downgrade continua bloqueado.`)
+  if(versionCmp===0 && !(meta.packageType==='full' && options.preflight?.repair?.sameVersion && options.preflight?.repair?.needed)) {
+    const err=new Error(`A versão ${meta.version} é a mesma já instalada e nenhuma necessidade de reparo foi confirmada pelo pré-check.`)
+    err.code='UPDATE_NO_CHANGES'
+    throw err
+  }
   if(meta.packageType==='incremental' && current.version!==meta.baseVersion) throw new Error(`Este incremental exige a versão ${meta.baseVersion}, mas a instalação está em ${current.version}. Use o pacote completo.`)
   if (meta.migrations?.length && meta.migrationRollbackSafe === false) throw new Error('A atualização contém migrações sem função down segura. A instalação via painel foi bloqueada para preservar o rollback automático.')
   const id = `job_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`

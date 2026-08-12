@@ -1,14 +1,15 @@
 # Changelog
 
-## 1.0.127 — Unificação visual final do painel
+## 1.0.128 — Wizard de atualização e modo reparo
 
-- GitHub deixa o drawer lateral e passa a abrir cada repositório em um workspace centralizado, amplo e responsivo, mantendo a grade de ações em 3 colunas no celular.
-- Integrações e APIs adota `DSPageHeader` e `DSModal`; diagnóstico geral e diagnóstico da IA passam a usar a mesma superfície/overlay dos demais pop-ups.
-- Estados de integração (sucesso, atenção, erro) deixam de usar verdes/âmbares fixos e passam a consumir os tokens semânticos do tema.
-- Cloudflare mantém o laranja somente como identidade do provedor; Explorer e ferramentas avançadas usam `DSModal` e estados de saúde seguem o Design System.
-- Projetos e Deploys, Monitor e Assistente recebem uma varredura de cores estruturais para reduzir inconsistências entre Claro, Escuro, Oceano e Rosa.
-- Design System ganha `--adm-subtle` e `--adm-overlay`, aplicados globalmente a overlays, placeholders, foco, seleção e superfícies legadas.
-- Adiciona `npm run check:themes`, que valida os tokens obrigatórios dos quatro temas e os principais pontos de responsividade.
+- Atualizações passam a abrir em um wizard profissional centralizado com cinco etapas: **Pacote → Revisão → Proteção → Instalação → Concluído**.
+- Upload do ZIP possui porcentagem própria; a revisão mostra versão atual → pacote, módulos encontrados, arquivos, tamanho, migrações e alterações reais antes de qualquer escrita.
+- Snapshot/backup ganha etapa dedicada. Em ambiente gerenciado, a preservação no R2 fica separada da sincronização GitHub.
+- Instalação local passa a publicar no job o arquivo atual, progresso de arquivos e log vivo com **ADD / MOD / DEL**.
+- Sincronização GitHub também informa arquivo atual, porcentagem e entradas ADD/MOD/DEL, inclusive remoções.
+- Pacote **completo** da mesma versão passa a ser aceito para reparo. O pré-check usa SHA-256 integral arquivo por arquivo e só permite continuar quando encontra diferenças reais ou dependências a reparar.
+- Se a versão for igual e tudo já estiver íntegro, o sistema informa que não há reparo necessário e cancela a reinstalação; versões anteriores permanecem bloqueadas.
+- Stepper, estados semânticos, modal central e tela final usam os tokens de Claro, Escuro, Oceano e Rosa.
 
 ## 1.0.126 — Componentes estruturais, Dashboard e módulos compactos
 

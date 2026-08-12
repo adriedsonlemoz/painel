@@ -22,6 +22,8 @@ const oceanTheme = {
     '--adm-red':       '#f87171',
     '--adm-amber':     '#fbbf24',
     '--adm-blue':      '#38bdf8',
+    '--adm-warning':   'var(--adm-amber)',
+    '--adm-danger':    'var(--adm-red)',
     '--adm-success':   '#22c55e',
     '--adm-topnav-bg': '#0f2644',
     '--adm-overlay':   'rgba(0,0,0,.64)',

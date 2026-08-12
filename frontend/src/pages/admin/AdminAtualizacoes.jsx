@@ -36,12 +36,19 @@ async function inspectUpdatePackage(file){
     const changeEntry=entries.filter(x=>/(^|\/)CHANGELOG\.md$/i.test(x.name)).sort((a,b)=>a.name.split('/').length-b.name.split('/').length)[0]
     if(changeEntry)changelog=releaseNotes(await changeEntry.async('string')).slice(0,12)
   }
-  return {version:String(manifest.version||''),product:String(manifest.product||'AL Sistemas'),packageFormat:manifest.packageFormat,changelog,manifestPath:manifestEntry.name}
+  const names=entries.map(x=>x.name.replace(/^\.\//,''))
+  const modules=[]
+  if(names.some(x=>/(^|\/)frontend\//.test(x)))modules.push('Frontend')
+  if(names.some(x=>/(^|\/)backend\//.test(x)))modules.push('Backend')
+  if(names.some(x=>/(^|\/)backend\/migrations\//.test(x)))modules.push('Migrações')
+  if(names.some(x=>/(^|\/)(scripts?|setup)\//i.test(x)))modules.push('Setup / Scripts')
+  return {version:String(manifest.version||''),product:String(manifest.product||'AL Sistemas'),packageFormat:manifest.packageFormat,changelog,manifestPath:manifestEntry.name,fileCount:entries.length,modules}
 }
 
 export default function AdminAtualizacoes(){
   const [data,setData]=useState(null),[loading,setLoading]=useState(true),[uploading,setUploading]=useState(false),[uploadProgress,setUploadProgress]=useState(0),[file,setFile]=useState(null),[packagePreview,setPackagePreview]=useState(null),[job,setJob]=useState(null),[confirmAction,setConfirmAction]=useState(null)
   const [githubPublish,setGithubPublish]=useState(null),[ephemeralStage,setEphemeralStage]=useState(null),[engineTest,setEngineTest]=useState(null),[diagnostics,setDiagnostics]=useState(null),[systemTest,setSystemTest]=useState(null),[uiPanel,setUiPanel]=useState(null)
+  const [wizardStep,setWizardStep]=useState(0),[wizardStage,setWizardStage]=useState(null),[wizardPreflight,setWizardPreflight]=useState(null),[wizardBusy,setWizardBusy]=useState(false)
   const poll=useRef(null)
   const packageInput=useRef(null)
   const mounted=useRef(true)
@@ -79,7 +86,7 @@ export default function AdminAtualizacoes(){
     params.delete('acao')
     const qs=params.toString()
     window.history.replaceState({},document.title,`${window.location.pathname}${qs?`?${qs}`:''}${window.location.hash||''}`)
-    if(acao==='nova')setUiPanel('upload')
+    if(acao==='nova'){setWizardStep(0);setWizardStage(null);setWizardPreflight(null);setUiPanel('upload')}
     else openGithubPublish(null)
   },[data])
   async function selectPackage(nextFile){
@@ -94,25 +101,56 @@ export default function AdminAtualizacoes(){
       setPackagePreview({loading:false,error:e.message,version:inferred,changelog:[],relation:inferred?compareVersions(inferred,data?.installed?.version||'0.0.0'):null})
     }
   }
-  async function prepare(){ if(!file)return toast.error('Selecione um pacote .zip.'); setUploading(true); setUploadProgress(0); try{
-    const r=await updatesService.preparar(file,p=>setUploadProgress(p))
-    const prepared=r.update
-    const managedHost=['vercel','render'].includes(data?.updateCapabilities?.environment)
-    if(r.ephemeral||managedHost){
-      if(r.ephemeral)setEphemeralStage(prepared)
-      else { setEphemeralStage(null); setFile(null); setPackagePreview(null); await load({silent:true}) }
+  async function prepare(){
+    if(!file)return toast.error('Selecione um pacote .zip.')
+    setUploading(true);setWizardBusy(true);setUploadProgress(0)
+    try{
+      const r=await updatesService.preparar(file,p=>setUploadProgress(p))
+      const prepared=r.update
+      const managed=['vercel','render'].includes(data?.updateCapabilities?.environment)
+      setWizardStage(prepared)
+      if(r.ephemeral)setEphemeralStage(prepared);else setEphemeralStage(null)
+      if(managed){
+        setWizardPreflight(null)
+        await load({silent:true})
+        setWizardStep(1)
+      }else{
+        const pre=await updatesService.preflight(prepared.id)
+        setWizardPreflight(pre.preflight)
+        await load({silent:true})
+        setWizardStep(1)
+      }
+    }catch(e){toast.error(e.message)}finally{setUploading(false);setWizardBusy(false)}
+  }
+  function resetUpdateWizard(){
+    if(wizardBusy||uploading)return
+    setUiPanel(null);setWizardStep(0);setWizardStage(null);setWizardPreflight(null);setFile(null);setPackagePreview(null);setUploadProgress(0)
+  }
+  async function startWizardInstall(){
+    if(!wizardStage?.id)return toast.error('Pacote preparado não encontrado.')
+    if(!wizardPreflight?.ok)return toast.error(wizardPreflight?.repair?.noChanges?'Esta versão já está íntegra; não há nada para reaplicar.':'O pré-check ainda possui bloqueios.')
+    setWizardBusy(true)
+    try{
+      const config={frontendUrl:window.location.origin,returnPath:'/admin/atualizacoes',snapshotRetention:3,maintenanceMode:true}
+      const r=await updatesService.instalar(wizardStage.id,config)
+      localStorage.setItem('als:last-update-job',r.job.id)
+      setUiPanel(null);setWizardStep(0);setWizardStage(null);setWizardPreflight(null);setFile(null);setPackagePreview(null)
+      setJob(r.job);watch(r.job.id)
+      toast.success(wizardPreflight?.repair?.sameVersion?'Reparo da mesma versão iniciado.':'Atualização iniciada.')
+    }catch(e){toast.error(e.message)}finally{setWizardBusy(false)}
+  }
+  async function advanceWizard(){
+    const managed=['vercel','render'].includes(data?.updateCapabilities?.environment)
+    if(wizardStep===1){setWizardStep(2);return}
+    if(wizardStep!==2)return
+    if(managed){
+      const stage=wizardStage
       setUiPanel(null)
-      // Em Render/Vercel a próxima etapa publica o pacote persistido no R2.
-      await openGithubPublish(prepared)
-    }else{
-      setFile(null)
-      setPackagePreview(null)
-      setEphemeralStage(null)
-      await load({silent:true})
-      setUiPanel(null)
-      await install(prepared)
+      await openGithubPublish(stage)
+      return
     }
-  }catch(e){toast.error(e.message)}finally{setUploading(false)} }
+    await startWizardInstall()
+  }
   function watch(id,typeHint=null){
     clearTimeout(poll.current)
     const seq=++watchSeq.current
@@ -262,14 +300,10 @@ export default function AdminAtualizacoes(){
       const r=action.type==='install'?await updatesService.instalar(action.item.id,config):await updatesService.rollback(action.item.id,config)
       localStorage.setItem('als:last-update-job',r.job.id)
       toast.success(action.type==='install'?'Atualização iniciada.':'Rollback iniciado.')
-      if(r.monitorReady&&r.monitorUrl){
-        window.location.assign(r.monitorUrl)
-        return
-      }
+      setJob(r.job)
       watch(r.job.id)
       if(r.monitorUrl){
-        toast('Canal independente iniciando. O progresso continua aqui e a transferência será automática quando ele responder.')
-        void handoffToExternalMonitor(r.monitorUrl,r.job.id)
+        toast('Monitor independente de recuperação está ativo em paralelo. O progresso principal permanece centralizado nesta tela.',{duration:3500})
       }
     }catch(e){toast.error(e.message)}
   }
@@ -460,7 +494,7 @@ export default function AdminAtualizacoes(){
     {managedHost&&<div className={`updates-alert ${data?.cloudStorage?.ok?'updates-alert-info':'updates-alert-warn'}`}><div><b>☁️ {data?.runtime?.environment} · {data?.cloudStorage?.ok?'R2 conectado':'R2 precisa de configuração'}</b><span>{data?.cloudStorage?.ok?`Produção cloud: ZIP → R2 (${data.cloudStorage.bucket}) → GitHub → Vercel + Render.`:(data?.cloudStorage?.error||'Configure o R2 em Integrações e APIs antes de enviar uma nova versão.')}</span></div></div>}
 
     <div className="updates-command-grid">
-      <button className="updates-command updates-command-primary" onClick={()=>setUiPanel('upload')}>
+      <button className="updates-command updates-command-primary" onClick={()=>{setWizardStep(0);setWizardStage(null);setWizardPreflight(null);setFile(null);setPackagePreview(null);setUploadProgress(0);setUiPanel('upload')}}>
         <span className="updates-command-icon">⬆</span><span><b>Nova versão</b><small>Enviar ZIP e validar</small></span>
       </button>
       {!managedHost&&<button className="updates-command updates-command-install" disabled={Boolean(activeOperation)} onClick={()=>setUiPanel('packages')}>
@@ -500,21 +534,58 @@ export default function AdminAtualizacoes(){
     {job&&!['github-publish','cloud-release'].includes(job.type)&&<UpdateProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status)){const reload=job.status==='completed';setJob(null);if(reload)window.location.reload()}}}/>}
     {job&&['github-publish','cloud-release'].includes(job.type)&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','attention','restart-required','rolled-back'].includes(job.status))setJob(null)}} onReconcile={reconcileCloudRelease} onRetry={retryCloudRelease} onRepublish={republishCloudRelease} onInterrupt={interruptCloudRelease}/>}
 
-    {uiPanel==='upload'&&<PanelModal kicker="NOVA VERSÃO" title="Validar e preparar pacote" onClose={()=>setUiPanel(null)}>
-      <p className="updates-panel-copy">{managedHost?'Em produção gerenciada, o ZIP é validado e a próxima etapa será Publicar no GitHub. Render/Vercel criam uma nova release; nenhum arquivo da instância atual é atualizado por cima.':'O ZIP é validado e extraído em staging. Nenhum arquivo da instalação é substituído nesta etapa.'}</p>
-      <input ref={packageInput} className="updates-file-input-hidden" type="file" accept=".zip" onChange={e=>{void selectPackage(e.target.files?.[0]||null);e.target.value=''}}/>
-      <div className="updates-package-picker">
-        <button type="button" className="updates-pick-file" disabled={uploading} onClick={()=>packageInput.current?.click()}><span>📦</span><span><b>{file?'Trocar pacote':'Selecionar pacote'}</b><small>Arquivo completo .zip do AL Sistemas</small></span></button>
-        <button className="updates-send-package" disabled={uploading||!file||packagePreview?.loading||packagePreview?.relation<=0} onClick={prepare}>{uploading?(uploadProgress<100?`Enviando ${uploadProgress}%`:'Validando…'):'↑ Preparar atualização'}</button>
-      </div>
-      {file&&<div className="updates-file-selected"><span><b>{file.name}</b><small>{bytes(file.size)}</small></span>{!uploading&&<span className="updates-file-ready">pronto para enviar</span>}</div>}
-      {file&&<div className={`updates-next-release ${packagePreview?.relation!==null&&packagePreview?.relation<=0?'warn':''}`}>
-        <div className="updates-next-release-head"><div><span>PRÓXIMA ATUALIZAÇÃO</span><b>{packagePreview?.loading?'Lendo o pacote…':packagePreview?.version?`AL Sistemas ${data?.installed?.version||'—'} → ${packagePreview.version}`:'Pacote selecionado'}</b></div>{packagePreview?.version&&<strong>v{packagePreview.version}</strong>}</div>
-        {packagePreview?.relation!==null&&packagePreview?.relation<=0&&<div className="updates-next-release-warning">⚠ Esta versão não é superior à instalada. O backend continuará bloqueando versões iguais ou anteriores.</div>}
-        {packagePreview?.error&&<div className="updates-next-release-warning">Não foi possível ler o manifesto localmente: {packagePreview.error} A validação oficial ainda será feita pelo backend.</div>}
-        {!packagePreview?.loading&&packagePreview?.changelog?.length>0&&<><div className="updates-next-release-label">O que muda nesta versão</div><ul>{packagePreview.changelog.slice(0,7).map((x,i)=><li key={i}>{x}</li>)}</ul>{packagePreview.changelog.length>7&&<small>+ {packagePreview.changelog.length-7} alteração(ões) descrita(s) no pacote.</small>}</>}
-      </div>}
-      {uploading&&<div className="updates-upload-progress"><div className="updates-upload-progress-head"><b>{uploadProgress<100?'Enviando pacote ao servidor':'Upload concluído'}</b><span>{uploadProgress}%</span></div><div className="updates-upload-track"><i style={{width:`${uploadProgress}%`}}/></div><small>{uploadProgress<100?`${bytes(Math.round((file?.size||0)*(uploadProgress/100)))} de ${bytes(file?.size||0)}`:(managedHost?'Validando o ZIP e armazenando a release no R2…':'Validando o ZIP e preparando o staging…')}</small></div>}
+    {uiPanel==='upload'&&<PanelModal kicker="ATUALIZAÇÃO GUIADA" title={wizardStep===0?'Selecionar pacote':wizardStep===1?'Revisar atualização':'Proteção e instalação'} onClose={resetUpdateWizard} wide>
+      <UpdateWizardSteps step={wizardStep} managed={managedHost}/>
+      {wizardStep===0&&<>
+        <p className="updates-panel-copy">Escolha o ZIP. Primeiro fazemos upload e validação; nenhum arquivo é alterado antes da revisão e da etapa de proteção.</p>
+        <input ref={packageInput} className="updates-file-input-hidden" type="file" accept=".zip" onChange={e=>{void selectPackage(e.target.files?.[0]||null);e.target.value=''}}/>
+        <button type="button" className="updates-wizard-drop" disabled={uploading} onClick={()=>packageInput.current?.click()}>
+          <span className="updates-wizard-drop-icon">📦</span>
+          <span><b>{file?file.name:'Selecionar pacote .zip'}</b><small>{file?`${bytes(file.size)} · toque para trocar`:'Pacote completo do AL Sistemas'}</small></span>
+        </button>
+        {file&&<div className={`updates-wizard-package ${packagePreview?.relation<0?'bad':packagePreview?.relation===0?'repair':''}`}>
+          <div className="updates-wizard-version"><small>VERSÃO</small><strong>{data?.installed?.version||'—'} <span>→</span> {packagePreview?.loading?'…':packagePreview?.version||'?'}</strong></div>
+          <div className="updates-wizard-mini-grid">
+            <MiniStat label="Arquivos" value={packagePreview?.fileCount??'—'}/>
+            <MiniStat label="Módulos" value={packagePreview?.modules?.length?packagePreview.modules.join(' · '):'analisando'}/>
+          </div>
+          {packagePreview?.relation===0&&<div className="updates-repair-note"><b>↻ Reaplicação permitida</b><span>A versão do pacote é a mesma registrada. O backend fará comparação SHA-256 arquivo por arquivo e só continuará se encontrar diferenças reais ou dependências para reparar.</span></div>}
+          {packagePreview?.relation<0&&<div className="updates-wizard-error">Versões anteriores continuam bloqueadas para evitar downgrade acidental.</div>}
+          {packagePreview?.error&&<div className="updates-wizard-warning">Manifesto local: {packagePreview.error} A validação oficial será feita no servidor.</div>}
+        </div>}
+        {uploading&&<div className="updates-upload-progress"><div className="updates-upload-progress-head"><b>{uploadProgress<100?'Enviando pacote':'Validando pacote'}</b><span>{uploadProgress}%</span></div><div className="updates-upload-track"><i style={{width:`${uploadProgress}%`}}/></div><small>{uploadProgress<100?`${bytes(Math.round((file?.size||0)*(uploadProgress/100)))} de ${bytes(file?.size||0)}`:(managedHost?'Validando estrutura e preservando no R2…':'Validando estrutura e criando staging isolado…')}</small></div>}
+        <div className="updates-wizard-footer"><span>1 de 5 · pacote</span><button className="updates-primary-action" disabled={uploading||!file||packagePreview?.loading||packagePreview?.relation<0} onClick={prepare}>{uploading?'Processando…':'Enviar e analisar'}</button></div>
+      </>}
+      {wizardStep===1&&<>
+        <div className="updates-wizard-review-head">
+          <div><small>PACOTE VALIDADO</small><h3>{data?.installed?.version||'—'} <span>→</span> {wizardStage?.version||packagePreview?.version||'—'}</h3></div>
+          <span className={`updates-review-badge ${wizardPreflight?.repair?.sameVersion?'repair':'ok'}`}>{wizardPreflight?.repair?.sameVersion?'MODO REPARO':'VALIDADO'}</span>
+        </div>
+        <div className="updates-wizard-mini-grid updates-wizard-mini-grid-4">
+          <MiniStat label="Arquivos no pacote" value={wizardStage?.integrity?.fileCount||packagePreview?.fileCount||'—'}/>
+          <MiniStat label="Tamanho" value={bytes(wizardStage?.integrity?.totalBytes||wizardStage?.packageBytes||file?.size)}/>
+          <MiniStat label="Migrações" value={wizardPreflight?.migrations?.count??wizardStage?.migrations?.length??0}/>
+          <MiniStat label="Tipo" value={wizardStage?.packageType==='incremental'?'Incremental':'Completo'}/>
+        </div>
+        {!managedHost&&wizardPreflight&&<PreflightSummary data={wizardPreflight} compact/>}
+        {managedHost&&<div className="updates-managed-review">
+          <b>Revisão de produção</b><span>O pacote foi validado sem substituir a instância atual. A próxima etapa confirma a cópia persistente no R2 antes de abrir o envio ao GitHub.</span>
+          {!!packagePreview?.modules?.length&&<div className="updates-module-pills">{packagePreview.modules.map(x=><span key={x}>{x}</span>)}</div>}
+        </div>}
+        {!!packagePreview?.changelog?.length&&<details className="updates-wizard-notes"><summary>O que mudou · {packagePreview.changelog.length} item(ns)</summary><ul>{packagePreview.changelog.slice(0,10).map((x,i)=><li key={i}>{x}</li>)}</ul></details>}
+        <div className="updates-wizard-footer"><button onClick={()=>setWizardStep(0)} disabled={wizardBusy}>Voltar</button><span>2 de 5 · revisão</span><button className="updates-primary-action" disabled={wizardBusy||(!managedHost&&(!wizardPreflight?.ok||wizardPreflight?.repair?.noChanges))} onClick={advanceWizard}>Avançar</button></div>
+      </>}
+      {wizardStep===2&&<>
+        <div className="updates-protection-card">
+          <div className="updates-protection-icon">{managedHost?'R2':'↶'}</div>
+          <div><small>{managedHost?'SNAPSHOT R2':'SNAPSHOT DE SEGURANÇA'}</small><h3>{managedHost?'Pacote preservado antes da publicação':'Backup automático antes de alterar arquivos'}</h3><p>{managedHost?'O ZIP validado fica no R2 e pode ser republicado mesmo que navegador, Render ou Vercel reiniciem.':'O worker cria e verifica um snapshot da instalação atual. Se uma etapa crítica falhar, o rollback automático usa este ponto de retorno.'}</p></div>
+        </div>
+        <div className="updates-wizard-mini-grid">
+          {managedHost?<><MiniStat label="Bucket" value={wizardStage?.bucket||data?.cloudStorage?.bucket||'—'}/><MiniStat label="Objeto" value={wizardStage?.objectKey||'armazenado no R2'}/></>:<><MiniStat label="Backup estimado" value={bytes(wizardPreflight?.disk?.estimatedBackupBytes)}/><MiniStat label="Espaço livre" value={bytes(wizardPreflight?.disk?.freeBytes)}/></>}
+        </div>
+        {!managedHost&&wizardPreflight?.repair?.sameVersion&&<div className="updates-repair-note"><b>↻ Reparo da mesma versão</b><span>{wizardPreflight.files.operations} operação(ões) de arquivo foram identificadas. A versão só será reaplicada nesses pontos; arquivos iguais não serão regravados.</span></div>}
+        <div className="updates-wizard-footer"><button onClick={()=>setWizardStep(1)} disabled={wizardBusy}>Voltar</button><span>3 de 5 · proteção</span><button className="updates-primary-action" disabled={wizardBusy} onClick={advanceWizard}>{managedHost?'Avançar para GitHub':'Criar snapshot e instalar'}</button></div>
+      </>}
     </PanelModal>}
 
     {uiPanel==='environment'&&<PanelModal kicker="AMBIENTE" title="Servidor e diagnóstico" onClose={()=>setUiPanel(null)} wide>
@@ -653,9 +724,16 @@ export default function AdminAtualizacoes(){
       .updates-target-lock{display:grid;gap:4px;margin:10px 0 12px;padding:11px 12px;border:1px solid #3b82f655;border-radius:11px;background:#3b82f608}.updates-target-lock b{font-size:11px;color:var(--adm-text)}.updates-target-lock span{font-size:12px;font-weight:900;color:#2563eb;overflow-wrap:anywhere}.updates-target-lock small{font-size:9px;line-height:1.45;color:var(--adm-muted)}
       .updates-recovery-actions{width:min(100%,560px);box-sizing:border-box;margin:4px auto 0;padding:0 20px 8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.updates-recovery-actions button{min-height:40px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);font-size:10px;font-weight:850;padding:8px 9px;cursor:pointer;white-space:normal;line-height:1.25}
       .updates-cloud-progress-modal{width:min(780px,calc(100vw - 24px))}.updates-cloud-pipeline{margin:0 20px;display:grid;gap:12px}.updates-cloud-summary{display:flex;justify-content:space-between;gap:12px;align-items:flex-end}.updates-cloud-summary>div{display:grid;gap:3px}.updates-cloud-summary span{font-size:9px;font-weight:900;letter-spacing:.12em;color:var(--adm-muted)}.updates-cloud-summary b{font-size:14px;color:var(--adm-text)}.updates-cloud-summary strong{font-size:23px;color:#2563eb}.updates-cloud-track{height:9px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.updates-cloud-track i{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .35s ease}.updates-cloud-chain{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;font-weight:900}.updates-cloud-chain>span{padding:5px 8px;border:1px solid var(--adm-border);border-radius:999px;color:var(--adm-muted);background:var(--adm-surface2)}.updates-cloud-chain>span.ok{color:#16803d;border-color:#16a34a55;background:#16a34a0a}.updates-cloud-chain>span.run{color:#2563eb;border-color:#3b82f655;background:#3b82f60a}.updates-cloud-chain>span.bad{color:#dc2626;border-color:#ef444455;background:#ef44440a}.updates-cloud-chain>span.warn{color:#b7791f;border-color:#f59e0b55;background:#f59e0b0a}.updates-cloud-chain i{font-style:normal;color:var(--adm-muted)}.updates-cloud-grid{display:grid;grid-template-columns:1fr;gap:9px}.updates-cloud-stage{min-width:0;padding:13px;border:1px solid var(--adm-border);border-radius:13px;background:var(--adm-surface2)}.updates-cloud-stage.ok{border-color:#16a34a55}.updates-cloud-stage.run{border-color:#3b82f666}.updates-cloud-stage.bad{border-color:#ef444466}.updates-cloud-stage.warn{border-color:#f59e0b66}.updates-cloud-stage-top{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:9px;align-items:center}.updates-cloud-stage-number{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--adm-border);border-radius:9px;font-weight:900;color:var(--adm-muted);background:var(--adm-surface)}.updates-cloud-stage.ok .updates-cloud-stage-number{color:#16a34a;border-color:#16a34a55}.updates-cloud-stage.run .updates-cloud-stage-number{color:#2563eb;border-color:#3b82f655}.updates-cloud-stage.bad .updates-cloud-stage-number{color:#dc2626;border-color:#ef444455}.updates-cloud-stage.warn .updates-cloud-stage-number{color:#b7791f;border-color:#f59e0b55}.updates-cloud-stage-top>div{min-width:0;display:grid;gap:1px}.updates-cloud-stage-top b{font-size:12px;color:var(--adm-text)}.updates-cloud-stage-top small{font-size:9px;color:var(--adm-muted)}.updates-cloud-stage-status{font-size:9px;font-weight:900;padding:5px 7px;border-radius:999px;background:var(--adm-surface);color:var(--adm-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.updates-stage-progress{height:7px;border-radius:999px;background:var(--adm-surface);overflow:hidden;margin-top:11px}.updates-stage-progress i{display:block;height:100%;border-radius:inherit;background:#94a3b8;transition:width .35s ease}.updates-cloud-stage.ok .updates-stage-progress i{background:#16a34a}.updates-cloud-stage.run .updates-stage-progress i{background:#2563eb}.updates-cloud-stage.bad .updates-stage-progress i{background:#dc2626}.updates-cloud-stage.warn .updates-stage-progress i{background:#f59e0b}.updates-stage-progress-label{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-top:7px}.updates-stage-progress-label span{font-size:10px;line-height:1.4;color:var(--adm-muted)}.updates-stage-progress-label b{font-size:10px;color:var(--adm-text);white-space:nowrap}.updates-cloud-stage-meta{margin-top:8px;padding-top:8px;border-top:1px solid var(--adm-border);display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--adm-muted)}.updates-cloud-stage-meta code{font-size:9px;overflow-wrap:anywhere}.updates-cloud-stage-meta a{color:#2563eb;font-weight:800;text-decoration:none}.updates-cloud-mini-steps{display:grid;gap:4px;margin-top:8px;font-size:9px;color:var(--adm-muted)}.updates-cloud-error{padding:10px;border-radius:10px;border:1px solid #ef444466;background:#ef44440a;color:#dc2626;font-size:11px}.updates-cloud-footnote{font-size:10px;line-height:1.45;color:var(--adm-muted);padding-bottom:2px}.updates-progress-footer-clean{justify-content:flex-start;border-top:1px solid var(--adm-border);margin-top:12px;padding-top:12px}
+      .updates-wizard-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:2px 0 18px}.updates-wizard-step{min-width:0;display:grid;justify-items:center;gap:5px;position:relative;color:var(--adm-muted)}.updates-wizard-step:not(:last-child):after{content:"";position:absolute;top:14px;left:calc(50% + 18px);right:calc(-50% + 18px);height:1px;background:var(--adm-border)}.updates-wizard-step i{width:28px;height:28px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:900;position:relative;z-index:1}.updates-wizard-step span{font-size:8px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.updates-wizard-step.active{color:var(--adm-accent)}.updates-wizard-step.active i{border-color:var(--adm-accent);color:var(--adm-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--adm-accent) 12%,transparent)}.updates-wizard-step.done{color:var(--adm-success)}.updates-wizard-step.done i{border-color:color-mix(in srgb,var(--adm-success) 45%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 8%,var(--adm-surface2))}
+      .updates-wizard-drop{width:100%;min-height:110px;border:1px dashed var(--adm-border);border-radius:16px;background:var(--adm-surface2);color:var(--adm-text);display:flex;align-items:center;justify-content:center;gap:13px;padding:18px;cursor:pointer;text-align:left}.updates-wizard-drop:hover{border-color:var(--adm-accent)}.updates-wizard-drop-icon{width:44px;height:44px;border-radius:13px;background:var(--adm-surface);border:1px solid var(--adm-border);display:grid;place-items:center;font-size:22px;flex:0 0 auto}.updates-wizard-drop>span:last-child{display:grid;gap:4px;min-width:0}.updates-wizard-drop b{font-size:13px;overflow-wrap:anywhere}.updates-wizard-drop small{font-size:10px;color:var(--adm-muted)}
+      .updates-wizard-package{margin-top:12px;padding:13px;border:1px solid color-mix(in srgb,var(--adm-success) 35%,var(--adm-border));border-radius:13px;background:color-mix(in srgb,var(--adm-success) 4%,var(--adm-surface));display:grid;gap:10px}.updates-wizard-package.repair{border-color:color-mix(in srgb,var(--adm-warning) 48%,var(--adm-border));background:color-mix(in srgb,var(--adm-warning) 5%,var(--adm-surface))}.updates-wizard-package.bad{border-color:color-mix(in srgb,var(--adm-danger) 50%,var(--adm-border))}.updates-wizard-version{display:grid;gap:3px}.updates-wizard-version small,.updates-wizard-review-head small,.updates-protection-card small,.updates-live-log-head small{font-size:9px;font-weight:900;letter-spacing:.11em;color:var(--adm-muted)}.updates-wizard-version strong{font-size:16px;color:var(--adm-text)}.updates-wizard-version strong span,.updates-wizard-review-head h3 span{color:var(--adm-muted);padding:0 4px}.updates-wizard-mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.updates-wizard-mini-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.updates-repair-note,.updates-managed-review{padding:10px 11px;border-radius:11px;border:1px solid color-mix(in srgb,var(--adm-warning) 42%,var(--adm-border));background:color-mix(in srgb,var(--adm-warning) 6%,var(--adm-surface2));display:grid;gap:3px}.updates-repair-note b,.updates-managed-review b{font-size:11px;color:var(--adm-text)}.updates-repair-note span,.updates-managed-review span{font-size:10px;line-height:1.5;color:var(--adm-muted)}.updates-wizard-error,.updates-wizard-warning{padding:9px 10px;border-radius:9px;font-size:10px;line-height:1.45}.updates-wizard-error{border:1px solid color-mix(in srgb,var(--adm-danger) 50%,var(--adm-border));color:var(--adm-danger)}.updates-wizard-warning{border:1px solid color-mix(in srgb,var(--adm-warning) 45%,var(--adm-border));color:var(--adm-warning)}
+      .updates-wizard-review-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}.updates-wizard-review-head>div{display:grid;gap:3px}.updates-wizard-review-head h3{margin:0;font-size:18px;color:var(--adm-text)}.updates-review-badge{font-size:9px;font-weight:900;border-radius:999px;padding:6px 8px;border:1px solid var(--adm-border);color:var(--adm-success)}.updates-review-badge.repair{color:var(--adm-warning)}.updates-module-pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.updates-module-pills span{font-size:9px;padding:5px 7px;border-radius:999px;border:1px solid var(--adm-border);background:var(--adm-surface)}.updates-wizard-notes{margin-top:10px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface2);padding:10px 12px}.updates-wizard-notes summary{font-size:11px;font-weight:800;color:var(--adm-text);cursor:pointer}.updates-wizard-notes ul{margin:9px 0 0;padding-left:18px;display:grid;gap:5px}.updates-wizard-notes li{font-size:10px;line-height:1.45;color:var(--adm-muted)}
+      .updates-protection-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:13px;align-items:start;padding:14px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface2)}.updates-protection-icon{width:48px;height:48px;border-radius:14px;border:1px solid var(--adm-border);background:var(--adm-surface);display:grid;place-items:center;font-size:15px;font-weight:900;color:var(--adm-accent)}.updates-protection-card h3{margin:3px 0 5px;font-size:15px;color:var(--adm-text)}.updates-protection-card p{margin:0;font-size:10.5px;line-height:1.55;color:var(--adm-muted)}
+      .updates-wizard-footer{position:sticky;bottom:-20px;z-index:4;margin:16px -20px -20px;padding:12px 20px;background:color-mix(in srgb,var(--adm-surface) 96%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--adm-border);display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.updates-wizard-footer>span{text-align:center;font-size:9px;font-weight:800;color:var(--adm-muted)}.updates-wizard-footer button{border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);padding:10px 13px;font-weight:850;cursor:pointer}.updates-primary-action{background:var(--adm-accent)!important;border-color:var(--adm-accent)!important;color:var(--adm-accent-contrast,#fff)!important}.updates-wizard-footer button:disabled{opacity:.5;cursor:not-allowed}
+      .updates-progress-stepper{padding:0 20px 4px}.updates-progress-stepper .updates-wizard-steps{margin-bottom:8px}.updates-live-log{margin:12px 0 2px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2);overflow:hidden}.updates-live-log-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:10px 11px}.updates-live-log-head>div{min-width:0;display:grid;gap:2px}.updates-live-log-head b{font-size:10.5px;color:var(--adm-text);overflow-wrap:anywhere}.updates-live-log-head>span{font-size:9px;font-weight:850;color:var(--adm-muted);white-space:nowrap}.updates-live-log-track{height:5px;background:var(--adm-surface);overflow:hidden}.updates-live-log-track i{display:block;height:100%;background:var(--adm-accent);transition:width .2s ease}.updates-live-log-list{max-height:180px;overflow:auto;padding:4px 0}.updates-live-log-list>div{display:grid;grid-template-columns:42px minmax(0,1fr) 16px;gap:7px;align-items:center;padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent);font-size:9px}.updates-live-log-list em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-list .act-add{color:var(--adm-success)}.updates-live-log-list .act-del{color:var(--adm-danger)}.updates-live-log-list .act-mod{color:var(--adm-warning)}.updates-live-log-list code{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere;white-space:normal}.updates-live-log-list>div>span{color:var(--adm-success)}.updates-live-log-list .current>span{color:var(--adm-accent)}.updates-cloud-filelog-wrap{margin:0 20px}.updates-modal-overlay{background:var(--adm-overlay,rgba(15,23,42,.46))}
       @media(max-width:760px){.updates-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-status-pill{display:none}}
-      .updates-cloud-wizard{max-width:560px;margin:0 auto;padding:0 20px 10px}.updates-cloud-wizard-dots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.updates-cloud-wizard-dots>span{min-width:0;display:grid;justify-items:center;gap:4px;color:var(--adm-muted)}.updates-cloud-wizard-dots i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-style:normal;font-size:9px;font-weight:900}.updates-cloud-wizard-dots small{font-size:7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.updates-cloud-wizard-dots .active i{border-color:#3b82f6;color:#2563eb;box-shadow:0 0 0 3px #3b82f611}.updates-cloud-wizard-dots .ok i{border-color:#16a34a55;color:#16a34a;background:#16a34a0a}.updates-cloud-wizard-dots .bad i{border-color:#ef444466;color:#dc2626}.updates-cloud-current{display:grid;gap:10px;align-content:start}.updates-cloud-current .updates-cloud-stage{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:center}.updates-cloud-current-caption{text-align:center;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-cloud-finish{min-height:250px;display:grid;justify-items:center;align-content:center;gap:8px;text-align:center;padding:20px}.updates-cloud-finish-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:#16a34a12;color:#16a34a;font-size:28px;font-weight:900}.updates-cloud-finish h3{margin:0;color:var(--adm-text);font-size:18px}.updates-cloud-finish p{margin:0;max-width:390px;font-size:11px;line-height:1.5;color:var(--adm-muted)}.updates-cloud-finish-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:5px}.updates-cloud-finish-list span{font-size:8px;font-weight:850;padding:5px 7px;border-radius:999px;border:1px solid #16a34a44;color:#16803d;background:#16a34a08}.updates-progress-overlay{align-items:center!important;justify-content:center!important;padding:14px!important}.updates-cloud-progress-modal{max-height:88dvh!important}
-      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:13px 12px;gap:10px}.updates-command-icon{width:38px;height:38px;font-size:18px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:0;align-items:flex-end;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0;border-bottom:0;padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-finished-modal{width:calc(100% - 28px)!important;border-radius:18px!important;padding:20px 16px!important;margin-bottom:14px}.updates-finished-modal h2{font-size:19px;margin-bottom:14px}.updates-finished-version strong{font-size:15px}.updates-finished-changes li,.updates-finished-changes p{font-size:10.5px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}.updates-recovery-actions{padding:0 10px 8px;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.updates-recovery-actions button{min-height:38px;padding:7px 6px;font-size:9px}}
+      .updates-cloud-wizard{max-width:560px;margin:0 auto;padding:0 20px 10px}.updates-cloud-wizard-dots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.updates-cloud-wizard-dots>span{min-width:0;display:grid;justify-items:center;gap:4px;color:var(--adm-muted)}.updates-cloud-wizard-dots i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-style:normal;font-size:9px;font-weight:900}.updates-cloud-wizard-dots small{font-size:7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.updates-cloud-wizard-dots .active i{border-color:var(--adm-accent);color:var(--adm-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--adm-accent) 12%,transparent)}.updates-cloud-wizard-dots .ok i{border-color:color-mix(in srgb,var(--adm-success) 38%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 7%,var(--adm-surface2))}.updates-cloud-wizard-dots .bad i{border-color:color-mix(in srgb,var(--adm-danger) 45%,var(--adm-border));color:var(--adm-danger)}.updates-cloud-current{display:grid;gap:10px;align-content:start}.updates-cloud-current .updates-cloud-stage{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:center}.updates-cloud-current-caption{text-align:center;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-cloud-finish{min-height:250px;display:grid;justify-items:center;align-content:center;gap:8px;text-align:center;padding:20px}.updates-cloud-finish-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--adm-success) 9%,var(--adm-surface2));color:var(--adm-success);font-size:28px;font-weight:900}.updates-cloud-finish h3{margin:0;color:var(--adm-text);font-size:18px}.updates-cloud-finish p{margin:0;max-width:390px;font-size:11px;line-height:1.5;color:var(--adm-muted)}.updates-cloud-finish-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:5px}.updates-cloud-finish-list span{font-size:8px;font-weight:850;padding:5px 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--adm-success) 30%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 6%,var(--adm-surface2))}.updates-progress-overlay{align-items:center!important;justify-content:center!important;padding:14px!important}.updates-cloud-progress-modal{max-height:88dvh!important}
+      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:13px 12px;gap:10px}.updates-command-icon{width:38px;height:38px;font-size:18px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:12px;align-items:center;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px;border-bottom:1px solid var(--adm-border);padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-finished-modal{width:calc(100% - 28px)!important;border-radius:18px!important;padding:20px 16px!important;margin-bottom:14px}.updates-finished-modal h2{font-size:19px;margin-bottom:14px}.updates-finished-version strong{font-size:15px}.updates-finished-changes li,.updates-finished-changes p{font-size:10.5px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}.updates-recovery-actions{padding:0 10px 8px;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.updates-recovery-actions button{min-height:38px;padding:7px 6px;font-size:9px}.updates-wizard-mini-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-wizard-footer{bottom:-16px;margin:14px -16px -16px;padding:11px 16px}.updates-wizard-footer{grid-template-columns:auto minmax(0,1fr) auto}.updates-wizard-step span{font-size:7px}.updates-live-log-list{max-height:150px}}
       @media(max-width:390px){.updates-overview>div{padding:9px}.updates-recovery-actions{grid-template-columns:1fr}}
     `}</style>
   </div>
@@ -663,16 +741,18 @@ export default function AdminAtualizacoes(){
 }
 
 
-function PreflightSummary({data}){
+function PreflightSummary({data,compact=false}){
  const risk=data.risk||'baixo'
  const riskColor=risk==='alto'?C.red:risk==='médio'?'#b7791f':C.greenSolid
  const files=data.files||{}
  const writes=files.writes ?? ((files.added||0)+(files.changed||0))
  const operations=files.operations ?? (writes+(files.removed||0))
  return <div style={{display:'grid',gap:10}}>
-  <div style={{padding:11,borderRadius:10,border:'1px solid #3b82f644',background:'#3b82f60b',fontSize:12,lineHeight:1.5,color:C.text}}>
-   <b>Aplicação diferencial</b><br/>
-   O pacote completo é a referência da versão. O atualizador compara os arquivos e só grava o que realmente mudou; arquivos idênticos permanecem intactos.
+  <div style={{padding:11,borderRadius:10,border:`1px solid ${data.repair?.sameVersion?'color-mix(in srgb,var(--adm-warning) 42%,var(--adm-border))':'color-mix(in srgb,var(--adm-accent) 32%,var(--adm-border))'}`,background:data.repair?.sameVersion?'color-mix(in srgb,var(--adm-warning) 6%,var(--adm-surface2))':'color-mix(in srgb,var(--adm-accent) 5%,var(--adm-surface2))',fontSize:12,lineHeight:1.5,color:C.text}}>
+   <b>{data.repair?.sameVersion?'Reparo verificado por SHA-256':'Aplicação diferencial'}</b><br/>
+   {data.repair?.sameVersion
+    ? (data.repair?.noChanges?'A versão registrada e os arquivos reais já correspondem ao pacote. Nenhuma reinstalação é necessária.':'A versão é igual à instalada, mas o atualizador encontrou diferenças reais. A comparação integral SHA-256 decide arquivo por arquivo o que precisa ser reparado.')
+    : 'O pacote completo é a referência da versão. O atualizador compara os arquivos e só grava o que realmente mudou; arquivos idênticos permanecem intactos.'}
   </div>
   <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:8}}>
    <MiniStat label="Versão" value={`${data.fromVersion} → ${data.toVersion}`}/>
@@ -711,7 +791,9 @@ function PreflightSummary({data}){
   {!!data.warnings?.length&&<div style={{padding:10,borderRadius:9,border:'1px solid #f59e0b55',background:'#f59e0b12',fontSize:12}}>
     {data.warnings.map((w,i)=><div key={i} style={{margin:i?'5px 0 0':0}}>⚠️ {w}</div>)}
   </div>}
-  {!data.ok&&<div style={{padding:10,borderRadius:9,border:`1px solid ${C.red}`,background:'var(--adm-surface2)',color:C.red,fontSize:12,fontWeight:700}}>A instalação foi bloqueada pelo pré-check.</div>}
+  {!data.ok&&(data.repair?.noChanges
+    ? <div style={{padding:10,borderRadius:9,border:'1px solid color-mix(in srgb,var(--adm-success) 35%,var(--adm-border))',background:'color-mix(in srgb,var(--adm-success) 6%,var(--adm-surface2))',color:'var(--adm-success)',fontSize:12,fontWeight:700}}>✓ Nenhum reparo necessário. Esta mesma versão já está íntegra.</div>
+    : <div style={{padding:10,borderRadius:9,border:`1px solid ${C.red}`,background:'var(--adm-surface2)',color:C.red,fontSize:12,fontWeight:700}}>A instalação foi bloqueada pelo pré-check.</div>)}
  </div>
 }
 
@@ -793,6 +875,19 @@ const STEP_LABELS={
 }
 
 
+const UPDATE_WIZARD_LABELS=['Pacote','Revisão','Proteção','Aplicação','Concluído']
+function UpdateWizardSteps({step=0,managed=false}){
+ const labels=managed?['Pacote','Revisão','R2','GitHub','Produção']:UPDATE_WIZARD_LABELS
+ return <div className="updates-wizard-steps" aria-label="Etapas da atualização">{labels.map((label,i)=><div key={label} className={`updates-wizard-step ${i<step?'done':i===step?'active':''}`}><i>{i<step?'✓':i+1}</i><span>{label}</span></div>)}</div>
+}
+function jobWizardStep(job){if(['completed','restart-required'].includes(job?.status))return 4;if(['integrity','backup','backup-done','snapshot-cleanup'].includes(job?.phase))return 2;return 3}
+function FileLiveLog({job,cloud=false}){
+ const source=cloud?(job?.cloudRelease?.publishJob||{}):(job||{}),log=Array.isArray(source.fileLog)?source.fileLog:[],current=source.currentFile||null
+ const done=Number(source.filesDone??source.filesProgress?.done??0),total=Number(source.filesTotal??source.filesProgress?.total??0)
+ if(!current&&!log.length&&!total)return null
+ return <div className="updates-live-log"><div className="updates-live-log-head"><div><small>LOG AO VIVO</small><b>{current?.path||'Sincronizando arquivos'}</b></div><span>{total?`${done}/${total}`:'aguardando'}</span></div>{total>0&&<div className="updates-live-log-track"><i style={{width:`${Math.max(0,Math.min(100,Math.round((done/Math.max(1,total))*100)))}%`}}/></div>}<div className="updates-live-log-list">{log.slice(-18).map((x,i)=><div key={`${x.at||i}-${x.path}`}><em className={`act-${String(x.action||'SYNC').toLowerCase()}`}>{x.action||'SYNC'}</em><code>{x.path}</code><span>{x.state==='done'?'✓':'●'}</span></div>)}{current&&(!log.length||log[log.length-1]?.path!==current.path)&&<div className="current"><em className={`act-${String(current.action||'SYNC').toLowerCase()}`}>{current.action||'SYNC'}</em><code>{current.path}</code><span>●</span></div>}</div></div>
+}
+
 function PanelModal({kicker,title,onClose,wide=false,children}){
   return <div className="updates-modal-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose?.()}}>
     <div className={`updates-modal ${wide?'updates-panel-wide':''}`} role="dialog" aria-modal="true">
@@ -809,7 +904,7 @@ function UpdateProgressModal({job,onClose}){
   if(success)return <div className="updates-modal-overlay updates-progress-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose?.()}}>
     <div className="updates-modal updates-progress-modal updates-finished-modal" role="dialog" aria-modal="true" aria-labelledby="update-progress-title">
       <div className="updates-finished-icon">✓</div>
-      <h2 id="update-progress-title">Atualização concluída</h2>
+      <h2 id="update-progress-title">Atualização concluída</h2><UpdateWizardSteps step={4}/>
       <div className="updates-finished-version"><small>VERSÃO</small><strong>{job.fromVersion||'—'} <span>→</span> {job.toVersion||'—'}</strong></div>
       <div className="updates-finished-changes">
         <small>O QUE MUDOU</small>
@@ -821,6 +916,7 @@ function UpdateProgressModal({job,onClose}){
   return <div className="updates-modal-overlay updates-progress-overlay" role="presentation" onMouseDown={e=>{if(canClose&&e.target===e.currentTarget)onClose?.()}}>
     <div className="updates-modal updates-progress-modal" role="dialog" aria-modal="true" aria-labelledby="update-progress-title">
       <div className="updates-progress-head"><div><div style={{fontSize:10,fontWeight:900,color:C.muted,letterSpacing:'.12em'}}>ATUALIZAÇÃO EM EXECUÇÃO</div><h2 id="update-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>AL Sistemas</h2><div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>O progresso fica isolado neste painel. A página principal não precisa mais rolar até a caixa de porcentagem.</div></div>{canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}</div>
+      <div className="updates-progress-stepper"><UpdateWizardSteps step={jobWizardStep(job)}/></div>
       <UpdateProgress job={job} embedded/>
       {job.finalReport&&<div style={{margin:'14px 20px 0'}}><UpdateFinalReport report={job.finalReport}/></div>}
       <div className="updates-progress-footer updates-progress-footer-clean"><span>{canClose?(job.status==='failed'?'A atualização terminou com erro. Use × no topo para fechar.':'Operação finalizada. Use × no topo para fechar.'):'Não feche esta aba durante a aplicação dos arquivos.'}</span></div>
@@ -946,7 +1042,8 @@ function PublishProgressModal({job,onClose,onReconcile,onRetry,onRepublish,onInt
         </div>
         {canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}
       </div>
-      {cloud?<CloudPublishProgress job={job}/>:<UpdateProgress job={job} embedded/>}
+      <div className="updates-progress-stepper"><UpdateWizardSteps managed step={job.status==='completed'?4:(job.commitSha||job.cloudRelease?.commitSha)?4:job.releaseId?3:2}/></div>
+      {cloud?<><CloudPublishProgress job={job}/><div className="updates-cloud-filelog-wrap"><FileLiveLog job={job} cloud/></div></>:<UpdateProgress job={job} embedded/>}
       {cloud&&job.status==='attention'&&job.releaseId&&<div className="updates-recovery-actions"><button onClick={()=>onReconcile?.(job.releaseId)}>Reconsultar</button><button onClick={()=>onRetry?.(job.releaseId)}>Tentar deploy novamente</button><button className="primary-blue" onClick={()=>onRepublish?.(job.releaseId)}>Publicar novamente do R2</button><button className="updates-delete-action" onClick={()=>onInterrupt?.(job.releaseId)}>Encerrar acompanhamento</button></div>}
       <div className="updates-progress-footer updates-progress-footer-clean">
         <span>{!canClose?(cloud?'Você pode acompanhar Vercel e Render nesta mesma tela; os estados são atualizados pelas APIs das plataformas.':'Mantenha esta tela aberta enquanto o commit é preparado.'):job.status==='completed'?'Atualização concluída. Use × no topo para fechar.':job.status==='failed'?'A atualização terminou com erro. Confira o card marcado acima e use × para fechar.':job.status==='attention'?'O acompanhamento foi interrompido com segurança. Escolha uma ação de recuperação acima ou feche esta janela.':'Operação finalizada.'}</span>
@@ -962,23 +1059,24 @@ function UpdateProgress({job,embedded=false}){
   const currentLabel=job.phaseLabel||STEP_LABELS[job.phase]||job.status||'Preparando'
   const timeline=Array.isArray(job.timeline)?job.timeline:[]
   const recentTimeline=timeline.slice(-6)
-  return <section className={embedded?'updates-progress-embedded':''} style={embedded?{borderTop:'1px solid var(--adm-border)',paddingTop:16}:{...card,borderColor:failed?C.red:done?C.greenSolid:C.blue}}>
+  return <section className={embedded?'updates-progress-embedded':''} style={embedded?{borderTop:'1px solid var(--adm-border)',paddingTop:16}:{...card,borderColor:failed?C.red:done?C.greenSolid:C.accent}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}>
       <div>
         {!embedded&&<div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>{['github-publish','cloud-release'].includes(job.type)?'PUBLICAÇÃO CLOUD':'PROGRESSO DA ATUALIZAÇÃO'}</div>}
         <h2 style={{margin:'5px 0 2px',fontSize:19,color:C.text}}>{currentLabel}</h2>
         {!embedded&&<div style={{fontSize:12,color:C.muted}}>{['github-publish','cloud-release'].includes(job.type)?'R2 preserva o pacote; GitHub distribui o código; Vercel e Render concluem a produção.':'Acompanhe esta caixa até a operação terminar.'}</div>}
       </div>
-      <strong style={{fontSize:22,color:failed?C.red:done?C.greenSolid:C.blue}}>{progress}%</strong>
+      <strong style={{fontSize:22,color:failed?C.red:done?C.greenSolid:C.accent}}>{progress}%</strong>
     </div>
     <div style={{height:9,borderRadius:999,background:'var(--adm-surface2)',overflow:'hidden',margin:'14px 0'}}>
-      <div style={{height:'100%',width:`${progress}%`,background:failed?C.red:done?C.greenSolid:C.blue,transition:'width .35s ease'}}/>
+      <div style={{height:'100%',width:`${progress}%`,background:failed?C.red:done?C.greenSolid:C.accent,transition:'width .35s ease'}}/>
     </div>
+    <FileLiveLog job={job}/>
     <div style={{display:'grid',gap:7}}>
       {recentTimeline.map((step,index)=>{
         const isLast=index===recentTimeline.length-1
         return <div key={`${step.at||index}-${step.key}`} style={{display:'grid',gridTemplateColumns:'18px minmax(0,1fr) auto',gap:8,alignItems:'center',fontSize:12}}>
-          <span style={{color:isLast&&!done&&!failed?C.blue:C.greenSolid}}>{isLast&&!done&&!failed?'●':'✓'}</span>
+          <span style={{color:isLast&&!done&&!failed?C.accent:C.greenSolid}}>{isLast&&!done&&!failed?'●':'✓'}</span>
           <span className="updates-wrap" style={{color:isLast?C.text:C.muted,fontWeight:isLast?700:400}}>{step.label||STEP_LABELS[step.key]||step.key}</span>
           <span style={{color:C.muted}}>{Number.isFinite(Number(step.progress))?`${step.progress}%`:''}</span>
         </div>

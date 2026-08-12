@@ -424,14 +424,31 @@ async function applyFiles(src,mode='apply',options={}){
   const journal={jobId:job.id,mode,packageType:incremental?'incremental':'full',status:'running',startedAt:new Date().toISOString(),total:ops.length,done:0,lastOperation:null}
   await writeJson(txFile,journal)
   let done=0
+  let liveLog=Array.isArray(job.fileLog)?job.fileLog.slice(-60):[]
   for(const op of ops){
-    journal.lastOperation={type:op.type,path:op.rel,state:'started',at:new Date().toISOString()}
+    const action=op.type==='write'?(current.map.has(op.rel)?'MOD':'ADD'):'DEL'
+    const startedAt=new Date().toISOString()
+    journal.lastOperation={type:op.type,path:op.rel,state:'started',at:startedAt}
     await writeJson(txFile,{...journal,done})
+    const runningProgress=32+Math.floor((done/Math.max(1,ops.length))*9)
+    await updateJob({
+      phase:'files',phaseLabel:`${action} ${op.rel}`,progress:runningProgress,
+      currentFile:{action,path:op.rel,state:'running',at:startedAt,index:done+1,total:ops.length},
+      filesProgress:{done,total:ops.length,percent:Math.floor((done/Math.max(1,ops.length))*100)},
+    })
     if(op.type==='write')await copyFileAtomic(op.from,op.to)
     else await fs.rm(op.to,{recursive:true,force:true})
     done++
-    journal.lastOperation={type:op.type,path:op.rel,state:'done',at:new Date().toISOString()}
+    const finished={action,path:op.rel,state:'done',at:new Date().toISOString(),index:done,total:ops.length}
+    liveLog=[...liveLog,finished].slice(-60)
+    journal.lastOperation={type:op.type,path:op.rel,state:'done',at:finished.at}
     await writeJson(txFile,{...journal,done})
+    const finishedProgress=32+Math.floor((done/Math.max(1,ops.length))*9)
+    await updateJob({
+      phase:'files',phaseLabel:`Aplicando arquivos (${done}/${ops.length})`,progress:finishedProgress,
+      currentFile:finished,fileLog:liveLog,
+      filesProgress:{done,total:ops.length,percent:Math.floor((done/Math.max(1,ops.length))*100)},
+    })
   }
   for(const rel of current.dirs.sort((a,b)=>b.length-a.length)){
     if(preserveAncestor(rel))continue

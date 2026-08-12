@@ -184,7 +184,8 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
       await execGit(['add','-A'],{cwd:repoDir,env:gitEnv})
       const status=(await execGit(['status','--porcelain'],{cwd:repoDir,env:gitEnv})).stdout,changes=status?status.split(/\r?\n/).filter(Boolean):[]
       const added=changes.filter(x=>x.startsWith('A ')||x.startsWith('??')).length,removed=changes.filter(x=>x.startsWith('D ')||x.slice(1,2)==='D').length,changed=Math.max(0,changes.length-added-removed),diff={total:changes.length,added,changed,removed}
-      await phase('git-native-diff',changes.length?`${changes.length} alteração(ões) reais encontradas`:'Repositório já está sincronizado',48,{publishEngine:'git-native',diff,diffPreview:changes.slice(0,30)})
+      const nativeFileLog=changes.slice(-60).map((raw,index)=>{const code=raw.slice(0,2).trim(),filePath=raw.slice(3).trim().replace(/^\"|\"$/g,'');return {action:code==='??'||code.includes('A')?'ADD':code.includes('D')?'DEL':'MOD',path:filePath,state:'queued',index:index+1,total:changes.length,at:new Date().toISOString()}})
+      await phase('git-native-diff',changes.length?`${changes.length} alteração(ões) reais encontradas`:'Repositório já está sincronizado',48,{publishEngine:'git-native',diff,diffPreview:changes.slice(0,30),fileLog:nativeFileLog,filesTotal:changes.length,filesDone:0})
       if(!changes.length){const head=hasRemote?(await execGit(['rev-parse','HEAD'],{cwd:repoDir,env:gitEnv})).stdout:null;return {commitSha:head,commitUrl:head?`https://github.com/${owner}/${repo}/commit/${head}`:`https://github.com/${owner}/${repo}`,noChanges:true,diff}}
       await execGit(['config','user.name','AL Sistemas'],{cwd:repoDir,env:gitEnv});await execGit(['config','user.email','al-sistemas@localhost'],{cwd:repoDir,env:gitEnv})
       await phase('git-native-commit','Criando commit local',68,{publishEngine:'git-native'});await execGit(['commit','-m',job.commitMessage||`Atualiza AL Sistemas para ${meta.version}`],{cwd:repoDir,env:gitEnv})
@@ -310,20 +311,34 @@ export async function runGithubPublish(initialJob,token,{jobFile=null,persistHis
 
     const entries=[]
     let n=0
+    const totalFileOps=Math.max(1,files.length+deletes.length)
+    let liveFileLog=Array.isArray(job.fileLog)?job.fileLog.slice(-60):[]
     for(const file of files){
       const stat=await fs.stat(file.full)
       if(stat.size>95*1024*1024) throw new Error(`Arquivo excede o limite seguro para publicação: ${file.target}`)
+      const started={action:existing.has(file.target)?'MOD':'ADD',path:file.target,state:'running',index:n+1,total:files.length+deletes.length,at:new Date().toISOString()}
+      await update({phase:'github-upload',phaseLabel:`${started.action} ${file.target}`,progress:15+Math.floor((n/totalFileOps)*55),currentFile:started,filesDone:n,filesTotal:files.length+deletes.length,fileLog:liveFileLog})
       const content=await fs.readFile(file.full)
       const blob=await gh('POST',`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs`,{
         content:content.toString('base64'),encoding:'base64',
       })
       entries.push({path:file.target,mode:'100644',type:'blob',sha:blob.sha})
       n++
-      const progress=15+Math.floor((n/files.length)*55)
-      if(n===1||n===files.length||n%10===0) await phase('github-upload',`Enviando arquivos ao GitHub (${n}/${files.length})`,progress,{filesDone:n,filesTotal:files.length})
+      const progress=15+Math.floor((n/totalFileOps)*55)
+      const finished={...started,state:'done',index:n,at:new Date().toISOString()}
+      liveFileLog=[...liveFileLog,finished].slice(-60)
+      await phase('github-upload',`Sincronizando arquivos (${n}/${files.length+deletes.length})`,progress,{currentFile:finished,fileLog:liveFileLog,filesDone:n,filesTotal:files.length+deletes.length,filesPercent:Math.floor((n/totalFileOps)*100)})
     }
-    for(const p of deletes) entries.push({path:p,mode:'100644',type:'blob',sha:null})
-    if(deletes.length) await phase('github-clean',`Removendo ${deletes.length} arquivo(s) local(is)/obsoleto(s) do repositório`,72,{deletedCount:deletes.length,deletedPreview:deletes.slice(0,25)})
+    for(const p of deletes){
+      const started={action:'DEL',path:p,state:'running',index:n+1,total:files.length+deletes.length,at:new Date().toISOString()}
+      await update({phase:'github-clean',phaseLabel:`DEL ${p}`,progress:15+Math.floor((n/totalFileOps)*55),currentFile:started,filesDone:n,filesTotal:files.length+deletes.length,fileLog:liveFileLog})
+      entries.push({path:p,mode:'100644',type:'blob',sha:null})
+      n++
+      const finished={...started,state:'done',index:n,at:new Date().toISOString()}
+      liveFileLog=[...liveFileLog,finished].slice(-60)
+      await update({phase:'github-clean',phaseLabel:`Limpando repositório (${n}/${files.length+deletes.length})`,progress:15+Math.floor((n/totalFileOps)*55),currentFile:finished,fileLog:liveFileLog,filesDone:n,filesTotal:files.length+deletes.length,filesPercent:Math.floor((n/totalFileOps)*100)})
+    }
+    if(deletes.length) await phase('github-clean',`Removidos ${deletes.length} arquivo(s) local(is)/obsoleto(s) do repositório`,72,{deletedCount:deletes.length,deletedPreview:deletes.slice(0,25),currentFile:null,fileLog:liveFileLog,filesDone:n,filesTotal:files.length+deletes.length,filesPercent:100})
 
     await phase('github-tree','Montando nova versão no repositório',74)
     const treeBody={tree:entries}

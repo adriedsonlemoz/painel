@@ -130,7 +130,7 @@ function cloudReleaseView(doc){
     publishMode:d.publishMode||'project',commitSha:d.commitSha||'',commitUrl:d.commitUrl||'',
     githubStatus:d.githubStatus||'pending',githubVerified:Boolean(d.githubVerified),githubVerifiedAt:d.githubVerifiedAt||null,githubVerification:d.githubVerification||{},
     productionTarget:d.productionTarget||{},targetLockedAt:d.targetLockedAt||null,
-    publishJob:{id:d.publishJobId||'',status:d.publishStatus||'',phase:d.publishPhase||'',phaseLabel:d.publishPhaseLabel||'',progress:Number(d.publishProgress||0),heartbeatAt:d.publishHeartbeatAt||null,startedAt:d.publishStartedAt||null,completedAt:d.publishCompletedAt||null,attempts:Number(d.publishAttempts||0),error:d.publishError||'',commitMessage:d.publishCommitMessage||'',candidateSha:d.publishCandidateSha||'',candidateUrl:d.publishCandidateUrl||'',timeline:Array.isArray(d.publishTimeline)?d.publishTimeline:[]},
+    publishJob:{id:d.publishJobId||'',status:d.publishStatus||'',phase:d.publishPhase||'',phaseLabel:d.publishPhaseLabel||'',progress:Number(d.publishProgress||0),heartbeatAt:d.publishHeartbeatAt||null,startedAt:d.publishStartedAt||null,completedAt:d.publishCompletedAt||null,attempts:Number(d.publishAttempts||0),error:d.publishError||'',commitMessage:d.publishCommitMessage||'',candidateSha:d.publishCandidateSha||'',candidateUrl:d.publishCandidateUrl||'',timeline:Array.isArray(d.publishTimeline)?d.publishTimeline:[],fileLog:Array.isArray(d.publishFileLog)?d.publishFileLog:[],currentFile:d.publishCurrentFile||null,filesDone:Number(d.publishFilesDone||0),filesTotal:Number(d.publishFilesTotal||0)},
     trackingStartedAt:d.trackingStartedAt||null,lastCheckedAt:d.lastCheckedAt||null,trackingAttempts:Number(d.trackingAttempts||0),
     stalledAt:d.stalledAt||null,interruptedAt:d.interruptedAt||null,recovery:d.recovery||{},vercel:d.vercel||{},render:d.render||{},
     productionReady:Boolean(d.productionReady),error:d.error||'',publishedAt:d.publishedAt||null,
@@ -370,9 +370,11 @@ async function updateManagedPublishProgress(releaseId,current={}){
     const e=new Error('Publicação encerrada pelo usuário. O pacote permanece no R2.');e.code='UPDATE_PUBLISH_INTERRUPTED';e.status=409;throw e
   }
   const timeline=Array.isArray(current.timeline)?current.timeline.slice(-30):[]
+  const fileLog=Array.isArray(current.fileLog)?current.fileLog.slice(-60):[]
   await UpdateRelease.updateOne({releaseId},{$set:{
     publishStatus:current.status||'running',publishPhase:current.phase||'',publishPhaseLabel:current.phaseLabel||'',publishProgress:Number(current.progress||0),
     publishHeartbeatAt:new Date(),publishError:current.error||'',publishTimeline:timeline,githubStatus:current.status==='failed'?'failed':'running',
+    publishFileLog:fileLog,publishCurrentFile:current.currentFile||{},publishFilesDone:Number(current.filesDone||current.filesProgress?.done||0),publishFilesTotal:Number(current.filesTotal||current.filesProgress?.total||0),
   }}).catch(()=>{})
 }
 
@@ -854,6 +856,7 @@ router.post('/:stageId/install',async(req,res,next)=>{try{
   const alreadyActive=await readUpdateLock()
   if(alreadyActive)return res.status(409).json({erro:`Já existe uma operação de atualização em andamento (${alreadyActive.jobId}).`,codigo:'UPDATE_BUSY',active:alreadyActive})
   const preflight=await getUpdatePreflight(req.params.stageId)
+  if(preflight.repair?.sameVersion&&preflight.repair?.noChanges)return res.status(409).json({erro:`A versão ${preflight.toVersion} já está íntegra. A reaplicação foi cancelada porque a comparação arquivo por arquivo não encontrou nada para reparar.`,codigo:'UPDATE_NO_CHANGES',preflight})
   if(!preflight.ok)return res.status(409).json({erro:'O pré-check bloqueou a instalação. Revise espaço em disco/migrações antes de continuar.',preflight})
   const job=await createJob(req.params.stageId,{...(req.body||{}),preflight})
   await reserveUpdateLock(job)
@@ -862,6 +865,7 @@ router.post('/:stageId/install',async(req,res,next)=>{try{
   res.status(202).json({message:'Atualização iniciada.',job,monitorUrl:monitorUrl(job),monitorReady})
 }catch(e){
   if(e.code==='UPDATE_BUSY')return res.status(409).json({erro:e.message,codigo:e.code,active:e.active})
+  if(e.code==='UPDATE_NO_CHANGES')return res.status(409).json({erro:e.message,codigo:e.code})
   next(e)
 }})
 

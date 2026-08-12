@@ -22,6 +22,8 @@ const darkTheme = {
     '--adm-red':       '#ef4444',
     '--adm-amber':     '#f59e0b',
     '--adm-blue':      '#3b82f6',
+    '--adm-warning':   'var(--adm-amber)',
+    '--adm-danger':    'var(--adm-red)',
     '--adm-success':   '#22c55e',
     '--adm-topnav-bg': '#18181b',
     '--adm-overlay':   'rgba(0,0,0,.64)',

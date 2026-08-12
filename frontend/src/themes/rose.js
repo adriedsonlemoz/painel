@@ -22,6 +22,8 @@ const roseTheme = {
     '--adm-red':       '#dc2626',
     '--adm-amber':     '#d97706',
     '--adm-blue':      '#2563eb',
+    '--adm-warning':   'var(--adm-amber)',
+    '--adm-danger':    'var(--adm-red)',
     '--adm-success':   '#16a34a',
     '--adm-topnav-bg': '#ffffff',
     '--adm-overlay':   'rgba(15,23,42,.46)',

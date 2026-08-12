@@ -1,14 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.127",
+  "version": "1.0.128",
   "packageFormat": 2,
   "changelog": [
-    "GitHub abre o repositório em um workspace centralizado e tematizado; comandos, arquivos e publicação preservam a grade compacta no celular.",
-    "Integrações e APIs passa a usar cabeçalho e modais do Design System; diagnóstico geral e diagnóstico de IA ficam centralizados e as cores de estado seguem os tokens do tema.",
-    "Cloudflare mantém o laranja apenas como identidade do provedor e migra Explorer e ferramentas avançadas para DSModal, com overlays consistentes em todos os temas.",
-    "Projetos e Deploys, Monitor e Assistente recebem uma varredura de cores estruturais/semânticas para remover verdes, azuis e vermelhos fixos que quebravam Oceano e Rosa.",
-    "Tokens globais ganham --adm-subtle e --adm-overlay; superfícies, foco, inputs e seleção passam a herdar o tema também em páginas legadas.",
-    "Adicionado check:themes para validar Claro, Escuro, Oceano e Rosa e os principais marcadores de responsividade antes do build."
+    "Atualizações passam a usar um wizard centralizado em cinco etapas: Pacote, Revisão, Proteção, Instalação e Concluído, com navegação fixa e visual compatível com todos os temas.",
+    "O upload do ZIP mostra progresso próprio e a revisão separa versão, módulos, quantidade de arquivos, migrações e alterações reais antes de permitir a instalação.",
+    "A etapa de proteção isola o snapshot/backup; em produção gerenciada o pacote persistente no R2 fica claramente separado da sincronização GitHub.",
+    "Instalação local e publicação GitHub exibem progresso e log vivo arquivo por arquivo, distinguindo ADD, MOD e DEL sem despejar log bruto na tela.",
+    "Pacotes completos da mesma versão agora podem entrar em modo reparo: o backend compara SHA-256 integral arquivo por arquivo e só reaplica diferenças reais ou dependências que precisem ser reparadas.",
+    "Uma mesma versão já íntegra não é reinstalada inutilmente, e versões anteriores continuam bloqueadas para impedir downgrade acidental."
   ],
   "updatePackages": {
     "full": true,

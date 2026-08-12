@@ -16,9 +16,3 @@ O frontend será aberto somente quando o backend estiver disponível.
 - Não criar confirmação com overlay/Tailwind local: usar `ConfirmModal`/`DSModal`.
 - Cores estruturais devem vir de `--adm-accent`; vermelho/âmbar/verde/azul ficam reservados a estados semânticos.
 - Para três métricas compactas no celular, usar `mobileColumns={3}`; o CSS responsivo agora respeita essa configuração.
-
-
-## 1.0.127 — consistência visual
-- Overlays e modais devem usar `DSModal`/`--adm-overlay`; não criar fundos pretos locais.
-- Estados estruturais usam `--adm-accent`; sucesso/erro/atenção/informação usam os tokens semânticos.
-- Execute `npm run check:themes` no frontend ao alterar tema, modal ou responsividade.
