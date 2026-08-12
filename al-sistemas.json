@@ -1,13 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.122",
+  "version": "1.0.123",
   "packageFormat": 2,
   "changelog": [
-    "Transforma Vercel / Render em uma Central de Projetos e Deploys para monitorar vários projetos.",
-    "Agrupa automaticamente frontend Vercel e backend Render pelo repositório GitHub, mantendo o Painel como projeto principal.",
-    "Adiciona página individual por projeto com visão geral, deploys, variáveis mascaradas, logs sob demanda e análise automática.",
-    "Detecta falhas recentes, branches/commits divergentes, projetos sem deploy recente e problemas por provedor.",
-    "Permite redefinir quais recursos Vercel e Render formam o Painel sem esconder os demais projetos da conta."
+    "Integrações e APIs ganham cards no padrão visual da Central de Atualizações e modais centralizados.",
+    "Diagnóstico da IA foi reorganizado com provedores, fila, latência, cooldowns e uso recente.",
+    "Cloudinary passa a usar corretamente o cofre central para salvar, testar e abrir a galeria.",
+    "Central Cloudflare ganha resumo de conta, planos/assinaturas quando a API permitir, zonas e métricas R2.",
+    "R2 vira um Explorer com múltiplos uploads, pastas, prévia, download, mover/renomear e exclusão em lote."
   ],
   "updatePackages": {
     "full": true,

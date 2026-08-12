@@ -931,452 +931,109 @@ function AbaWorkers() {
 
 // ─── ABA: R2 Storage ──────────────────────────────────────────
 function AbaR2({ status, onRefreshStatus }) {
-  const [view,      setView]      = useState('overview')   // 'overview' | 'browser'
-  const [buckets,   setBuckets]   = useState([])
-  const [usage,     setUsage]     = useState(null)
-  const [loading,   setLoading]   = useState(true)
-  const [bucketSel, setBucketSel] = useState(null)
+  const [view,setView]=useState('overview')
+  const [buckets,setBuckets]=useState([]),[usage,setUsage]=useState(null),[loading,setLoading]=useState(true)
+  const [bucketSel,setBucketSel]=useState(null),[objetos,setObjetos]=useState([]),[prefixos,setPrefixos]=useState([]),[prefix,setPrefix]=useState(''),[cursor,setCursor]=useState(''),[truncated,setTruncated]=useState(false),[loadingObj,setLoadingObj]=useState(false)
+  const [selected,setSelected]=useState(new Set()),[uploading,setUploading]=useState(false),[uploadProgress,setUploadProgress]=useState(0)
+  const [showCreateBucket,setShowCreateBucket]=useState(false),[nomeBucket,setNomeBucket]=useState(''),[busy,setBusy]=useState(false)
+  const [showFolder,setShowFolder]=useState(false),[folderName,setFolderName]=useState('')
+  const [preview,setPreview]=useState(null),[previewInfo,setPreviewInfo]=useState(null),[previewBusy,setPreviewBusy]=useState(false)
+  const [moveItem,setMoveItem]=useState(null),[moveTo,setMoveTo]=useState('')
+  const [display,setDisplay]=useState('list')
+  const fileInputRef=React.useRef(null)
+  const dropRef=React.useRef(null)
+  const bn=b=>b?.nome||b?.name||''
+  const fmtBytes=n=>bytes(Number(n||0))
+  const isImage=key=>/\.(avif|gif|jpe?g|png|svg|webp)$/i.test(key||'')
+  const isVideo=key=>/\.(mp4|webm|mov|m4v)$/i.test(key||'')
+  const isAudio=key=>/\.(mp3|wav|ogg|m4a)$/i.test(key||'')
+  const nameOf=key=>String(key||'').replace(prefix,'').split('/').filter(Boolean).pop()||key
 
-  // Browser
-  const [objetos,   setObjetos]   = useState([])
-  const [prefixos,  setPrefixos]  = useState([])
-  const [prefix,    setPrefix]    = useState('')
-  const [cursor,    setCursor]    = useState('')
-  const [truncated, setTruncated] = useState(false)
-  const [loadingObj,setLoadingObj]= useState(false)
-  const [selected,  setSelected]  = useState(new Set())
-
-  // Criar bucket
-  const [showCreate, setShowCreate] = useState(false)
-  const [nomeBucket, setNomeBucket] = useState('')
-  const [criando,    setCriando]    = useState(false)
-  const [erroCreate, setErroCreate] = useState('')
-
-  // Delete
-  const [deleting, setDeleting] = useState(false)
-
-  // Upload
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const fileInputRef = React.useRef(null)
-
-  async function uploadArquivo(e) {
-    const file = e.target.files?.[0]
-    if (!file || !bucketSel) return
-    setUploading(true); setUploadProgress(0)
-    try {
-      await cloudflareService.uploadObjeto(bucketSel.nome, prefix, file, setUploadProgress)
-      toast.success(`"${file.name}" enviado para R2!`)
-      await carregarObjetos(bucketSel, prefix, '')
-      await carregarOverview()
-    } catch (err) { toast.error(err.message) }
-    finally { setUploading(false); setUploadProgress(0); e.target.value = '' }
-  }
-
-  // ── Carrega buckets + usage ─────────────────────────────────
-  const carregarOverview = useCallback(async () => {
+  const carregarOverview=useCallback(async()=>{
     setLoading(true)
-    try {
-      const [b, u] = await Promise.all([
-        cloudflareService.listarBuckets(),
-        cloudflareService.usageR2().catch(() => null),
-      ])
-      setBuckets(b.buckets || [])
+    try{
+      const [b,u]=await Promise.all([cloudflareService.listarBuckets(),cloudflareService.usageR2().catch(()=>null)])
+      setBuckets((b.buckets||[]).map(x=>({...x,nome:x.nome||x.name})))
       setUsage(u)
-    } catch (err) { toast.error(err.message) }
-    finally { setLoading(false) }
-  }, [])
+    }catch(err){toast.error(err.message)}finally{setLoading(false)}
+  },[])
+  useEffect(()=>{carregarOverview()},[carregarOverview])
 
-  useEffect(() => { carregarOverview() }, [carregarOverview])
-
-  // ── Carrega objetos do bucket ───────────────────────────────
-  const carregarObjetos = useCallback(async (b, pref = '', cur = '') => {
-    if (!b) return
+  const carregarObjetos=useCallback(async(b,pref='',cur='')=>{
+    if(!b)return
     setLoadingObj(true)
-    try {
-      const d = await cloudflareService.listarObjetos(b.nome, {
-        prefix: pref, cursor: cur, limit: 250, delim: '/',
-      })
-      setObjetos(d.objetos  || [])
-      setPrefixos(d.prefixos || [])
-      setTruncated(d.truncated || false)
-      setCursor(d.cursor || '')
-      setSelected(new Set())
-    } catch (err) { toast.error(err.message) }
-    finally { setLoadingObj(false) }
-  }, [])
+    try{
+      const d=await cloudflareService.listarObjetos(bn(b),{prefix:pref,cursor:cur,limit:250,delim:'/'})
+      const clean=(d.objetos||[]).filter(o=>!String(o.key||'').endsWith('/.keep'))
+      if(cur)setObjetos(old=>[...old,...clean]);else setObjetos(clean)
+      if(cur)setPrefixos(old=>Array.from(new Set([...old,...(d.prefixos||[])])));else setPrefixos(d.prefixos||[])
+      setTruncated(Boolean(d.truncated));setCursor(d.cursor||'');setSelected(new Set())
+    }catch(err){toast.error(err.message)}finally{setLoadingObj(false)}
+  },[])
 
-  function abrirBucket(b) {
-    setBucketSel(b); setPrefix(''); setCursor('')
-    setView('browser'); carregarObjetos(b, '', '')
+  function abrirBucket(b){setBucketSel(b);setPrefix('');setView('browser');setSelected(new Set());carregarObjetos(b,'','')}
+  function navPrefix(p){setPrefix(p);setSelected(new Set());carregarObjetos(bucketSel,p,'')}
+  function Breadcrumb(){const parts=prefix.split('/').filter(Boolean);return <div className="cf-explorer-crumb"><button onClick={()=>navPrefix('')}>{bn(bucketSel)}</button>{parts.map((part,i)=>{const target=parts.slice(0,i+1).join('/')+'/';return <React.Fragment key={target}><span>/</span><button onClick={()=>navPrefix(target)}>{part}</button></React.Fragment>})}</div>}
+
+  async function definirPadrao(bucket,e){e?.stopPropagation?.();try{const r=await cloudflareService.definirBucketPadrao(bucket);toast.success(r.mensagem||'Bucket padrão atualizado');await onRefreshStatus?.()}catch(err){toast.error(err.message)}}
+  async function criarBucket(){const name=nomeBucket.trim();if(!name)return;setBusy(true);try{await cloudflareService.criarBucket(name);toast.success(`Bucket ${name} criado`);setNomeBucket('');setShowCreateBucket(false);await carregarOverview()}catch(err){toast.error(err.message)}finally{setBusy(false)}}
+  async function excluirBucket(bucket,e){e?.stopPropagation?.();if(!window.confirm(`Excluir o bucket “${bucket}”? Ele precisa estar vazio.`))return;setBusy(true);try{await cloudflareService.deletarBucket(bucket);toast.success('Bucket removido');await carregarOverview()}catch(err){toast.error(err.message)}finally{setBusy(false)}}
+
+  async function uploadFiles(filesLike){const files=Array.from(filesLike||[]);if(!files.length||!bucketSel)return;setUploading(true);setUploadProgress(0);let ok=0
+    try{for(let i=0;i<files.length;i++){const file=files[i];await cloudflareService.uploadObjeto(bn(bucketSel),prefix,file,p=>setUploadProgress(Math.round(((i+p/100)/files.length)*100)));ok++}toast.success(`${ok} arquivo(s) enviado(s)`);await carregarObjetos(bucketSel,prefix,'');await carregarOverview()}
+    catch(err){toast.error(`${ok} enviado(s); falha: ${err.message}`)}finally{setUploading(false);setUploadProgress(0)}
   }
+  async function criarPasta(){const n=folderName.trim().replace(/^\/+|\/+$/g,'');if(!n)return;setBusy(true);try{await cloudflareService.criarPasta(bn(bucketSel),prefix,n);toast.success('Pasta criada');setFolderName('');setShowFolder(false);await carregarObjetos(bucketSel,prefix,'')}catch(err){toast.error(err.message)}finally{setBusy(false)}}
+  async function deletarUm(key){if(!window.confirm(`Excluir “${nameOf(key)}”?`))return;try{await cloudflareService.deletarObjeto(bn(bucketSel),key);toast.success('Arquivo removido');await carregarObjetos(bucketSel,prefix,'')}catch(err){toast.error(err.message)}}
+  async function deletarSelecionados(){const keys=[...selected];if(!keys.length||!window.confirm(`Excluir ${keys.length} arquivo(s)?`))return;setBusy(true);try{const d=await cloudflareService.deletarObjetos(bn(bucketSel),keys);if(d.erros?.length)toast.error(`${d.deletados||0} removido(s), ${d.erros.length} falha(s)`);else toast.success(`${keys.length} arquivo(s) removido(s)`);await carregarObjetos(bucketSel,prefix,'')}catch(err){toast.error(err.message)}finally{setBusy(false)}}
+  function toggleSelect(key){setSelected(old=>{const n=new Set(old);n.has(key)?n.delete(key):n.add(key);return n})}
+  function toggleAll(){setSelected(selected.size===objetos.length?new Set():new Set(objetos.map(o=>o.key)))}
 
-  function navPrefix(p) {
-    setPrefix(p); carregarObjetos(bucketSel, p, '')
-  }
+  async function abrirPreview(o){setPreview(o);setPreviewInfo(null);setPreviewBusy(true);try{setPreviewInfo(await cloudflareService.infoObjeto(bn(bucketSel),o.key))}catch(err){toast.error(err.message)}finally{setPreviewBusy(false)}}
+  function abrirMover(o){setMoveItem(o);setMoveTo(o.key)}
+  async function mover(){const to=String(moveTo||'').trim().replace(/^\//,'');if(!moveItem||!to)return;setBusy(true);try{await cloudflareService.moverObjeto(bn(bucketSel),moveItem.key,to);toast.success('Arquivo movido/renomeado');setMoveItem(null);await carregarObjetos(bucketSel,prefix,'')}catch(err){toast.error(err.message)}finally{setBusy(false)}}
+  function baixar(o){window.open(cloudflareService.objectUrl(bn(bucketSel),o.key,{download:true}),'_blank','noopener')}
 
-  // ── Criar bucket ────────────────────────────────────────────
-  async function definirPadrao(bucket, ev) {
-    ev?.stopPropagation?.()
-    try {
-      const r=await cloudflareService.definirBucketPadrao(bucket)
-      toast.success(r.mensagem || `${bucket} definido como padrão`)
-      await onRefreshStatus?.()
-    } catch (err) { toast.error(err.message) }
-  }
+  const Modal=({title,onClose,children})=><div className="cf-explorer-modal-bg" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><div className="cf-explorer-modal"><div className="cf-explorer-modal-head"><b>{title}</b><button onClick={onClose}>×</button></div>{children}</div></div>
 
-  async function criarBucket() {
-    if (!nomeBucket.trim()) return
-    setCriando(true); setErroCreate('')
-    try {
-      await cloudflareService.criarBucket(nomeBucket.trim())
-      toast.success(`Bucket "${nomeBucket}" criado!`)
-      setShowCreate(false); setNomeBucket(''); carregarOverview()
-    } catch (err) { setErroCreate(err.message) }
-    finally { setCriando(false) }
-  }
-
-  // ── Deletar objetos selecionados ────────────────────────────
-  async function deletarSelecionados() {
-    if (!selected.size || !bucketSel) return
-    setDeleting(true)
-    try {
-      const keys = [...selected]
-      await cloudflareService.deletarObjetos(bucketSel.nome, keys)
-      toast.success(`${keys.length} objeto(s) removido(s)`)
-      carregarObjetos(bucketSel, prefix, '')
-    } catch (err) { toast.error(err.message) }
-    finally { setDeleting(false) }
-  }
-
-  // ── Deletar um objeto ───────────────────────────────────────
-  async function deletarUm(key) {
-    try {
-      await cloudflareService.deletarObjeto(bucketSel.nome, key)
-      toast.success('Objeto removido')
-      carregarObjetos(bucketSel, prefix, '')
-    } catch (err) { toast.error(err.message) }
-  }
-
-  function toggleSelect(key) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
-
-  function toggleAll() {
-    if (selected.size === objetos.length) setSelected(new Set())
-    else setSelected(new Set(objetos.map(o => o.key)))
-  }
-
-  function bytes(n) {
-    if (!n) return '0 B'
-    const u = ['B','KB','MB','GB','TB']; let i = 0
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
-    return `${n.toFixed(1)} ${u[i]}`
-  }
-
-  // ── Breadcrumb do prefix ────────────────────────────────────
-  function Breadcrumb() {
-    const partes = prefix.split('/').filter(Boolean)
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', fontSize: 12 }}>
-        <button onClick={() => navPrefix('')}
-          style={{ background: 'none', border: 'none', color: CF.orange, cursor: 'pointer', fontWeight: 600 }}>
-          {bucketSel?.nome}
-        </button>
-        {partes.map((p, i) => {
-          const target = partes.slice(0, i + 1).join('/') + '/'
-          return (
-            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: C.muted }}>/</span>
-              <button onClick={() => navPrefix(target)}
-                style={{ background: 'none', border: 'none',
-                  color: i === partes.length - 1 ? C.text : CF.orange,
-                  cursor: i === partes.length - 1 ? 'default' : 'pointer', fontWeight: 600 }}>
-                {p}
-              </button>
-            </span>
-          )
-        })}
-      </div>
-    )
-  }
-
-  // ═══ OVERVIEW ════════════════════════════════════════════════
-  if (view === 'overview') return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-      {/* Modal criar bucket */}
-      {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 999, background: '#0008',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-          onClick={e => e.target === e.currentTarget && setShowCreate(false)}>
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`,
-            borderRadius: RADIUS.lg, padding: SPACE.xl2, width: '100%', maxWidth: 380,
-            boxShadow: '0 20px 60px #0005' }}>
-            <h3 style={{ margin: `0 0 ${SPACE.lg}px`, color: C.text, fontSize: FONT.lg }}>
-              🪣 Novo Bucket R2
-            </h3>
-            <div style={{ marginBottom: SPACE.md }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: C.muted,
-                display: 'block', marginBottom: SPACE.xs, textTransform: 'uppercase' }}>
-                Nome
-              </label>
-              <input value={nomeBucket}
-                onChange={e => setNomeBucket(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
-                placeholder="meu-bucket"
-                onKeyDown={e => e.key === 'Enter' && criarBucket()}
-                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px',
-                  borderRadius: RADIUS.md, border: `1px solid ${C.border}`,
-                  background: C.surface2, color: C.text, fontSize: 13 }} />
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-                Apenas letras minúsculas, números e hífens
-              </div>
-            </div>
-            {erroCreate && (
-              <div style={{ fontSize: 12, color: CF.err, marginBottom: SPACE.md }}>{erroCreate}</div>
-            )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Btn onClick={() => setShowCreate(false)} variant="secondary"
-                style={{ width: 'auto', padding: '6px 16px', fontSize: 12 }}>
-                Cancelar
-              </Btn>
-              <Btn onClick={criarBucket} disabled={!nomeBucket.trim() || criando}
-                style={{ width: 'auto', padding: '6px 16px', fontSize: 12,
-                  background: CF.orange, borderColor: CF.orange }}>
-                {criando ? <Spin size={12} /> : '✓ Criar'}
-              </Btn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Resumo compacto — conteúdo do R2 primeiro, sem ocupar a tela com cards grandes */}
-      {usage && (
-        <PageCard style={{ padding: '10px 12px' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:6 }}>
-            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Armazenamento</span><b style={{display:'block',fontSize:13,color:CF.orange,overflow:'hidden',textOverflow:'ellipsis'}}>{bytes(usage.totalBytes)}</b></div>
-            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Objetos</span><b style={{display:'block',fontSize:13,color:C.text}}>{(usage.totalObjetos||0).toLocaleString('pt-BR')}</b></div>
-            <div style={{minWidth:0}}><span style={{display:'block',fontSize:9,color:C.muted}}>Buckets</span><b style={{display:'block',fontSize:13,color:C.text}}>{buckets.length}</b></div>
-          </div>
-        </PageCard>
-      )}
-
-      {/* Header + botão criar */}
-      <PageCard style={{ padding: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: `${SPACE.lg}px ${SPACE.lg}px ${SPACE.md}px` }}>
-          <SectionTitle icon={<span style={{ fontSize: 15 }}>🪣</span>}>
-            Buckets ({buckets.length})
-          </SectionTitle>
-          <Btn onClick={() => setShowCreate(true)}
-            style={{ width: 'auto', padding: '5px 14px', fontSize: 12,
-              background: CF.orange, borderColor: CF.orange }}>
-            + Novo bucket
-          </Btn>
-        </div>
-
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Spin size={20} /></div>
-        ) : buckets.length === 0 ? (
-          <p style={{ color: C.muted, textAlign: 'center', padding: 40, fontSize: 13 }}>
-            Nenhum bucket encontrado. Crie o primeiro!
-          </p>
-        ) : (
-          <div>
-            {buckets.map(b => {
-              const u = usage?.buckets?.find(x => x.nome === b.nome) || b
-              return (
-                <div key={b.nome || b.name}
-                  onClick={() => abrirBucket({ nome: b.nome || b.name, criado: b.criado || b.creation_date })}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: `${SPACE.md}px ${SPACE.lg}px`,
-                    borderBottom: `1px solid ${C.border}`, cursor: 'pointer',
-                    transition: 'background .12s' }}
-                  onMouseEnter={e => e.currentTarget.style.background = CF.orangeL}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 18 }}>🪣</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                        {b.nome || b.name}
-                      </div>
-                      <div style={{ fontSize: 11, color: C.muted }}>
-                        {b.criado || b.creation_date
-                          ? new Date(b.criado || b.creation_date).toLocaleDateString('pt-BR')
-                          : '—'}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {u.bytes != null && (
-                      <div style={{ textAlign: 'right', marginRight:4 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{bytes(u.bytes)}</div>
-                        <div style={{ fontSize: 10, color: C.muted }}>{(u.objetos||0).toLocaleString('pt-BR')} obj</div>
-                      </div>
-                    )}
-                    {(b.nome||b.name)===status?.s3Credentials?.bucket
-                      ? <Badge color={CF.active}>padrão do AL</Badge>
-                      : <button onClick={e=>definirPadrao(b.nome||b.name,e)} style={{fontSize:9,padding:'4px 7px'}}>Usar no AL</button>}
-                    <span style={{ color: CF.orange, fontSize: 14 }}>→</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-        <div style={{ padding: `${SPACE.md}px ${SPACE.lg}px`, borderTop: `1px solid ${C.border}` }}>
-          <Btn onClick={carregarOverview} variant="secondary"
-            style={{ width: 'auto', padding: '5px 14px', fontSize: 11 }}>
-            {Ico.refresh} Atualizar
-          </Btn>
-        </div>
-      </PageCard>
+  if(view==='overview')return <div className="cf-r2-shell">
+    {showCreateBucket&&<Modal title="Novo bucket R2" onClose={()=>setShowCreateBucket(false)}><div className="cf-explorer-form"><label>Nome do bucket</label><input autoFocus value={nomeBucket} onChange={e=>setNomeBucket(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,'-'))} placeholder="meu-bucket" onKeyDown={e=>e.key==='Enter'&&criarBucket()}/><small>Use letras minúsculas, números e hífens.</small><div><button onClick={()=>setShowCreateBucket(false)}>Cancelar</button><button className="primary" onClick={criarBucket} disabled={busy||!nomeBucket}>Criar</button></div></div></Modal>}
+    <div className="cf-r2-stats"><div><span>ARMAZENAMENTO</span><b>{fmtBytes(usage?.totalBytes)}</b></div><div><span>OBJETOS</span><b>{Number(usage?.totalObjetos||0).toLocaleString('pt-BR')}</b></div><div><span>BUCKETS</span><b>{buckets.length}</b></div><button onClick={carregarOverview} title="Atualizar">↻</button></div>
+    <div className="cf-explorer-card">
+      <div className="cf-explorer-card-head"><div><small>R2 STORAGE</small><h3>Seus espaços</h3><p>Abra um bucket para administrar arquivos como em um Explorer.</p></div><button className="primary" onClick={()=>setShowCreateBucket(true)}>+ Novo bucket</button></div>
+      {loading?<div className="cf-explorer-loading"><Spin size={20}/></div>:!buckets.length?<div className="cf-explorer-empty"><b>Nenhum bucket encontrado</b><span>Crie o primeiro espaço de armazenamento R2.</span></div>:<div className="cf-bucket-grid">{buckets.map(b=>{const name=bn(b),u=usage?.buckets?.find(x=>(x.nome||x.name)===name);const isDefault=name===status?.s3Credentials?.bucket;return <button key={name} className={`cf-bucket-card ${isDefault?'default':''}`} onClick={()=>abrirBucket(b)}><div className="cf-bucket-top"><span className="cf-bucket-icon">R2</span>{isDefault&&<em>PADRÃO AL</em>}</div><h4>{name}</h4><div className="cf-bucket-meta"><span>{fmtBytes(u?.bytes)}</span><span>{Number(u?.objetos||0).toLocaleString('pt-BR')} objetos</span></div><div className="cf-bucket-actions"><span onClick={e=>definirPadrao(name,e)}>{isDefault?'Em uso':'Usar no AL'}</span><span className="danger" onClick={e=>excluirBucket(name,e)}>Excluir</span><b>→</b></div></button>})}</div>}
     </div>
-  )
+    <style>{CF_EXPLORER_CSS}</style>
+  </div>
 
-  // ═══ BROWSER ═════════════════════════════════════════════════
-  const bucketUsage = usage?.buckets?.find(x => x.nome === bucketSel?.nome) || null
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {bucketUsage && <PageCard style={{padding:'9px 12px'}}>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:6}}>
-          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>USO DO BUCKET</span><b style={{display:'block',fontSize:12,color:CF.orange}}>{bytes(bucketUsage.bytes||0)}</b></div>
-          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>OBJETOS</span><b style={{display:'block',fontSize:12,color:C.text}}>{(bucketUsage.objetos||0).toLocaleString('pt-BR')}</b></div>
-          <div style={{minWidth:0}}><span style={{display:'block',fontSize:8.5,color:C.muted}}>UPLOADS</span><b style={{display:'block',fontSize:12,color:C.text}}>{(bucketUsage.uploads||0).toLocaleString('pt-BR')}</b></div>
-        </div>
-        <div style={{fontSize:8.5,color:C.muted,marginTop:6}}>Tráfego/egress não é inventado: esta tela mostra apenas métricas retornadas pela integração atual.</div>
-      </PageCard>}
-      {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Btn onClick={() => { setView('overview'); setBucketSel(null) }} variant="secondary"
-          style={{ width: 'auto', padding: '5px 12px', fontSize: 12 }}>
-          ← Buckets
-        </Btn>
-        <Breadcrumb />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          {selected.size > 0 && (
-            <Btn onClick={deletarSelecionados} disabled={deleting}
-              style={{ width: 'auto', padding: '5px 12px', fontSize: 12,
-                background: CF.err, borderColor: CF.err }}>
-              {deleting ? <Spin size={12} /> : `🗑 Deletar ${selected.size}`}
-            </Btn>
-          )}
-          <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={uploadArquivo} />
-          <Btn onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="secondary"
-            style={{ width: 'auto', padding: '5px 12px', fontSize: 12 }}>
-            {uploading ? `⬆ ${uploadProgress}%` : '⬆ Upload'}
-          </Btn>
-          <Btn onClick={() => carregarObjetos(bucketSel, prefix, '')} variant="secondary"
-            style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }}>
-            {Ico.refresh}
-          </Btn>
-        </div>
-      </div>
+  const bucketUsage=usage?.buckets?.find(x=>(x.nome||x.name)===bn(bucketSel))
+  return <div className="cf-r2-shell">
+    {showFolder&&<Modal title="Nova pasta" onClose={()=>setShowFolder(false)}><div className="cf-explorer-form"><label>Nome</label><input autoFocus value={folderName} onChange={e=>setFolderName(e.target.value)} placeholder="imagens" onKeyDown={e=>e.key==='Enter'&&criarPasta()}/><small>Será criada dentro de {prefix||'/'}</small><div><button onClick={()=>setShowFolder(false)}>Cancelar</button><button className="primary" onClick={criarPasta} disabled={busy||!folderName.trim()}>Criar pasta</button></div></div></Modal>}
+    {moveItem&&<Modal title="Mover ou renomear" onClose={()=>setMoveItem(null)}><div className="cf-explorer-form"><label>Novo caminho</label><input autoFocus value={moveTo} onChange={e=>setMoveTo(e.target.value)} onKeyDown={e=>e.key==='Enter'&&mover()}/><small>Você pode alterar só o nome ou mover para outra pasta informando o caminho completo.</small><div><button onClick={()=>setMoveItem(null)}>Cancelar</button><button className="primary" onClick={mover} disabled={busy||!moveTo.trim()}>Aplicar</button></div></div></Modal>}
+    {preview&&<Modal title={nameOf(preview.key)} onClose={()=>{setPreview(null);setPreviewInfo(null)}}><div className="cf-preview-body">{previewBusy?<div className="cf-explorer-loading"><Spin size={20}/></div>:<>{isImage(preview.key)&&<img src={cloudflareService.objectUrl(bn(bucketSel),preview.key)} alt={nameOf(preview.key)}/>} {isVideo(preview.key)&&<video controls src={cloudflareService.objectUrl(bn(bucketSel),preview.key)}/>} {isAudio(preview.key)&&<audio controls src={cloudflareService.objectUrl(bn(bucketSel),preview.key)}/>} {!isImage(preview.key)&&!isVideo(preview.key)&&!isAudio(preview.key)&&<div className="cf-file-generic">📄<b>{nameOf(preview.key)}</b><span>Prévia visual não disponível para este formato.</span></div>}<div className="cf-preview-info"><span><b>Tamanho</b>{fmtBytes(previewInfo?.size??preview.size)}</span><span><b>Tipo</b>{previewInfo?.contentType||'—'}</span><span><b>Modificado</b>{previewInfo?.lastModified?new Date(previewInfo.lastModified).toLocaleString('pt-BR'):'—'}</span><span><b>ETag</b>{previewInfo?.etag||preview.etag||'—'}</span></div><div className="cf-preview-actions"><button onClick={()=>baixar(preview)}>⇩ Baixar</button><button onClick={()=>{setPreview(null);abrirMover(preview)}}>Renomear / mover</button></div></>}</div></Modal>}
 
-      <PageCard style={{ padding: 0 }}>
-        {/* Sub-header do bucket */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: `${SPACE.md}px ${SPACE.lg}px`, borderBottom: `1px solid ${C.border}`,
-          background: C.surface2 }}>
-          <div style={{ fontSize: 12, color: C.muted }}>
-            {loadingObj ? 'Carregando…'
-              : `${prefixos.length} pasta(s) · ${objetos.length} objeto(s)`
-                + (truncated ? ' (há mais)' : '')}
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 11, color: C.muted, cursor: 'pointer' }}>
-            <input type="checkbox" checked={selected.size === objetos.length && objetos.length > 0}
-              onChange={toggleAll}
-              style={{ width: 13, height: 13, accentColor: CF.orange }} />
-            Selecionar todos
-          </label>
-        </div>
-
-        {loadingObj ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Spin size={20} /></div>
-        ) : (prefixos.length === 0 && objetos.length === 0) ? (
-          <p style={{ color: C.muted, textAlign: 'center', padding: 40, fontSize: 13 }}>
-            Pasta vazia.
-          </p>
-        ) : (
-          <div>
-            {/* Pastas (prefixos) */}
-            {prefixos.map(p => (
-              <div key={p} onClick={() => navPrefix(p)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10,
-                  padding: `${SPACE.sm + 2}px ${SPACE.lg}px`,
-                  borderBottom: `1px solid ${C.border}`, cursor: 'pointer',
-                  transition: 'background .1s' }}
-                onMouseEnter={e => e.currentTarget.style.background = CF.orangeL}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ fontSize: 16 }}>📁</span>
-                <span style={{ fontSize: 13, color: C.text, flex: 1 }}>
-                  {p.replace(prefix, '').replace(/\/$/, '')}
-                </span>
-                <span style={{ fontSize: 11, color: CF.orange }}>→</span>
-              </div>
-            ))}
-
-            {/* Objetos */}
-            {objetos.map(o => {
-              const nome = (o.key || '').replace(prefix, '')
-              const ext  = nome.split('.').pop() || ''
-              const ICON = { jpg:'🖼',jpeg:'🖼',png:'🖼',gif:'🖼',webp:'🖼',svg:'🖼',
-                pdf:'📄', zip:'📦', gz:'📦', md:'📝', json:'🗒', js:'📜', ts:'📜',
-                html:'🌐', css:'🎨', mp4:'🎬', mp3:'🎵' }
-              const icon = ICON[ext.toLowerCase()] || '📄'
-              const isSel = selected.has(o.key)
-
-              return (
-                <div key={o.key}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10,
-                    padding: `${SPACE.sm + 2}px ${SPACE.lg}px`,
-                    borderBottom: `1px solid ${C.border}`,
-                    background: isSel ? CF.orangeL : 'transparent',
-                    transition: 'background .1s' }}>
-                  <input type="checkbox" checked={isSel}
-                    onChange={() => toggleSelect(o.key)}
-                    style={{ width: 13, height: 13, accentColor: CF.orange, flexShrink: 0 }} />
-                  <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: C.text, fontFamily: 'monospace',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {nome}
-                    </div>
-                    <div style={{ fontSize: 10, color: C.muted, display: 'flex', gap: 8 }}>
-                      {o.size != null && <span>{bytes(o.size)}</span>}
-                      {o.uploaded && <span>{new Date(o.uploaded).toLocaleString('pt-BR')}</span>}
-                    </div>
-                  </div>
-                  <button onClick={() => deletarUm(o.key)} title="Deletar"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer',
-                      color: CF.err, padding: '2px 4px', borderRadius: RADIUS.sm,
-                      flexShrink: 0 }}>
-                    {Ico.trash}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Paginação cursor */}
-        {truncated && cursor && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: SPACE.md }}>
-            <Btn onClick={() => carregarObjetos(bucketSel, prefix, cursor)} variant="secondary"
-              style={{ width: 'auto', padding: '5px 16px', fontSize: 12 }}>
-              Carregar mais →
-            </Btn>
-          </div>
-        )}
-      </PageCard>
+    <div className="cf-explorer-toolbar">
+      <button className="back" onClick={()=>{setView('overview');setBucketSel(null)}}>← Espaços</button><Breadcrumb/>
+      <div className="cf-explorer-toolbar-actions"><button onClick={()=>setShowFolder(true)}>+ Pasta</button><input ref={fileInputRef} type="file" multiple hidden onChange={e=>{uploadFiles(e.target.files);e.target.value=''}}/><button className="primary" onClick={()=>fileInputRef.current?.click()} disabled={uploading}>{uploading?`Enviando ${uploadProgress}%`:'↑ Enviar arquivos'}</button><button onClick={()=>setDisplay(display==='list'?'grid':'list')} title="Alternar visualização">{display==='list'?'▦':'☷'}</button><button onClick={()=>carregarObjetos(bucketSel,prefix,'')} title="Atualizar">↻</button></div>
     </div>
-  )
+    <div className="cf-explorer-context"><div><span>BUCKET</span><b>{bn(bucketSel)}</b></div><div><span>USO</span><b>{fmtBytes(bucketUsage?.bytes)}</b></div><div><span>OBJETOS</span><b>{Number(bucketUsage?.objetos||0).toLocaleString('pt-BR')}</b></div>{selected.size>0&&<button className="danger" onClick={deletarSelecionados} disabled={busy}>Excluir {selected.size}</button>}</div>
+    <div ref={dropRef} className={`cf-explorer-drop ${uploading?'uploading':''}`} onDragOver={e=>{e.preventDefault();e.currentTarget.classList.add('dragging')}} onDragLeave={e=>e.currentTarget.classList.remove('dragging')} onDrop={e=>{e.preventDefault();e.currentTarget.classList.remove('dragging');uploadFiles(e.dataTransfer.files)}}>
+      <div className="cf-explorer-list-head"><span>{loadingObj?'Carregando…':`${prefixos.length} pasta(s) · ${objetos.length} arquivo(s)`}</span><label><input type="checkbox" checked={objetos.length>0&&selected.size===objetos.length} onChange={toggleAll}/> Selecionar arquivos</label></div>
+      {loadingObj?<div className="cf-explorer-loading"><Spin size={20}/></div>:(!prefixos.length&&!objetos.length)?<div className="cf-explorer-empty"><b>Pasta vazia</b><span>Arraste arquivos para cá ou use “Enviar arquivos”.</span></div>:<div className={`cf-object-area ${display}`}>
+        {prefixos.map(p=><button key={p} className="cf-folder-row" onClick={()=>navPrefix(p)}><span>📁</span><div><b>{p.replace(prefix,'').replace(/\/$/,'')}</b><small>Pasta</small></div><em>→</em></button>)}
+        {objetos.map(o=>{const sel=selected.has(o.key),image=isImage(o.key);return <div key={o.key} className={`cf-object-row ${sel?'selected':''}`}><label className="cf-object-check"><input type="checkbox" checked={sel} onChange={()=>toggleSelect(o.key)}/></label><button className="cf-object-open" onClick={()=>abrirPreview(o)}>{display==='grid'&&image?<img src={cloudflareService.objectUrl(bn(bucketSel),o.key)} alt="" loading="lazy"/>:<span className="cf-object-icon">{image?'🖼':isVideo(o.key)?'🎬':isAudio(o.key)?'🎵':'📄'}</span>}<div><b>{nameOf(o.key)}</b><small>{fmtBytes(o.size)}{o.uploaded?` · ${new Date(o.uploaded).toLocaleDateString('pt-BR')}`:''}</small></div></button><div className="cf-object-actions"><button onClick={()=>baixar(o)} title="Baixar">⇩</button><button onClick={()=>abrirMover(o)} title="Renomear ou mover">✎</button><button className="danger" onClick={()=>deletarUm(o.key)} title="Excluir">×</button></div></div>})}
+      </div>}
+      {truncated&&cursor&&<div className="cf-explorer-more"><button onClick={()=>carregarObjetos(bucketSel,prefix,cursor)}>Carregar mais</button></div>}
+      {uploading&&<div className="cf-upload-progress"><span style={{width:`${uploadProgress}%`}}/></div>}
+    </div>
+    <style>{CF_EXPLORER_CSS}</style>
+  </div>
 }
+
+const CF_EXPLORER_CSS=`
+.cf-r2-shell{display:grid;gap:12px}.cf-r2-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:8px;align-items:stretch}.cf-r2-stats>div,.cf-explorer-context>div{border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface);padding:10px 12px;min-width:0}.cf-r2-stats span,.cf-explorer-context span{display:block;font-size:8px;font-weight:900;letter-spacing:.1em;color:var(--adm-muted)}.cf-r2-stats b,.cf-explorer-context b{display:block;font-size:13px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cf-r2-stats>button{width:40px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface);color:var(--adm-text);font-size:18px}.cf-explorer-card,.cf-explorer-drop{border:1px solid var(--adm-border);border-radius:16px;background:var(--adm-surface);overflow:hidden}.cf-explorer-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;padding:15px;border-bottom:1px solid var(--adm-border)}.cf-explorer-card-head small{font-size:8px;font-weight:950;letter-spacing:.12em;color:#f6821f}.cf-explorer-card-head h3{font-size:16px;margin:3px 0}.cf-explorer-card-head p{font-size:10px;color:var(--adm-muted);margin:0}.cf-explorer-card button,.cf-r2-shell button{cursor:pointer}.cf-r2-shell button.primary,.cf-explorer-form button.primary,.cf-explorer-toolbar button.primary{background:#f6821f;color:#fff;border-color:#f6821f}.cf-bucket-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:12px}.cf-bucket-card{position:relative;overflow:hidden;min-height:145px;padding:12px;text-align:left;border:1px solid var(--adm-border);border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));color:var(--adm-text)}.cf-bucket-card.default:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#f6821f}.cf-bucket-top{display:flex;justify-content:space-between;align-items:center}.cf-bucket-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;border:1px solid var(--adm-border);background:var(--adm-bg);color:#f6821f;font-size:10px;font-weight:950}.cf-bucket-top em{font-style:normal;font-size:7px;font-weight:950;letter-spacing:.08em;color:#16a34a}.cf-bucket-card h4{margin:12px 0 6px;font-size:12px;overflow:hidden;text-overflow:ellipsis}.cf-bucket-meta{display:flex;flex-wrap:wrap;gap:5px}.cf-bucket-meta span{font-size:8px;color:var(--adm-muted);border:1px solid var(--adm-border);border-radius:999px;padding:4px 6px}.cf-bucket-actions{margin-top:12px;padding-top:9px;border-top:1px solid var(--adm-border);display:flex;align-items:center;gap:8px;font-size:8px;font-weight:850;color:var(--adm-muted)}.cf-bucket-actions span:hover{color:#f6821f}.cf-bucket-actions .danger:hover{color:#ef4444}.cf-bucket-actions b{margin-left:auto;color:#f6821f;font-size:12px}.cf-explorer-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.cf-explorer-toolbar>button,.cf-explorer-toolbar-actions button,.cf-preview-actions button,.cf-explorer-more button{border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface);color:var(--adm-text);padding:8px 10px;font-size:10px;font-weight:800}.cf-explorer-toolbar-actions{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}.cf-explorer-crumb{display:flex;align-items:center;gap:4px;min-width:0;overflow:auto}.cf-explorer-crumb button{border:0;background:transparent;color:#f6821f;padding:4px;font-size:10px;font-weight:800;white-space:nowrap}.cf-explorer-crumb span{color:var(--adm-muted)}.cf-explorer-context{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:7px;align-items:stretch}.cf-explorer-context>button{border:1px solid #ef444455;background:#ef44440b;color:#ef4444;border-radius:12px;padding:0 12px;font-size:9px;font-weight:900}.cf-explorer-list-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface2);font-size:9px;color:var(--adm-muted)}.cf-explorer-list-head label{display:flex;align-items:center;gap:5px}.cf-object-area.list{display:block}.cf-object-area.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px}.cf-folder-row,.cf-object-row{width:100%;display:flex;align-items:center;gap:9px;border:0;border-bottom:1px solid var(--adm-border);border-radius:0;background:transparent;color:var(--adm-text);padding:9px 12px;text-align:left}.cf-folder-row:hover,.cf-object-row:hover{background:#f6821f0a}.cf-folder-row>span{font-size:15px}.cf-folder-row>div{display:grid;gap:2px;min-width:0}.cf-folder-row b,.cf-object-open b{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cf-folder-row small,.cf-object-open small{font-size:8px;color:var(--adm-muted)}.cf-folder-row em{margin-left:auto;font-style:normal;color:#f6821f}.cf-object-row.selected{background:#f6821f0d}.cf-object-check{display:grid;place-items:center}.cf-object-open{min-width:0;flex:1;display:flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--adm-text);text-align:left;padding:0}.cf-object-open>div{display:grid;gap:2px;min-width:0}.cf-object-icon{font-size:15px}.cf-object-actions{display:flex;gap:3px;margin-left:auto}.cf-object-actions button{width:28px;height:28px;padding:0;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface2);color:var(--adm-muted)}.cf-object-actions .danger{color:#ef4444}.cf-object-area.grid .cf-object-row{position:relative;display:block;border:1px solid var(--adm-border);border-radius:12px;padding:8px;min-width:0}.cf-object-area.grid .cf-folder-row{border:1px solid var(--adm-border);border-radius:12px;min-height:92px}.cf-object-area.grid .cf-object-check{position:absolute;top:7px;left:7px;z-index:2;background:var(--adm-surface);border-radius:5px;padding:2px}.cf-object-area.grid .cf-object-open{display:grid;gap:7px}.cf-object-area.grid .cf-object-open img{width:100%;aspect-ratio:1.5;object-fit:cover;border-radius:8px;background:var(--adm-bg)}.cf-object-area.grid .cf-object-icon{display:grid;place-items:center;width:100%;aspect-ratio:1.5;border-radius:8px;background:var(--adm-bg);font-size:26px}.cf-object-area.grid .cf-object-actions{margin:7px 0 0;justify-content:flex-end}.cf-explorer-drop.dragging{outline:2px dashed #f6821f;outline-offset:-5px;background:#f6821f08}.cf-upload-progress{height:3px;background:var(--adm-border)}.cf-upload-progress span{display:block;height:100%;background:#f6821f;transition:width .15s}.cf-explorer-loading,.cf-explorer-empty{min-height:120px;display:grid;place-items:center;align-content:center;gap:5px;color:var(--adm-muted);font-size:10px;text-align:center;padding:18px}.cf-explorer-empty b{font-size:11px;color:var(--adm-text)}.cf-explorer-more{display:flex;justify-content:center;padding:10px}.cf-explorer-modal-bg{position:fixed;inset:0;z-index:1400;background:#0008;display:grid;place-items:center;padding:14px}.cf-explorer-modal{width:min(620px,100%);max-height:88dvh;overflow:auto;border:1px solid var(--adm-border);border-radius:18px;background:var(--adm-surface);box-shadow:0 24px 80px #0007}.cf-explorer-modal-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface)}.cf-explorer-modal-head b{font-size:13px}.cf-explorer-modal-head button{border:0;background:transparent;color:var(--adm-muted);font-size:20px}.cf-explorer-form{padding:15px;display:grid;gap:8px}.cf-explorer-form label{font-size:9px;font-weight:900;color:var(--adm-muted)}.cf-explorer-form input{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg);color:var(--adm-text)}.cf-explorer-form small{font-size:9px;color:var(--adm-muted)}.cf-explorer-form>div{display:flex;justify-content:flex-end;gap:7px;margin-top:6px}.cf-explorer-form button{border:1px solid var(--adm-border);border-radius:9px;padding:8px 11px;background:var(--adm-surface2);color:var(--adm-text);font-size:10px;font-weight:800}.cf-preview-body{padding:14px;display:grid;gap:12px}.cf-preview-body>img,.cf-preview-body>video{width:100%;max-height:55vh;object-fit:contain;border-radius:12px;background:var(--adm-bg)}.cf-preview-body>audio{width:100%}.cf-file-generic{min-height:160px;border:1px dashed var(--adm-border);border-radius:12px;background:var(--adm-bg);display:grid;place-items:center;align-content:center;gap:6px;font-size:34px}.cf-file-generic b{font-size:11px}.cf-file-generic span{font-size:9px;color:var(--adm-muted)}.cf-preview-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.cf-preview-info span{display:grid;gap:2px;padding:8px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2);font-size:9px;overflow-wrap:anywhere}.cf-preview-info b{font-size:8px;color:var(--adm-muted)}.cf-preview-actions{display:flex;justify-content:flex-end;gap:6px}
+@media(max-width:760px){.cf-bucket-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:8px}.cf-object-area.grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:7px}.cf-explorer-toolbar-actions{width:100%;margin-left:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.cf-explorer-toolbar-actions button{padding:8px 5px}.cf-explorer-context{grid-template-columns:repeat(3,minmax(0,1fr))}.cf-explorer-context>div:first-child{grid-column:1/-1}.cf-explorer-context>button{grid-column:1/-1;min-height:38px}.cf-explorer-list-head{align-items:flex-start}.cf-r2-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.cf-r2-stats>button{grid-column:1/-1;width:100%;height:34px}.cf-explorer-card-head{align-items:flex-start;flex-direction:column}.cf-explorer-card-head>button{width:100%}.cf-preview-info{grid-template-columns:1fr}.cf-explorer-modal-bg{padding:10px}.cf-explorer-modal{max-height:calc(100dvh - 20px)}}
+`
 
 // ─── ABA: SSL ─────────────────────────────────────────────────
 function AbaSsl({ zona }) {
@@ -1665,112 +1322,69 @@ function AbaPageRules({ zona }) {
 }
 
 export default function AbaCloudflare() {
-  const [abaAtiva,      setAbaAtiva]      = useState('r2')
-  const [configAberta, setConfigAberta] = useState(false)
-  const [statusCF,      setStatusCF]      = useState(null)
-  const [loadingStatus, setLoadingStatus] = useState(true)
-  const [zonaSelecionada, setZonaSelecionada] = useState(null)
+  const [statusCF,setStatusCF]=useState(null),[dashboard,setDashboard]=useState(null),[loadingStatus,setLoadingStatus]=useState(true)
+  const [settingsOpen,setSettingsOpen]=useState(false),[tool,setTool]=useState('menu'),[zonaSelecionada,setZonaSelecionada]=useState(null)
 
-  const carregarStatus = useCallback(async () => {
+  const carregarStatus=useCallback(async()=>{
     setLoadingStatus(true)
-    try {
-      const d = await cloudflareService.status()
-      setStatusCF(d)
-    } catch (err) {
-      setStatusCF({ ok: false, erro: err.message })
-    } finally {
-      setLoadingStatus(false)
-    }
-  }, [])
-
-  useEffect(() => { carregarStatus() }, [carregarStatus])
-
-  const tokenAtivo = statusCF?.ok && statusCF?.token?.status === 'active'
-
-  const ABAS = [
-    { id: 'geral',      label: '🔑 Visão Geral' },
-    { id: 'recursos',   label: '🧭 Recursos',      req: tokenAtivo },
-    { id: 'zonas',      label: '🌐 Zonas',        req: tokenAtivo },
-    { id: 'dns',        label: '📋 DNS',          req: tokenAtivo, sub: zonaSelecionada?.name },
-    { id: 'ssl',        label: '🔒 SSL',          req: tokenAtivo, sub: zonaSelecionada?.name },
-    { id: 'firewall',   label: '🛡 Firewall',      req: tokenAtivo, sub: zonaSelecionada?.name },
-    { id: 'pagerules',  label: '📐 Page Rules',   req: tokenAtivo, sub: zonaSelecionada?.name },
-    { id: 'analytics',  label: '📊 Analytics',    req: tokenAtivo, sub: zonaSelecionada?.name },
-    { id: 'workers',    label: '⚙️ Workers',      req: tokenAtivo },
-    { id: 'r2',         label: '🪣 R2 Storage',   req: tokenAtivo },
+    try{
+      const [s,d]=await Promise.all([cloudflareService.status(),cloudflareService.dashboard().catch(()=>null)])
+      setStatusCF(s);setDashboard(d)
+    }catch(err){setStatusCF({ok:false,erro:err.message})}finally{setLoadingStatus(false)}
+  },[])
+  useEffect(()=>{carregarStatus()},[carregarStatus])
+  const tokenAtivo=statusCF?.ok&&statusCF?.token?.status==='active'
+  const subscriptions=dashboard?.subscriptions||[]
+  const planNames=Object.entries(dashboard?.zones?.plans||{}).map(([name,count])=>`${name} · ${count}`).join(', ')
+  const planMain=subscriptions[0]?.rate_plan?.public_name||subscriptions[0]?.rate_plan?.full_name||subscriptions[0]?.rate_plan?.id||subscriptions[0]?.name||planNames||'Não informado pela API'
+  const tools=[
+    ['geral','🔑','Conta e token','Identidade, token e credenciais R2'],['recursos','🧭','Produtos','Pages, KV, D1, Queues, Vectorize e AI Gateway'],['zonas','🌐','Zonas e DNS','Domínios e registros DNS'],['ssl','🔒','SSL/TLS','Configuração da zona selecionada'],['firewall','🛡','Segurança','Eventos de firewall'],['pagerules','📐','Page Rules','Regras de página'],['analytics','📊','Analytics','Tráfego e ameaças'],['workers','⚙','Workers','Scripts da conta'],['account','◉','Conta e plano','Contas acessíveis, assinaturas e planos'],['credentials','🔐','Credenciais','Abrir Integrações e APIs'],
   ]
+  function selectZone(z){setZonaSelecionada(z);setTool('dns')}
+  function openTool(id){if(id==='credentials'){window.location.href='/admin/integracoes?open=cloudflare';return}setTool(id)}
+  function closeSettings(){setSettingsOpen(false);setTool('menu')}
 
-  function selecionarZona(z) {
-    setZonaSelecionada(z)
-    setAbaAtiva('dns')
+  const ToolContent=()=>{
+    if(tool==='menu')return <div className="cf-tools-grid">{tools.map(([id,ico,title,desc])=><button key={id} onClick={()=>openTool(id)}><span>{ico}</span><div><b>{title}</b><small>{desc}</small></div><em>→</em></button>)}</div>
+    if(tool==='geral')return <AbaGeral status={statusCF} carregando={loadingStatus} recarregar={carregarStatus}/>
+    if(tool==='recursos')return <AbaRecursos/>
+    if(tool==='zonas')return <AbaZonas onSelecionarZona={selectZone} zonaSelecionada={zonaSelecionada}/>
+    if(tool==='dns')return <AbaDns zona={zonaSelecionada}/>
+    if(tool==='ssl')return <AbaSsl zona={zonaSelecionada}/>
+    if(tool==='firewall')return <AbaFirewall zona={zonaSelecionada}/>
+    if(tool==='pagerules')return <AbaPageRules zona={zonaSelecionada}/>
+    if(tool==='analytics')return <AbaAnalytics zona={zonaSelecionada}/>
+    if(tool==='workers')return <AbaWorkers/>
+    if(tool==='account')return <div className="cf-account-panel">
+      <section><small>CONTA ATIVA</small><h3>{dashboard?.account?.name||statusCF?.conta?.name||'Cloudflare'}</h3><p>{dashboard?.account?.id||statusCF?.account_id||'—'}</p></section>
+      <div className="cf-account-list"><div><b>Contas acessíveis</b><span>{dashboard?.accountsAvailable===false?'O token não permite listar contas.':`${dashboard?.accounts?.length||1} conta(s)`}</span></div>{(dashboard?.accounts||[]).map(a=><div key={a.id}><b>{a.name||'Conta'}</b><code>{a.id}</code></div>)}</div>
+      <div className="cf-account-list"><div><b>Assinaturas / plano</b><span>{dashboard?.subscriptionsAvailable===false?'Permissão de billing não disponível para este token.':`${subscriptions.length} assinatura(s)`}</span></div>{subscriptions.length?subscriptions.map((sub,i)=><div key={sub.id||i}><b>{sub.rate_plan?.public_name||sub.rate_plan?.full_name||sub.rate_plan?.id||sub.name||sub.id||'Assinatura'}</b><span>{sub.state||sub.status||sub.frequency||'ativa'}</span>{sub.price!=null&&<code>{sub.currency||'USD'} {sub.price}</code>}</div>):<div><b>Planos das zonas</b><span>{planNames||'Nenhum plano retornado'}</span></div>}</div>
+      <div className="cf-account-list"><div><b>R2</b><span>{dashboard?.r2?.available?'Métricas S3 acessíveis':'Métricas detalhadas indisponíveis'}</span></div><div><b>{bytes(dashboard?.r2?.totalBytes||0)}</b><span>{Number(dashboard?.r2?.totalObjetos||0).toLocaleString('pt-BR')} objetos · {(dashboard?.r2?.buckets||[]).length} bucket(s)</span></div></div>
+    </div>
+    return null
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header com logo Cloudflare */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 14,
-        padding: '12px 18px', borderRadius: RADIUS.lg,
-        background: C.surface, border: `1px solid ${C.border}`,
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: RADIUS.md,
-          background: CF.orangeL, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', fontSize: 22, flexShrink: 0,
-        }}>
-          ☁️
-        </div>
-        <div>
-          <div style={{ fontSize: FONT.lg, fontWeight: 800, color: CF.orange }}>Cloudflare</div>
-          <div style={{ fontSize: 11, color: C.muted }}>
-            {loadingStatus
-              ? 'Verificando...'
-              : tokenAtivo
-                ? `✅ Conectado — ${statusCF?.conta?.name || 'Conta ativa'}`
-                : '⚠ Token não configurado ou inválido'}
-          </div>
-        </div>
-        {!loadingStatus && (
-          <div style={{ marginLeft: 'auto' }}>
-            <div style={{
-              width: 10, height: 10, borderRadius: '50%',
-              background: tokenAtivo ? CF.active : CF.err,
-              boxShadow: `0 0 6px ${tokenAtivo ? CF.active : CF.err}`,
-            }} />
-          </div>
-        )}
-      </div>
+  return <div className="cf-central">
+    <section className="cf-central-hero">
+      <div className="cf-central-brand"><span className="cf-central-logo">CF</span><div><small>CLOUDFLARE CENTRAL</small><h2>{loadingStatus?'Carregando…':statusCF?.conta?.name||dashboard?.account?.name||'Sua conta Cloudflare'}</h2><p>{tokenAtivo?'API conectada e pronta para administrar recursos':'Conecte a Cloudflare em Integrações e APIs'}</p></div></div>
+      <div className="cf-central-actions"><span className={`cf-live ${tokenAtivo?'on':''}`}>{tokenAtivo?'CONECTADO':'OFFLINE'}</span><button onClick={carregarStatus} title="Atualizar">↻</button><button className="gear" onClick={()=>setSettingsOpen(true)} title="Abrir ferramentas Cloudflare">⚙</button></div>
+    </section>
 
-      {/* Navegação compacta: R2 fica no foco; demais superfícies ficam na engrenagem. */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'7px 9px',background:C.surface2,borderRadius:RADIUS.md,border:`1px solid ${C.border}`}}>
-        <button type="button" onClick={()=>setAbaAtiva('r2')} style={{border:0,borderRadius:RADIUS.sm,padding:'6px 10px',background:abaAtiva==='r2'?CF.orange:'transparent',color:abaAtiva==='r2'?'#fff':C.text,fontWeight:800,fontSize:12,cursor:'pointer'}}>🪣 R2 Storage</button>
-        <div style={{display:'flex',alignItems:'center',gap:7,minWidth:0}}>
-          {abaAtiva!=='r2'&&<span style={{fontSize:10,color:C.muted,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ABAS.find(a=>a.id===abaAtiva)?.label}</span>}
-          <button type="button" onClick={()=>setConfigAberta(true)} aria-label="Abrir recursos Cloudflare" title="Recursos e configurações Cloudflare" style={{width:34,height:34,borderRadius:10,border:`1px solid ${C.border}`,background:C.surface,color:C.text,cursor:'pointer',fontSize:16}}>⚙</button>
-        </div>
-      </div>
+    <section className="cf-central-stats">
+      <button onClick={()=>{setSettingsOpen(true);setTool('account')}}><small>CONTA</small><b>{dashboard?.account?.name||statusCF?.conta?.name||'—'}</b><span>{dashboard?.accounts?.length>1?`${dashboard.accounts.length} contas acessíveis`:'Conta ativa'}</span></button>
+      <button onClick={()=>{setSettingsOpen(true);setTool('account')}}><small>PLANO</small><b>{planMain}</b><span>{subscriptions.length?`${subscriptions.length} assinatura(s)`:(planNames||'Conforme permissão da API')}</span></button>
+      <button onClick={()=>{setSettingsOpen(true);setTool('zonas')}}><small>ZONAS</small><b>{dashboard?.zones?.count??'—'}</b><span>{planNames||'Domínios da conta'}</span></button>
+      <div><small>R2 STORAGE</small><b>{bytes(dashboard?.r2?.totalBytes||0)}</b><span>{Number(dashboard?.r2?.totalObjetos||0).toLocaleString('pt-BR')} objetos · {(dashboard?.r2?.buckets||statusCF?.s3Credentials?.buckets||[]).length} espaços</span></div>
+    </section>
 
-      {configAberta&&<div role="dialog" aria-modal="true" aria-label="Recursos Cloudflare" onClick={e=>e.target===e.currentTarget&&setConfigAberta(false)} style={{position:'fixed',inset:0,zIndex:1200,background:'#0008',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-        <div style={{width:'min(620px,100%)',maxHeight:'88vh',overflow:'auto',background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:14,boxShadow:'0 24px 70px #0006'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:12}}><div><b style={{fontSize:15,color:C.text}}>Cloudflare · Recursos</b><div style={{fontSize:10,color:C.muted,marginTop:3}}>Abra somente quando precisar administrar DNS, SSL, Workers e demais recursos.</div></div><button onClick={()=>setConfigAberta(false)} style={{border:0,background:'transparent',fontSize:20,color:C.muted,cursor:'pointer'}}>×</button></div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:7}}>
-            {ABAS.filter(a=>a.req!==false).map(a=><button key={a.id} type="button" onClick={()=>{setAbaAtiva(a.id);setConfigAberta(false)}} style={{minHeight:62,borderRadius:11,border:`1px solid ${abaAtiva===a.id?CF.orange:C.border}`,background:abaAtiva===a.id?CF.orangeL:C.surface2,color:C.text,padding:'8px 6px',fontSize:10,fontWeight:750,cursor:'pointer',overflowWrap:'anywhere'}}>{a.label}{a.sub&&<small style={{display:'block',fontSize:8,color:C.muted,marginTop:3}}>{a.sub}</small>}</button>)}
-          </div>
-          <button type="button" onClick={()=>{setConfigAberta(false);window.location.href='/admin/integracoes'}} style={{width:'100%',marginTop:10,minHeight:38,borderRadius:10,border:`1px solid ${C.border}`,background:C.surface2,color:C.text,fontSize:10,fontWeight:800,cursor:'pointer'}}>🔐 Credenciais em Integrações e APIs</button>
-        </div>
-      </div>}
+    <section className="cf-explorer-title"><div><small>EXPLORER</small><h3>Arquivos e espaços R2</h3><p>Envie, visualize, baixe, renomeie, mova e apague arquivos sem sair do AL Sistemas.</p></div><span>{statusCF?.s3Credentials?.configurado?(statusCF?.s3Credentials?.valido?'S3 pronto':'S3 precisa de revisão'):'Configure as chaves S3'}</span></section>
+    <AbaR2 status={statusCF} onRefreshStatus={carregarStatus}/>
 
-      {/* Conteúdo */}
-      {abaAtiva === 'geral'      && <AbaGeral     status={statusCF} carregando={loadingStatus} recarregar={carregarStatus} />}
-      {abaAtiva === 'recursos'   && <AbaRecursos />}
-      {abaAtiva === 'zonas'      && <AbaZonas     onSelecionarZona={selecionarZona} zonaSelecionada={zonaSelecionada} />}
-      {abaAtiva === 'dns'        && <AbaDns       zona={zonaSelecionada} />}
-      {abaAtiva === 'ssl'        && <AbaSsl       zona={zonaSelecionada} />}
-      {abaAtiva === 'firewall'   && <AbaFirewall  zona={zonaSelecionada} />}
-      {abaAtiva === 'pagerules'  && <AbaPageRules zona={zonaSelecionada} />}
-      {abaAtiva === 'analytics'  && <AbaAnalytics zona={zonaSelecionada} />}
-      {abaAtiva === 'workers'    && <AbaWorkers />}
-      {abaAtiva === 'r2'         && <AbaR2 status={statusCF} onRefreshStatus={carregarStatus} />}
-    </div>
-  )
+    {settingsOpen&&<div className="cf-tools-modal-bg" onMouseDown={e=>e.target===e.currentTarget&&closeSettings()}><div className="cf-tools-modal"><header><button className="cf-tools-back" onClick={()=>tool==='menu'?closeSettings():setTool('menu')}>{tool==='menu'?'×':'←'}</button><div><small>FERRAMENTAS CLOUDFLARE</small><b>{tool==='menu'?'Administração avançada':tools.find(x=>x[0]===tool)?.[2]||zonaSelecionada?.name||'Detalhes'}</b></div><button onClick={closeSettings}>×</button></header><main><ToolContent/></main></div></div>}
+    <style>{`
+      .cf-central{display:grid;gap:13px}.cf-central-hero{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px;border:1px solid var(--adm-border);border-radius:18px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));box-shadow:0 12px 34px rgba(15,23,42,.05)}.cf-central-brand{display:flex;align-items:center;gap:11px;min-width:0}.cf-central-logo{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:#f6821f12;border:1px solid #f6821f44;color:#f6821f;font-size:12px;font-weight:950}.cf-central-brand>div{min-width:0}.cf-central-brand small,.cf-explorer-title small{font-size:8px;font-weight:950;letter-spacing:.12em;color:#f6821f}.cf-central-brand h2{font-size:17px;margin:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cf-central-brand p,.cf-explorer-title p{font-size:10px;color:var(--adm-muted);margin:0}.cf-central-actions{display:flex;align-items:center;gap:6px}.cf-central-actions button{width:36px;height:36px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-bg);color:var(--adm-text);font-size:16px}.cf-central-actions .gear{color:#f6821f}.cf-live{font-size:8px;font-weight:950;letter-spacing:.08em;border:1px solid var(--adm-border);border-radius:999px;padding:6px 8px;color:var(--adm-muted)}.cf-live.on{color:#16a34a;border-color:#16a34a44;background:#16a34a08}.cf-central-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.cf-central-stats>button,.cf-central-stats>div{min-width:0;padding:11px 12px;text-align:left;border:1px solid var(--adm-border);border-radius:13px;background:var(--adm-surface);color:var(--adm-text)}.cf-central-stats>button{cursor:pointer}.cf-central-stats small{display:block;font-size:7.5px;font-weight:950;letter-spacing:.1em;color:var(--adm-muted)}.cf-central-stats b{display:block;margin-top:3px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cf-central-stats span{display:block;margin-top:3px;font-size:8px;color:var(--adm-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cf-explorer-title{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:4px 2px}.cf-explorer-title h3{font-size:15px;margin:2px 0}.cf-explorer-title>span{font-size:8px;font-weight:850;color:var(--adm-muted);border:1px solid var(--adm-border);border-radius:999px;padding:5px 7px}.cf-tools-modal-bg{position:fixed;inset:0;z-index:1350;background:#0009;display:grid;place-items:center;padding:14px}.cf-tools-modal{width:min(900px,100%);max-height:calc(100dvh - 28px);overflow:hidden;border:1px solid var(--adm-border);border-radius:20px;background:var(--adm-surface);box-shadow:0 24px 90px #0008;display:grid;grid-template-rows:auto minmax(0,1fr)}.cf-tools-modal>header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--adm-border)}.cf-tools-modal>header>div{display:grid;gap:2px}.cf-tools-modal header small{font-size:7.5px;font-weight:950;letter-spacing:.12em;color:#f6821f}.cf-tools-modal header b{font-size:13px}.cf-tools-modal header button{width:32px;height:32px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2);color:var(--adm-text)}.cf-tools-modal>main{overflow:auto;padding:13px}.cf-tools-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.cf-tools-grid button{min-height:92px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:11px;text-align:left;border:1px solid var(--adm-border);border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));color:var(--adm-text)}.cf-tools-grid button>span{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--adm-bg);border:1px solid var(--adm-border)}.cf-tools-grid button>div{display:grid;gap:3px;min-width:0}.cf-tools-grid b{font-size:10px}.cf-tools-grid small{font-size:8px;color:var(--adm-muted);line-height:1.35}.cf-tools-grid em{font-style:normal;color:#f6821f}.cf-account-panel{display:grid;gap:10px}.cf-account-panel>section,.cf-account-list{border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface2);padding:12px}.cf-account-panel>section small{font-size:8px;font-weight:950;letter-spacing:.1em;color:#f6821f}.cf-account-panel h3{margin:4px 0;font-size:16px}.cf-account-panel p{margin:0;font-family:monospace;font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere}.cf-account-list{display:grid;gap:7px}.cf-account-list>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:7px;border-bottom:1px solid var(--adm-border)}.cf-account-list>div:last-child{border-bottom:0;padding-bottom:0}.cf-account-list b{font-size:10px}.cf-account-list span,.cf-account-list code{font-size:8.5px;color:var(--adm-muted);overflow-wrap:anywhere;text-align:right}
+      @media(max-width:760px){.cf-central-hero{align-items:flex-start}.cf-central-actions{flex-wrap:wrap;justify-content:flex-end}.cf-live{display:none}.cf-central-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cf-explorer-title{align-items:flex-start;flex-direction:column}.cf-tools-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cf-tools-modal-bg{padding:10px}.cf-tools-modal{max-height:calc(100dvh - 20px)}}
+    `}</style>
+  </div>
 }
+

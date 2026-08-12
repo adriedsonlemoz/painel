@@ -338,6 +338,19 @@ router.put('/:id', async(req,res,next)=>{ try {
   const atual=await getCredential(id,defs[id])
   const merged=normalizeAiMetadata(id,{...(atual.metadata||{}),...metadata})
   let value=String(secret||'').trim()||atual.value
+  if(id==='cloudinary'){
+    let old={}
+    try{old=JSON.parse(atual.value||'{}')}catch{old={apiSecret:atual.value||''}}
+    const cloudName=String(merged.cloudName||old.cloudName||atual.metadata?.cloudName||'').trim()
+    const apiKey=String(merged.apiKey||old.apiKey||atual.metadata?.apiKey||'').trim()
+    const apiSecret=String(secret||'').trim()||old.apiSecret||''
+    if(!cloudName)return res.status(400).json({erro:'Cloud Name do Cloudinary é obrigatório.'})
+    if(!apiKey)return res.status(400).json({erro:'API Key do Cloudinary é obrigatória.'})
+    if(!apiSecret)return res.status(400).json({erro:'API Secret do Cloudinary é obrigatório.'})
+    merged.cloudName=cloudName
+    merged.apiKey=apiKey
+    value=JSON.stringify({cloudName,apiKey,apiSecret})
+  }
   if(id==='cloudflare'){
     let old={}; try{old=JSON.parse(atual.value||'{}')}catch{old={apiToken:atual.value||''}}
     const apiToken=String(secret||'').trim()||old.apiToken||''
@@ -349,7 +362,7 @@ router.put('/:id', async(req,res,next)=>{ try {
     value=JSON.stringify({apiToken,r2AccessKeyId,r2SecretAccessKey})
   }
   if(!value)return res.status(400).json({erro:'Credencial obrigatória.'})
-  await setCredential(id, id==='cloudinary'?JSON.stringify({...merged,apiSecret:value}):value, merged)
+  await setCredential(id, value, merged)
   if(['gemini','openrouter'].includes(id)) resetAiRuntime(id)
   if(merged.primary && ['gemini','openrouter'].includes(id)){ for(const other of ['gemini','openrouter']){ if(other===id)continue; const oc=await getCredential(other,defs[other]); if(oc.value&&oc.metadata?.primary) await setCredential(other,oc.value,{...(oc.metadata||{}),primary:false}); } }
   if(id==='cloudinary') await configurarCloudinary()
@@ -362,6 +375,15 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
   const stored=await getCredential(id,defs[id])
   const typed=String(req.body?.secret||'').trim()
   let c={...stored,value:typed||stored.value,metadata:normalizeAiMetadata(id,{...(stored.metadata||{}),...(req.body?.metadata||{})})}
+  if(id==='cloudinary'){
+    let old={}; try{old=JSON.parse(stored.value||'{}')}catch{old={apiSecret:stored.value||''}}
+    c={...c,cloudinary:{
+      cloudName:String(c.metadata?.cloudName||old.cloudName||stored.metadata?.cloudName||'').trim(),
+      apiKey:String(c.metadata?.apiKey||old.apiKey||stored.metadata?.apiKey||'').trim(),
+      apiSecret:typed||old.apiSecret||'',
+    }}
+    c.value=c.cloudinary.apiSecret
+  }
   if(id==='cloudflare'){
     let old={}; try{old=JSON.parse(stored.value||'{}')}catch{old={apiToken:stored.value||''}}
     const apiToken=typed||old.apiToken||''
@@ -377,8 +399,18 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
     if(!r.ok)throw new Error(`GitHub respondeu ${r.status}`)
     result.user=(await r.json()).login
   } else if(id==='cloudinary'){
-    await configurarCloudinary(); await cloudinary.api.ping()
-    result.mensagem='Cloudinary conectado e credenciais válidas.'
+    const cfg=c.cloudinary||{}
+    if(!cfg.cloudName||!cfg.apiKey||!cfg.apiSecret)throw new Error('Informe Cloud Name, API Key e API Secret do Cloudinary.')
+    try{
+      cloudinary.config({cloud_name:cfg.cloudName,api_key:cfg.apiKey,api_secret:cfg.apiSecret})
+      const ping=await cloudinary.api.ping()
+      if(ping?.status && ping.status!=='ok')throw new Error(`Cloudinary respondeu ${ping.status}`)
+      result.mensagem=`Cloudinary conectado • cloud ${cfg.cloudName}.`
+      result.cloud={name:cfg.cloudName,status:ping?.status||'ok'}
+    } finally {
+      // O teste não altera a credencial ativa até o usuário tocar em Salvar.
+      await configurarCloudinary().catch(()=>{})
+    }
   } else if(id==='cloudflare'){
     const accountId=String(c.metadata?.accountId||'').trim()
     if(!accountId)throw new Error('Informe o Account ID da Cloudflare.')
@@ -534,7 +566,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.122',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.123',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }

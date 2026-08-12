@@ -8,6 +8,7 @@ export const cloudflareService = {
   async status() {
     return api('/admin/cloudflare/status')
   },
+  async dashboard() { return api('/admin/cloudflare/dashboard') },
 
 
   /** Descobre quais superfícies da conta o token realmente consegue ler */
@@ -206,6 +207,21 @@ export const cloudflareService = {
     if (cursor) p.set('cursor', cursor)
     if (delim)  p.set('delim', delim)
     return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/objects?${p}`)
+  },
+
+  objectUrl(bucket,key,{download=false}={}) {
+    const p=new URLSearchParams({key})
+    if(download)p.set('download','1')
+    return `${BASE_URL}/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/object?${p}`
+  },
+  async infoObjeto(bucket,key){
+    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/object-info?key=${encodeURIComponent(key)}`)
+  },
+  async criarPasta(bucket,prefix,name){
+    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/folders`,{method:'POST',body:JSON.stringify({prefix,name})})
+  },
+  async moverObjeto(bucket,from,to){
+    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/move`,{method:'POST',body:JSON.stringify({from,to})})
   },
 
   /** Deleta um objeto */

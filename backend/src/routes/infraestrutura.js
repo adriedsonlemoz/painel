@@ -28,6 +28,7 @@ import { registerPlatformOrigin, isPlatformOriginAllowed, hydratePlatformOrigins
 import { ensurePersistentBootstrap } from '../utils/hostedBootstrap.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
 import { v2 as cloudinary } from 'cloudinary'
+import { configurarCloudinary as configurarCloudinaryCentral } from '../config/index.js'
 import { autenticar }        from '../middleware/auth.js'
 import { runtimeLabel, IS_RENDER, IS_VERCEL, IS_TERMUX, IS_MANAGED_PLATFORM } from '../utils/runtimeEnvironment.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
@@ -38,15 +39,6 @@ try { BACKEND_VERSION=JSON.parse(fsSync.readFileSync(new URL('../../package.json
 const router = Router()
 router.use(autenticar)
 router.use(verificarPermissao('configuracoes.gerenciar'))
-
-// ─── helper: reconfigura Cloudinary com .env atual ────────────
-function configurarCloudinary() {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME  || '',
-    api_key:    process.env.CLOUDINARY_API_KEY      || '',
-    api_secret: process.env.CLOUDINARY_API_SECRET   || '',
-  })
-}
 
 // ─── helper: converte bytes para formato legível ───────────────
 function fmtBytes(b) {
@@ -75,11 +67,7 @@ router.post('/testar-conexoes', async (_req, res, next) => {
     }
 
     // ── Cloudinary ──
-    configurarCloudinary()
-    const temCredenciais =
-      process.env.CLOUDINARY_CLOUD_NAME &&
-      process.env.CLOUDINARY_API_KEY    &&
-      process.env.CLOUDINARY_API_SECRET
+    const temCredenciais = await configurarCloudinaryCentral()
 
     if (!temCredenciais) {
       resultados.cloudinary = { ok: false, erro: 'Credenciais não configuradas' }
@@ -230,12 +218,7 @@ router.delete('/mongodb/colecoes/:nome/doc/:id', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════════
 router.get('/cloudinary/status', async (_req, res, next) => {
   try {
-    configurarCloudinary()
-
-    const temCredenciais =
-      process.env.CLOUDINARY_CLOUD_NAME &&
-      process.env.CLOUDINARY_API_KEY    &&
-      process.env.CLOUDINARY_API_SECRET
+    const temCredenciais = await configurarCloudinaryCentral()
 
     if (!temCredenciais) {
       return res.status(400).json({ erro: 'Cloudinary não configurado. Insira as credenciais na aba Configurações.' })
@@ -244,7 +227,7 @@ router.get('/cloudinary/status', async (_req, res, next) => {
     const uso = await cloudinary.api.usage()
 
     res.json({
-      cloud_name:     process.env.CLOUDINARY_CLOUD_NAME,
+      cloud_name:     cloudinary.config().cloud_name || '—',
       plano:          uso.plan            || '—',
       // Armazenamento
       storage_bytes:  uso.storage?.usage  ?? 0,
@@ -280,7 +263,8 @@ router.get('/cloudinary/status', async (_req, res, next) => {
 // ═══════════════════════════════════════════════════════════════
 router.get('/cloudinary/recursos', async (req, res, next) => {
   try {
-    configurarCloudinary()
+    const configurado = await configurarCloudinaryCentral()
+    if (!configurado) return res.status(400).json({ erro: 'Cloudinary não configurado em Integrações e APIs.' })
 
     const tipo       = req.query.tipo       || 'image'  // image | video | raw
     const max        = Math.min(50, parseInt(req.query.max || '20'))
@@ -327,7 +311,8 @@ router.get('/cloudinary/recursos', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════════
 router.delete('/cloudinary/recursos', async (req, res, next) => {
   try {
-    configurarCloudinary()
+    const configurado = await configurarCloudinaryCentral()
+    if (!configurado) return res.status(400).json({ erro: 'Cloudinary não configurado em Integrações e APIs.' })
 
     const { public_id, tipo = 'image' } = req.body
     if (!public_id) return res.status(400).json({ erro: 'public_id é obrigatório' })

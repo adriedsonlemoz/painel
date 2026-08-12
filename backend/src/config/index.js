@@ -45,7 +45,19 @@ export async function configurarCloudinary() {
   let apiSecret = bootstrapValue('CLOUDINARY_API_SECRET')
   if (mongoose.connection.readyState === 1) {
     const stored = await getCredential('cloudinary')
-    if (stored.value) { const v = JSON.parse(stored.value); cloudName=v.cloudName||cloudName; apiKey=v.apiKey||apiKey; apiSecret=v.apiSecret||apiSecret }
+    if (stored.value) {
+      try {
+        const v = JSON.parse(stored.value)
+        cloudName = v.cloudName || stored.metadata?.cloudName || cloudName
+        apiKey = v.apiKey || stored.metadata?.apiKey || apiKey
+        apiSecret = v.apiSecret || apiSecret
+      } catch {
+        // Compatibilidade com instalações antigas em que apenas o secret era salvo.
+        cloudName = stored.metadata?.cloudName || cloudName
+        apiKey = stored.metadata?.apiKey || apiKey
+        apiSecret = stored.value || apiSecret
+      }
+    }
   }
   cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret })
   return Boolean(cloudName && apiKey && apiSecret)

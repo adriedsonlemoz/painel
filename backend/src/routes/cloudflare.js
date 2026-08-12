@@ -22,7 +22,7 @@ import multer                  from 'multer'
 import { autenticar }          from '../middleware/auth.js'
 import { verificarPermissao }  from '../middleware/verificarPermissao.js'
 import { logger }              from '../utils/logger.js'
-import { S3Client, PutObjectCommand, ListBucketsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, ListBucketsCommand, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { hydrateCloudflareEnv, getCloudflareConfig } from '../utils/cloudflareConfig.js'
 import { getCredential, setCredential } from '../utils/credentialStore.js'
 
@@ -46,6 +46,18 @@ function r2S3Client() {
       secretAccessKey: process.env.CF_R2_SECRET_ACCESS_KEY || '',
     },
   })
+}
+
+async function scanR2BucketUsage(bucket,{maxPages=20}={}){
+  let bytes=0,objects=0,token,pages=0,truncated=false
+  do{
+    const page=await r2S3Client().send(new ListObjectsV2Command({Bucket:bucket,ContinuationToken:token,MaxKeys:1000}))
+    for(const o of page.Contents||[]){bytes+=Number(o.Size||0);objects++}
+    pages++
+    token=page.IsTruncated?page.NextContinuationToken:undefined
+    if(token&&pages>=maxPages){truncated=true;break}
+  }while(token)
+  return {name:bucket,bytes,objects,truncated,pages}
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -169,6 +181,46 @@ router.get('/status', async (_req, res, next) => {
     if (err.message.includes('não configurado')) return res.json({ok:false,erro:err.message})
     next(err)
   }
+})
+
+
+// ── GET /dashboard — resumo moderno da conta para a Central Cloudflare ────────
+router.get('/dashboard', async (_req,res,next)=>{
+  try{
+    const cfg=await getCloudflareConfig()
+    const optional=async(path)=>{ try{return {ok:true,data:await cfFetch(path)}}catch(err){return {ok:false,error:String(err.message||err)}} }
+    const [account,accounts,subscriptions,zones,buckets]=await Promise.all([
+      optional(`/accounts/${accountId()}`),
+      optional('/accounts?per_page=50'),
+      optional(`/accounts/${accountId()}/subscriptions`),
+      optional(`/zones?account.id=${accountId()}&per_page=50`),
+      optional(`/accounts/${accountId()}/r2/buckets?per_page=100`),
+    ])
+    let s3Usage={totalBytes:0,totalObjetos:0,buckets:[],available:false}
+    if(cfg.r2AccessKeyId&&cfg.r2SecretAccessKey){
+      try{
+        const list=await r2S3Client().send(new ListBucketsCommand({}))
+        const bucketNames=(list.Buckets||[]).map(x=>x.Name).filter(Boolean)
+        const details=[]
+        for(const name of bucketNames)details.push(await scanR2BucketUsage(name,{maxPages:20}))
+        s3Usage={available:true,buckets:details,totalBytes:details.reduce((a,b)=>a+b.bytes,0),totalObjetos:details.reduce((a,b)=>a+b.objects,0),partial:details.some(x=>x.truncated)}
+      }catch(err){s3Usage={...s3Usage,error:String(err.message||err)}}
+    }
+    const zoneList=resultList(zones.data)
+    const planCounts={}
+    for(const z of zoneList){const n=z?.plan?.name||z?.plan?.legacy_id||'Sem plano informado';planCounts[n]=(planCounts[n]||0)+1}
+    res.json({
+      ok:true,
+      account:account.ok?account.data?.result:null,
+      accounts:accounts.ok?resultList(accounts.data):[],
+      accountsAvailable:accounts.ok,
+      subscriptions:subscriptions.ok?resultList(subscriptions.data):[],
+      subscriptionsAvailable:subscriptions.ok,
+      zones:{count:zoneList.length,plans:planCounts,items:zoneList.map(z=>({id:z.id,name:z.name,status:z.status,plan:z.plan?.name||z.plan?.legacy_id||null}))},
+      r2:{...s3Usage,defaultBucket:cfg.r2Bucket||null,endpoint:cfg.r2Endpoint||null,publicUrl:cfg.r2PublicUrl||null},
+      unavailable:[!accounts.ok&&{name:'accounts',error:accounts.error},!subscriptions.ok&&{name:'subscriptions',error:subscriptions.error}].filter(Boolean),
+    })
+  }catch(err){next(err)}
 })
 
 // ── GET /capabilities — autodetecção real das superfícies acessíveis ─────────
@@ -630,8 +682,24 @@ export default router
 // ── GET /r2/buckets ────────────────────────────────────────────
 router.get('/r2/buckets', async (_req, res, next) => {
   try {
+    // O Explorer deve continuar funcional mesmo quando o API Token da conta não
+    // possui a permissão REST de R2, desde que as chaves S3 tenham sido salvas.
+    if (process.env.CF_R2_ACCESS_KEY_ID && process.env.CF_R2_SECRET_ACCESS_KEY) {
+      try {
+        const out = await r2S3Client().send(new ListBucketsCommand({}))
+        return res.json({
+          buckets: (out.Buckets || []).map(b => ({
+            name: b.Name,
+            creation_date: b.CreationDate || null,
+          })),
+          source: 's3',
+        })
+      } catch (s3Err) {
+        logger.warn({ err: s3Err?.message }, 'Falha ao listar buckets pelo R2 S3; tentando API Cloudflare')
+      }
+    }
     const data = await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
-    res.json({ buckets: data.result?.buckets ?? data.result ?? [] })
+    res.json({ buckets: data.result?.buckets ?? data.result ?? [], source: 'cloudflare-api' })
   } catch (err) { next(err) }
 })
 
@@ -713,6 +781,68 @@ router.get('/r2/buckets/:bucket/objects', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+
+function normalizeR2Key(value=''){
+  return String(value||'').replace(/^\/+/, '').replace(/[\u0000-\u001f]/g,'').slice(0,1024)
+}
+
+// Cria uma pasta lógica no R2. S3/R2 não possui diretórios reais; um objeto .keep
+// mantém a pasta visível mesmo antes de receber arquivos.
+router.post('/r2/buckets/:bucket/folders', async(req,res,next)=>{
+  try{
+    const {bucket}=req.params
+    if(!process.env.CF_R2_ACCESS_KEY_ID||!process.env.CF_R2_SECRET_ACCESS_KEY)return res.status(409).json({erro:'Configure as credenciais S3 do R2 em Integrações e APIs.'})
+    const parent=normalizeR2Key(req.body?.prefix||'')
+    const raw=normalizeR2Key(req.body?.name||'').replace(/\/+$/,'')
+    if(!raw)return res.status(400).json({erro:'Informe o nome da pasta.'})
+    const key=`${parent}${parent&&!parent.endsWith('/')?'/':''}${raw}/.keep`
+    await r2S3Client().send(new PutObjectCommand({Bucket:bucket,Key:key,Body:'',ContentType:'application/x-directory'}))
+    res.status(201).json({ok:true,prefix:key.replace(/\.keep$/,'')})
+  }catch(err){next(err)}
+})
+
+// Metadados de um objeto, usados pelo painel lateral do Explorer.
+router.get('/r2/buckets/:bucket/object-info', async(req,res,next)=>{
+  try{
+    const key=normalizeR2Key(req.query?.key||'')
+    if(!key)return res.status(400).json({erro:'Informe a chave do objeto.'})
+    const out=await r2S3Client().send(new HeadObjectCommand({Bucket:req.params.bucket,Key:key}))
+    res.json({ok:true,key,size:Number(out.ContentLength||0),contentType:out.ContentType||'application/octet-stream',lastModified:out.LastModified||null,etag:String(out.ETag||'').replace(/^"|"$/g,''),metadata:out.Metadata||{},cacheControl:out.CacheControl||null})
+  }catch(err){if(err?.$metadata?.httpStatusCode===404||err?.name==='NotFound')return res.status(404).json({erro:'Arquivo não encontrado.'});next(err)}
+})
+
+// Visualização/download autenticado. Evita exigir que o bucket seja público.
+router.get('/r2/buckets/:bucket/object', async(req,res,next)=>{
+  try{
+    const key=normalizeR2Key(req.query?.key||'')
+    if(!key)return res.status(400).json({erro:'Informe a chave do objeto.'})
+    const out=await r2S3Client().send(new GetObjectCommand({Bucket:req.params.bucket,Key:key}))
+    res.setHeader('Content-Type',out.ContentType||'application/octet-stream')
+    if(out.ContentLength!=null)res.setHeader('Content-Length',String(out.ContentLength))
+    if(out.ETag)res.setHeader('ETag',String(out.ETag))
+    const name=key.split('/').filter(Boolean).pop()||'arquivo'
+    res.setHeader('Content-Disposition',`${String(req.query.download)==='1'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`)
+    res.setHeader('Cache-Control','private, max-age=60')
+    if(out.Body?.pipe)return out.Body.pipe(res)
+    const bytes=out.Body?.transformToByteArray?await out.Body.transformToByteArray():new Uint8Array()
+    res.end(Buffer.from(bytes))
+  }catch(err){if(err?.$metadata?.httpStatusCode===404||err?.name==='NoSuchKey')return res.status(404).json({erro:'Arquivo não encontrado.'});next(err)}
+})
+
+// Renomeia ou move um objeto (copy + delete, sem baixar o arquivo para o servidor).
+router.post('/r2/buckets/:bucket/move', async(req,res,next)=>{
+  try{
+    const bucket=req.params.bucket
+    const from=normalizeR2Key(req.body?.from||''),to=normalizeR2Key(req.body?.to||'')
+    if(!from||!to)return res.status(400).json({erro:'Informe origem e destino.'})
+    if(from===to)return res.json({ok:true,key:to})
+    await r2S3Client().send(new CopyObjectCommand({Bucket:bucket,Key:to,CopySource:`${encodeURIComponent(bucket)}/${from.split('/').map(encodeURIComponent).join('/')}`}))
+    await r2S3Client().send(new DeleteObjectCommand({Bucket:bucket,Key:from}))
+    logger.info({bucket,from,to},'R2 objeto movido')
+    res.json({ok:true,key:to})
+  }catch(err){next(err)}
+})
+
 // ── DELETE /r2/buckets/:bucket/objects  (lote) ─────────────────
 router.delete('/r2/buckets/:bucket/objects', async (req, res, next) => {
   try {
@@ -721,18 +851,14 @@ router.delete('/r2/buckets/:bucket/objects', async (req, res, next) => {
     if (!Array.isArray(keys) || keys.length === 0) {
       return res.status(400).json({ erro: 'Forneça um array "keys" com as chaves a deletar.' })
     }
-    // CF API não tem delete em lote nativo — paralelizamos individualmente
-    const resultados = await Promise.allSettled(
-      keys.map(k =>
-        cfFetch(`/accounts/${accountId()}/r2/buckets/${bucket}/objects/${encodeURIComponent(k)}`, {
-          method: 'DELETE',
-        })
-      )
-    )
-    const erros = resultados
-      .map((r, i) => r.status === 'rejected' ? `${keys[i]}: ${r.reason?.message}` : null)
-      .filter(Boolean)
-
+    let erros=[]
+    if(process.env.CF_R2_ACCESS_KEY_ID&&process.env.CF_R2_SECRET_ACCESS_KEY){
+      const out=await r2S3Client().send(new DeleteObjectsCommand({Bucket:bucket,Delete:{Objects:keys.slice(0,1000).map(Key=>({Key})),Quiet:false}}))
+      erros=(out.Errors||[]).map(e=>`${e.Key}: ${e.Message||e.Code||'falha'}`)
+    }else{
+      const resultados=await Promise.allSettled(keys.map(k=>cfFetch(`/accounts/${accountId()}/r2/buckets/${bucket}/objects/${encodeURIComponent(k)}`,{method:'DELETE'})))
+      erros=resultados.map((r,i)=>r.status==='rejected'?`${keys[i]}: ${r.reason?.message}`:null).filter(Boolean)
+    }
     logger.info({ bucket, total: keys.length, erros: erros.length }, 'R2 objetos deletados em lote')
     res.json({ ok: erros.length === 0, deletados: keys.length - erros.length, erros })
   } catch (err) { next(err) }
@@ -742,10 +868,8 @@ router.delete('/r2/buckets/:bucket/objects', async (req, res, next) => {
 router.delete('/r2/buckets/:bucket/objects/:key(*)', async (req, res, next) => {
   try {
     const { bucket, key } = req.params
-    await cfFetch(
-      `/accounts/${accountId()}/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`,
-      { method: 'DELETE' }
-    )
+    if(process.env.CF_R2_ACCESS_KEY_ID&&process.env.CF_R2_SECRET_ACCESS_KEY)await r2S3Client().send(new DeleteObjectCommand({Bucket:bucket,Key:key}))
+    else await cfFetch(`/accounts/${accountId()}/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`,{method:'DELETE'})
     logger.info({ bucket, key }, 'R2 objeto deletado')
     res.json({ ok: true })
   } catch (err) { next(err) }
@@ -754,30 +878,20 @@ router.delete('/r2/buckets/:bucket/objects/:key(*)', async (req, res, next) => {
 // ── GET /r2/usage ──────────────────────────────────────────────
 router.get('/r2/usage', async (_req, res, next) => {
   try {
-    // Busca métricas de todos os buckets em paralelo
-    const bucketsData = await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
-    const buckets     = bucketsData.result?.buckets ?? bucketsData.result ?? []
-
-    const metricas = await Promise.allSettled(
-      buckets.map(b =>
-        cfFetch(`/accounts/${accountId()}/r2/buckets/${b.name}/usage`).catch(() => null)
-      )
-    )
-
-    const detalhes = buckets.map((b, i) => {
-      const m = metricas[i].status === 'fulfilled' ? metricas[i].value?.result : null
-      return {
-        nome:     b.name,
-        criado:   b.creation_date,
-        bytes:    m?.payload_size   ?? 0,
-        objetos:  m?.object_count   ?? 0,
-        uploads:  m?.upload_count   ?? 0,
+    if(process.env.CF_R2_ACCESS_KEY_ID&&process.env.CF_R2_SECRET_ACCESS_KEY){
+      const list=await r2S3Client().send(new ListBucketsCommand({}))
+      const detalhes=[]
+      for(const b of list.Buckets||[]){
+        if(!b.Name)continue
+        const u=await scanR2BucketUsage(b.Name,{maxPages:20})
+        detalhes.push({nome:b.Name,criado:b.CreationDate||null,bytes:u.bytes,objetos:u.objects,uploads:null,parcial:u.truncated})
       }
-    })
-
-    const totalBytes   = detalhes.reduce((s, d) => s + d.bytes,   0)
-    const totalObjetos = detalhes.reduce((s, d) => s + d.objetos, 0)
-
-    res.json({ buckets: detalhes, totalBytes, totalObjetos })
+      return res.json({buckets:detalhes,totalBytes:detalhes.reduce((a,b)=>a+b.bytes,0),totalObjetos:detalhes.reduce((a,b)=>a+b.objetos,0),parcial:detalhes.some(x=>x.parcial),source:'s3'})
+    }
+    const bucketsData=await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
+    const buckets=bucketsData.result?.buckets??bucketsData.result??[]
+    const metricas=await Promise.allSettled(buckets.map(b=>cfFetch(`/accounts/${accountId()}/r2/buckets/${b.name}/usage`).catch(()=>null)))
+    const detalhes=buckets.map((b,i)=>{const m=metricas[i].status==='fulfilled'?metricas[i].value?.result:null;return {nome:b.name,criado:b.creation_date,bytes:m?.payload_size??0,objetos:m?.object_count??0,uploads:m?.upload_count??0}})
+    res.json({buckets:detalhes,totalBytes:detalhes.reduce((s,d)=>s+d.bytes,0),totalObjetos:detalhes.reduce((s,d)=>s+d.objetos,0),source:'rest'})
   } catch (err) { next(err) }
 })

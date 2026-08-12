@@ -14,7 +14,6 @@ import { lazyWithRetry } from '../../utils/lazyWithRetry'
 import { Suspense } from 'react'
 import { Spin }           from '../../components/admin/infra/InfraBase'
 import { DSPageHeader }   from '../../components/admin/ui/DS'
-import { DSBtn }          from '../../components/admin/ui/DS'
 import { SPACE }          from '../../themes/tokens'
 
 const AbaCloudflare = lazyWithRetry(() => import('../../components/admin/infra/AbaCloudflare'))
@@ -30,16 +29,6 @@ function IconoCF() {
   )
 }
 
-function IconoExternal() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-      style={{ width: 13, height: 13 }}>
-      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-      <polyline points="15 3 21 3 21 9" />
-      <line x1="10" y1="14" x2="21" y2="3" />
-    </svg>
-  )
-}
 
 export default function AdminCloudflare() {
   return (
@@ -50,16 +39,7 @@ export default function AdminCloudflare() {
             <IconoCF /> Cloudflare
           </span>
         }
-        sub="DNS · Zonas · Analytics · Workers · SSL — gerenciamento completo da sua conta"
-        actions={
-          <DSBtn
-            variant="secondary"
-            onClick={() => window.open('https://dash.cloudflare.com', '_blank', 'noopener')}
-            title="Abrir painel Cloudflare em nova aba"
-          >
-            <IconoExternal /> Painel CF
-          </DSBtn>
-        }
+        sub="Central de conta e R2: espaços, arquivos, uso, planos e ferramentas avançadas na engrenagem."
       />
 
       <Suspense fallback={

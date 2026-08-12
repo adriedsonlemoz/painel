@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.123 — Integrações e Cloudflare Explorer
+
+- Redesenha os cards de Integrações e APIs no padrão visual da Central de Atualizações e mantém os modais centralizados também no celular.
+- Reorganiza o Diagnóstico da IA com estado do motor, provedores, fila, latência, cooldowns e uso dos últimos 7 dias.
+- Corrige definitivamente o Cloudinary para usar as credenciais do cofre central, inclusive ao testar uma credencial ainda não salva e ao abrir a galeria.
+- Moderniza a Central Cloudflare com resumo de conta, planos/assinaturas quando permitidos pela API, zonas e armazenamento R2.
+- Transforma o R2 em um Explorer: múltiplos uploads, arrastar e soltar, pastas lógicas, prévia de imagens/vídeo/áudio, download autenticado, renomear/mover e exclusão em lote.
+- Mantém DNS, SSL, firewall, analytics, Workers, Page Rules e demais produtos dentro da engrenagem de ferramentas avançadas.
+
 ## 1.0.122 — Central de Projetos e Deploys
 
 - Vercel e Render deixam de ser tratados apenas como uma dupla fixa e passam a alimentar uma central de múltiplos projetos.
