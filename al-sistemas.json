@@ -1,14 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.129",
+  "version": "1.0.131",
   "packageFormat": 2,
   "changelog": [
-    "Atualizações passam a usar um wizard centralizado em cinco etapas: Pacote, Revisão, Proteção, Instalação e Concluído, com navegação fixa e visual compatível com todos os temas.",
-    "O upload do ZIP mostra progresso próprio e a revisão separa versão, módulos, quantidade de arquivos, migrações e alterações reais antes de permitir a instalação.",
-    "A etapa de proteção isola o snapshot/backup; em produção gerenciada o pacote persistente no R2 fica claramente separado da sincronização GitHub.",
-    "Instalação local e publicação GitHub exibem progresso e log vivo arquivo por arquivo, distinguindo ADD, MOD e DEL sem despejar log bruto na tela.",
-    "Pacotes completos da mesma versão agora podem entrar em modo reparo: o backend compara SHA-256 integral arquivo por arquivo e só reaplica diferenças reais ou dependências que precisem ser reparadas.",
-    "Uma mesma versão já íntegra não é reinstalada inutilmente, e versões anteriores continuam bloqueadas para impedir downgrade acidental."
+    "Publicação GitHub agora usa revisão, progresso e resultado compactos; detalhes técnicos ficam recolhidos por padrão.",
+    "Acontecimentos ficam ocultos durante o fluxo normal e abrem automaticamente apenas quando há erro.",
+    "Polling tolera oscilações de rede com reconexão progressiva sem reenviar o ZIP.",
+    "Jobs de publicação passam a persistir no MongoDB e uma trava impede duas publicações simultâneas na mesma branch.",
+    "Corrige versão final desatualizada por cache e remove a revalidação duplicada do frontend antes do upload.",
+    "Erros passam a informar a próxima ação recomendada e resultados sem mudanças exibem Projeto já estava atualizado."
   ],
   "updatePackages": {
     "full": true,

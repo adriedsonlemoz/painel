@@ -28,6 +28,7 @@ import { autenticar }   from '../middleware/auth.js'
 import { auditLog }     from '../middleware/auditLog.js'
 import AuditLog         from '../models/AuditLog.js'
 import GitHubMeta       from '../models/GitHubMeta.js'
+import GitHubPublishJob from '../models/GitHubPublishJob.js'
 import fs               from 'fs'
 import path             from 'path'
 import sanitizeHtml     from 'sanitize-html'
@@ -49,22 +50,69 @@ const publishUpload = multer({
   limits: { fileSize: Number(process.env.AL_GITHUB_PACKAGE_MAX_BYTES || 80 * 1024 * 1024) },
 })
 
-// Jobs curtos de publicação. O ZIP continua somente em memória durante a operação;
-// o mapa guarda apenas estado/log/resultado para que o frontend acompanhe cada etapa.
-const githubPublishJobs = new Map()
-function pruneGithubPublishJobs() {
-  const limite = Date.now() - 60 * 60 * 1000
-  for (const [id, job] of githubPublishJobs) if (new Date(job.updatedAt || job.createdAt).getTime() < limite) githubPublishJobs.delete(id)
+// O estado dos jobs fica no MongoDB. O ZIP ainda existe somente durante a
+// execução atual, mas uma reinicialização do backend não faz o job "sumir":
+// o frontend continua encontrando o registro e recebe um diagnóstico explícito.
+function publishLockKey(repository, branch) {
+  return `${String(repository || '').trim().toLowerCase()}@${String(branch || 'main').trim().toLowerCase()}`
 }
-function criarGithubPublishJob({ owner, repo, usuarioId }) {
-  pruneGithubPublishJobs()
-  const now = new Date().toISOString()
+function queueGithubPublishPersist(job, update) {
+  if (!job) return Promise.resolve()
+  job._persist = (job._persist || Promise.resolve())
+    .catch(() => {})
+    .then(() => GitHubPublishJob.updateOne({ jobId: job.id }, update))
+    .catch(err => { job._persistError = err })
+  return job._persist
+}
+async function criarGithubPublishJob({ owner, repo, usuarioId, destination, branch }) {
+  await GitHubPublishJob.init()
+  const now = new Date()
+  const lockKey = publishLockKey(destination, branch)
+
+  // Libera locks abandonados por uma execução antiga. O job continua registrado
+  // como falha em vez de desaparecer da tela.
+  const staleBefore = new Date(Date.now() - 20 * 60 * 1000)
+  await GitHubPublishJob.updateMany(
+    { lockKey, status: { $in: ['queued', 'running'] }, updatedAt: { $lt: staleBefore } },
+    {
+      $set: {
+        status: 'failed', phase: 'error', progress: 100, finishedAt: now, updatedAt: now,
+        error: {
+          message: 'A publicação anterior foi interrompida pelo backend. Confira a branch no GitHub antes de iniciar outra publicação.',
+          code: 'GITHUB_PUBLISH_STALE',
+          action: 'Confira o GitHub. Se o commit não estiver na branch, inicie uma nova publicação.',
+        },
+      },
+      $unset: { lockKey: 1 },
+    },
+  ).catch(() => {})
+
+  const active = await GitHubPublishJob.findOne({ lockKey, status: { $in: ['queued', 'running'] } }).lean()
+  if (active) {
+    const e = new Error(`Já existe uma publicação em andamento para ${destination} · ${branch}.`)
+    e.status = 409; e.code = 'GITHUB_PUBLISH_ACTIVE'; e.jobId = active.jobId
+    throw e
+  }
+
   const job = {
     id: `ghpub_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
-    owner, repo, usuarioId: String(usuarioId || ''), status: 'queued', phase: 'received',
-    progress: 0, createdAt: now, updatedAt: now, logs: [], result: null, error: null,
+    owner, repo, destination, branch, lockKey, usuarioId: String(usuarioId || ''),
+    status: 'queued', phase: 'received', progress: 0, createdAt: now.toISOString(),
+    updatedAt: now.toISOString(), logs: [], result: null, error: null,
   }
-  githubPublishJobs.set(job.id, job)
+  try {
+    await GitHubPublishJob.create({
+      jobId: job.id, sourceOwner: owner, sourceRepo: repo, destination, branch,
+      usuarioId: job.usuarioId, lockKey, status: job.status, phase: job.phase,
+      progress: 0, logs: [], createdAt: now, updatedAt: now,
+    })
+  } catch (err) {
+    if (Number(err?.code) === 11000) {
+      const e = new Error(`Já existe uma publicação em andamento para ${destination} · ${branch}.`)
+      e.status = 409; e.code = 'GITHUB_PUBLISH_ACTIVE'; throw e
+    }
+    throw err
+  }
   return job
 }
 function registrarGithubPublishLog(job, phase, label, message, state = 'active', progress = null, details = null) {
@@ -78,6 +126,10 @@ function registrarGithubPublishLog(job, phase, label, message, state = 'active',
   job.logs.push(entry)
   const maxLogs = Number(process.env.AL_GITHUB_PUBLISH_MAX_LOGS || 3500)
   if (job.logs.length > maxLogs) job.logs.splice(0, job.logs.length - maxLogs)
+  queueGithubPublishPersist(job, {
+    $set: { phase: job.phase, progress: job.progress, updatedAt: new Date(at) },
+    $push: { logs: { $each: [entry], $slice: -maxLogs } },
+  })
 }
 function versaoPartes(value = '') {
   const match = String(value || '').trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$/)
@@ -201,6 +253,7 @@ function githubRateLimitError(err) {
 
 function githubPublishErrorMessage(err) {
   const msg=String(err?.message||'Erro desconhecido do GitHub').trim()
+  if(err?.code==='GITHUB_PUBLISH_ACTIVE') return msg
   if(githubRateLimitError(err)) return err?.githubRetriesExhausted
     ? `O GitHub aplicou um limite temporário de gravação. O AL Sistemas aguardou e tentou novamente ${err.githubRetriesExhausted} vezes, mas a API ainda recusou a operação. Aguarde alguns minutos e repita. Detalhe: ${msg}`
     : `O GitHub aplicou um limite temporário à API. Aguarde alguns minutos e repita a operação. Detalhe: ${msg}`
@@ -212,6 +265,16 @@ function githubPublishErrorMessage(err) {
   }
   const endpoint=err?.githubPath ? ` (${err.githubMethod||'GET'} ${err.githubPath})` : ''
   return `GitHub recusou a operação${endpoint}: ${msg}`
+}
+
+function githubPublishErrorAction(err) {
+  const msg=String(err?.message||'')
+  if (err?.code === 'GITHUB_PUBLISH_ACTIVE') return 'Acompanhe a publicação já ativa; não envie o mesmo pacote novamente.'
+  if (githubRateLimitError(err)) return 'Aguarde alguns minutos e use Tentar novamente. O snapshot existente pode ser reaproveitado com segurança.'
+  if (Number(err?.status)===403 && /resource not accessible|personal access token|integration|permission|push access|contents/i.test(msg)) return 'Abra Integrações e APIs e confirme Contents: Read and write para o token do GitHub.'
+  if (Number(err?.status)===403 && /protected branch|repository rule|ruleset|review required|branch protection/i.test(msg)) return 'Revise as regras de proteção da branch ou publique em uma branch permitida.'
+  if (err?.preflight) return 'Volte à revisão, corrija o item indicado e execute a verificação novamente.'
+  return 'Abra Acontecimentos para ver a etapa exata. Se um commit já existir no GitHub, não repita o envio antes de confirmar a branch.'
 }
 
 async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,message,replacePath=false,onProgress=null}) {
@@ -387,27 +450,96 @@ async function publicarPacoteNoGitHub({owner,repo,branch,targetPath='',files,mes
   },{label:'commit',progress:88})
 
   onProgress?.({phase:'ref',label:'Branch',message:`Atualizando ${base.branch} para o novo commit…`,progress:93})
+  let updatedRef=null
   if(base.exists){
-    await writeGithub(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
+    updatedRef=await writeGithub(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(base.branch)}`,{
       method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false}),
     },{label:`branch ${base.branch}`,progress:93})
   }else{
-    await writeGithub(`/repos/${owner}/${repo}/git/refs`,{
+    updatedRef=await writeGithub(`/repos/${owner}/${repo}/git/refs`,{
       method:'POST',body:JSON.stringify({ref:`refs/heads/${base.branch}`,sha:commit.sha}),
     },{label:`branch ${base.branch}`,progress:93})
   }
 
+  // A resposta da própria mutação já é a primeira confirmação de que o GitHub
+  // aceitou o novo SHA. A leitura da ref pode ficar alguns instantes atrás da
+  // escrita, então reconsultamos com pequenos intervalos em vez de acusar um
+  // falso negativo imediatamente.
+  const mutationConfirmed=updatedRef?.object?.sha===commit.sha
   onProgress?.({phase:'verify',label:'Verificação GitHub',message:'Confirmando o commit diretamente na branch publicada…',progress:96})
-  const verifyRef=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base.branch)}`)
-  const verifyCommit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`)
-  const verified=verifyRef?.object?.sha===commit.sha && Boolean(verifyCommit?.tree?.sha)
-  if(!verified){const e=new Error('O GitHub recebeu o commit, mas a verificação final da branch não confirmou a publicação.');e.status=502;throw e}
-  onProgress?.({phase:'verify',label:'Verificação GitHub',message:`Commit ${commit.sha.slice(0,7)} confirmado na branch ${base.branch}.`,progress:99,state:'done'})
+
+  let verifyRef=null
+  let verifyCommit=null
+  let verified=false
+  let branchAdvanced=false
+  const verifyDelays=[0,350,800,1500,2500]
+  for(let attempt=0;attempt<verifyDelays.length;attempt++){
+    if(verifyDelays[attempt]) await sleep(verifyDelays[attempt])
+    try{
+      verifyRef=await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base.branch)}`,{headers:{'Cache-Control':'no-cache'}})
+      verifyCommit=await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`,{headers:{'Cache-Control':'no-cache'}})
+      const refSha=verifyRef?.object?.sha||''
+      const commitExists=Boolean(verifyCommit?.tree?.sha)
+      if(refSha===commit.sha && commitExists){verified=true;break}
+
+      // Se outra publicação avançou a branch logo depois desta, o commit ainda
+      // pode estar corretamente no histórico. Confirmamos isso pela comparação.
+      if(refSha && refSha!==commit.sha && commitExists){
+        try{
+          const compare=await githubFetch(`/repos/${owner}/${repo}/compare/${commit.sha}...${refSha}`,{headers:{'Cache-Control':'no-cache'}})
+          if(['ahead','identical'].includes(String(compare?.status||'').toLowerCase())){
+            verified=true
+            branchAdvanced=true
+            break
+          }
+        }catch{/* a próxima tentativa de leitura ainda pode confirmar normalmente */}
+      }
+    }catch(err){
+      if(attempt===verifyDelays.length-1 && !mutationConfirmed) throw err
+    }
+
+    if(attempt===0 && !verified){
+      onProgress?.({
+        phase:'verify',label:'Sincronizando GitHub',
+        message:'A atualização da branch foi aceita; aguardando a leitura da API refletir o novo commit…',
+        progress:97,state:'active',details:{attempt:attempt+1,expectedSha:commit.sha},
+      })
+    }
+  }
+
+  // Se o PATCH/POST retornou explicitamente o SHA correto e o commit existe,
+  // não transformamos uma leitura eventualmente atrasada em falha da publicação.
+  if(!verified && mutationConfirmed){
+    try{
+      verifyCommit=verifyCommit||await githubFetch(`/repos/${owner}/${repo}/git/commits/${commit.sha}`,{headers:{'Cache-Control':'no-cache'}})
+      const observedSha=verifyRef?.object?.sha||''
+      // Aceita a confirmação da própria mutação quando a leitura ainda não veio
+      // ou continua mostrando exatamente o head anterior (cenário de propagação
+      // observado na API). Um SHA terceiro/divergente continua sendo erro real.
+      verified=Boolean(verifyCommit?.tree?.sha) && (!observedSha || observedSha===base.parentSha)
+    }catch{/* tratado abaixo com mensagem diagnóstica */}
+  }
+
+  if(!verified){
+    const expected=commit.sha
+    const observed=verifyRef?.object?.sha||'não retornado'
+    const e=new Error(`O GitHub criou o commit ${expected.slice(0,7)}, mas a branch ${base.branch} não pôde ser confirmada após novas tentativas (SHA observado: ${String(observed).slice(0,12)}).`)
+    e.status=502
+    throw e
+  }
+
+  onProgress?.({
+    phase:'verify',label:'Verificação GitHub',
+    message:branchAdvanced
+      ? `Commit ${commit.sha.slice(0,7)} confirmado no histórico de ${base.branch}; a branch já avançou para um commit mais novo.`
+      : `Commit ${commit.sha.slice(0,7)} confirmado na branch ${base.branch}.`,
+    progress:99,state:'done',
+  })
   return {
     changed:true,branch:base.branch,commitSha:commit.sha,
     commitUrl:commit.html_url||`https://github.com/${owner}/${repo}/commit/${commit.sha}`,
-    treeSha:verifyCommit.tree?.sha||newTree.sha,enviados,removidos,inalterados,inlineTree,blobsCriados,
-    initializedRepository,verified:true,verifiedAt:new Date().toISOString(),
+    treeSha:verifyCommit?.tree?.sha||newTree.sha,enviados,removidos,inalterados,inlineTree,blobsCriados,
+    initializedRepository,verified:true,verifiedAt:new Date().toISOString(),branchAdvanced,
   }
 }
 
@@ -422,10 +554,10 @@ function validarNome(str) {
 // Resumo técnico leve para enriquecer a listagem sem transformar cada card
 // em uma auditoria completa. Cache curto reduz chamadas à API do GitHub.
 const repoInsightCache = new Map()
-async function montarRepoInsight(owner, repo, branch='main') {
+async function montarRepoInsight(owner, repo, branch='main', { fresh = false } = {}) {
   const key = `${owner}/${repo}@${branch}`
   const cached = repoInsightCache.get(key)
-  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data
+  if (!fresh && cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data
 
   const root = await githubFetch(`/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`)
   const itens = Array.isArray(root) ? root : []
@@ -1277,7 +1409,7 @@ async function githubPublishPreflight({ sourceOwner, sourceRepoName, config }) {
   let insight = null
   if (base?.parentSha) {
     const insightBranch = base.exists ? config.branch : (base.repoInfo?.default_branch || config.branch)
-    try { insight = await montarRepoInsight(config.destOwner, config.destRepo, insightBranch) }
+    try { insight = await montarRepoInsight(config.destOwner, config.destRepo, insightBranch, { fresh: true }) }
     catch { insight = null }
   }
   pushCheck('path', 'Pasta de destino', 'ok', config.targetPath ? `/${config.targetPath}` : '/ (raiz)')
@@ -1330,9 +1462,11 @@ async function githubPublishPreflight({ sourceOwner, sourceRepoName, config }) {
 }
 
 function publicGithubPublishJob(job) {
+  if (!job) return null
   return {
-    id:job.id,status:job.status,phase:job.phase,progress:job.progress,createdAt:job.createdAt,updatedAt:job.updatedAt,
-    logs:job.logs,result:job.result,error:job.error,
+    id:job.id || job.jobId,status:job.status,phase:job.phase,progress:job.progress,createdAt:job.createdAt,updatedAt:job.updatedAt,
+    logs:Array.isArray(job.logs)?job.logs:[],result:job.result||null,error:job.error||null,
+    destination:job.destination||null,branch:job.branch||null,
   }
 }
 
@@ -1383,18 +1517,23 @@ async function executarGithubPublish({ sourceOwner, sourceRepoName, fileBuffer, 
     ip, request_id:requestId || null,
   }).catch(() => {})
 
-  repoInsightCache.delete(`${config.destOwner}/${config.destRepo}@${result.branch || config.branch}`)
+  const finalBranch = result.branch || config.branch
+  repoInsightCache.delete(`${config.destOwner}/${config.destRepo}@${finalBranch}`)
+  const finalInsight = await montarRepoInsight(config.destOwner, config.destRepo, finalBranch, { fresh: true }).catch(() => null)
+  const finalVersion = String(finalInsight?.versao || '') || (result.changed ? config.sentVersion : preflight.version.current) || null
+  const finalProduct = String(finalInsight?.produto || '') || preflight.version.productCurrent || config.sentProduct || null
+
   onLog?.({phase:'done',label:'Publicação verificada',message:result.changed
     ? `Commit ${result.commitSha?.slice(0,7)} confirmado no GitHub.`
     : 'O conteúdo já estava idêntico ao GitHub; nenhum novo commit foi necessário.',progress:100,state:'done'})
   return {
     ok:true,
     mensagem:result.changed ? `Pacote publicado em ${config.repository} com sucesso.` : 'O conteúdo enviado já corresponde ao conteúdo do GitHub.',
-    destino:{ repository:config.repository, branch:result.branch || config.branch, path:config.targetPath || '/', replacePath:config.replacePath },
+    destino:{ repository:config.repository, branch:finalBranch, path:config.targetPath || '/', replacePath:config.replacePath },
     pacote:{ nome:original, sha256, arquivos:unpacked.files.length, bytes:unpacked.totalBytes, raizRemovida:unpacked.commonRoot || null },
     snapshot, commit:result,
     verificacao:{ ok:Boolean(result.verified), verificadoEm:result.verifiedAt || new Date().toISOString(), checks:preflight.checks, warnings:preflight.warnings },
-    versao:preflight.version,
+    versao:{ ...preflight.version, after:finalVersion, afterProduct:finalProduct },
   }
 }
 
@@ -1413,8 +1552,23 @@ router.post('/repos/:owner/:repo/publicar-pacote/preflight', autenticar, async (
 
 /* GET /api/github/repos/:owner/:repo/publicar-pacote/jobs/:jobId */
 router.get('/repos/:owner/:repo/publicar-pacote/jobs/:jobId', autenticar, async(req,res)=>{
-  const job=githubPublishJobs.get(String(req.params.jobId||''))
-  if(!job || job.owner!==req.params.owner || job.repo!==req.params.repo || (job.usuarioId && job.usuarioId!==String(req.usuario?._id||''))) return res.status(404).json({erro:'Publicação não encontrada ou expirada.'})
+  const jobId=String(req.params.jobId||'')
+  let job=await GitHubPublishJob.findOne({
+    jobId, sourceOwner:req.params.owner, sourceRepo:req.params.repo, usuarioId:String(req.usuario?._id||''),
+  }).lean()
+  if(!job) return res.status(404).json({erro:'Publicação não encontrada ou expirada.'})
+
+  // Após reinício do backend o registro persiste. Se não recebe nenhuma atualização
+  // por tempo excessivo, converte o estado antigo em falha explicativa em vez de 404.
+  if(['queued','running'].includes(job.status) && Date.now()-new Date(job.updatedAt||job.createdAt).getTime()>20*60*1000){
+    const error={
+      message:'O acompanhamento persistiu, mas o backend deixou de atualizar esta publicação. Confira a branch no GitHub antes de iniciar outra.',
+      code:'GITHUB_PUBLISH_STALE',
+      action:'Confira o GitHub. Se o commit não estiver na branch, inicie uma nova publicação.',
+    }
+    await GitHubPublishJob.updateOne({jobId},{$set:{status:'failed',phase:'error',progress:100,error,finishedAt:new Date(),updatedAt:new Date()},$unset:{lockKey:1}})
+    job={...job,status:'failed',phase:'error',progress:100,error,updatedAt:new Date()}
+  }
   res.json({job:publicGithubPublishJob(job)})
 })
 
@@ -1430,23 +1584,45 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
 
   const asyncMode=String(req.body?.async||'').toLowerCase()==='true'
   if(asyncMode){
-    const job=criarGithubPublishJob({owner,repo,usuarioId:req.usuario?._id})
-    registrarGithubPublishLog(job,'received','Pacote recebido',`${original} chegou ao backend (${req.file.size || req.file.buffer.length} bytes).`,'done',12)
-    const buffer=req.file.buffer
-    const body={...req.body}
-    const usuario=req.usuario, ip=req.ip, requestId=req.requestId
-    setImmediate(async()=>{
-      job.status='running'; job.updatedAt=new Date().toISOString()
-      try{
-        const result=await executarGithubPublish({sourceOwner:owner,sourceRepoName:repo,fileBuffer:buffer,original,body,usuario,ip,requestId,
-          onLog:e=>registrarGithubPublishLog(job,e.phase,e.label,e.message,e.state||'active',e.progress,e.details)})
-        job.result=result; job.status='succeeded'; job.progress=100; job.phase='done'; job.updatedAt=new Date().toISOString()
-      }catch(err){
-        job.status='failed'; job.phase='error'; job.error={message:githubPublishErrorMessage(err), status:err.status||500, preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined}
-        registrarGithubPublishLog(job,'error','Publicação interrompida',job.error.message,'error',job.progress)
-      }
-    })
-    return res.status(202).json({ok:true,async:true,job:publicGithubPublishJob(job)})
+    try{
+      const parsedConfig=parseGithubPublishConfig(req.body||{},owner,repo)
+      const job=await criarGithubPublishJob({
+        owner,repo,usuarioId:req.usuario?._id,destination:parsedConfig.repository,branch:parsedConfig.branch,
+      })
+      registrarGithubPublishLog(job,'received','Pacote recebido',`${original} chegou ao backend (${req.file.size || req.file.buffer.length} bytes).`,'done',12)
+      const buffer=req.file.buffer
+      const body={...req.body}
+      const usuario=req.usuario, ip=req.ip, requestId=req.requestId
+      setImmediate(async()=>{
+        job.status='running'; job.updatedAt=new Date().toISOString()
+        queueGithubPublishPersist(job,{$set:{status:'running',updatedAt:new Date(job.updatedAt)}})
+        try{
+          const result=await executarGithubPublish({sourceOwner:owner,sourceRepoName:repo,fileBuffer:buffer,original,body,usuario,ip,requestId,
+            onLog:e=>registrarGithubPublishLog(job,e.phase,e.label,e.message,e.state||'active',e.progress,e.details)})
+          await job._persist?.catch(()=>{})
+          job.result=result; job.status='succeeded'; job.progress=100; job.phase='done'; job.updatedAt=new Date().toISOString()
+          await GitHubPublishJob.updateOne({jobId:job.id},{
+            $set:{status:'succeeded',phase:'done',progress:100,result,updatedAt:new Date(job.updatedAt),finishedAt:new Date()},
+            $unset:{lockKey:1},
+          })
+        }catch(err){
+          job.status='failed'; job.phase='error'; job.error={
+            message:githubPublishErrorMessage(err), status:err.status||500, code:err.code||null,
+            action:githubPublishErrorAction(err),
+            preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined,
+          }
+          registrarGithubPublishLog(job,'error','Publicação interrompida',job.error.message,'error',job.progress)
+          await job._persist?.catch(()=>{})
+          await GitHubPublishJob.updateOne({jobId:job.id},{
+            $set:{status:'failed',phase:'error',progress:job.progress,error:job.error,updatedAt:new Date(),finishedAt:new Date()},
+            $unset:{lockKey:1},
+          }).catch(()=>{})
+        }
+      })
+      return res.status(202).json({ok:true,async:true,job:publicGithubPublishJob(job)})
+    }catch(err){
+      return res.status(err.status||500).json({erro:githubPublishErrorMessage(err),codigo:err.code||null,jobId:err.jobId||null,acao:githubPublishErrorAction(err)})
+    }
   }
 
   try{
@@ -1454,7 +1630,7 @@ router.post('/repos/:owner/:repo/publicar-pacote', autenticar, publishUpload.sin
     res.status(201).json(result)
   }catch(err){
     const msg=githubPublishErrorMessage(err)
-    res.status(err.status||500).json({erro:msg,preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined})
+    res.status(err.status||500).json({erro:msg,acao:githubPublishErrorAction(err),codigo:err.code||null,preflight:err.preflight ? {checks:err.preflight.checks,warnings:err.preflight.warnings}:undefined})
   }
 })
 

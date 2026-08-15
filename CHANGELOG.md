@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.131 — Publicação GitHub compacta e recuperável
+
+- Compacta a revisão para mostrar apenas destino, versão, modo e snapshot; detalhes técnicos ficam recolhidos.
+- Reduz a tela de publicação a percentual, operação, arquivo e contador, com **Acontecimentos** ocultos por padrão.
+- Compacta o resultado para no máximo quatro informações principais e move diagnóstico para **Detalhes da publicação**.
+- Corrige versão final desatualizada causada pelo cache de insight do repositório.
+- Remove a revalidação duplicada do frontend ao tocar em Publicar; o backend mantém a checagem autoritativa imediatamente antes do GitHub.
+- Torna o polling tolerante a oscilações de rede, com até oito tentativas progressivas e opção **Reconectar** sem reenviar o ZIP.
+- Persiste jobs de publicação no MongoDB; reinícios deixam diagnóstico recuperável em vez de apagar o job da memória.
+- Impede duas publicações simultâneas na mesma combinação repositório/branch.
+- Exibe orientação prática quando ocorre erro e abre os acontecimentos automaticamente somente nesse caso.
+- Mantém log completo disponível para cópia sem ocupar espaço durante a operação normal.
+- Resultado sem alterações agora informa **Projeto já estava atualizado**, sem exibir uma transição de versão enganosa.
+- Pacote oficial desta versão segue o padrão aceito pelo atualizador: `alsistemas-1.0.131.zip`.
+
+## 1.0.130 — Confirmação GitHub confiável e progresso compacto
+
+- Corrige o falso erro após o GitHub aceitar o commit e atualizar a branch: a resposta do próprio `PATCH/POST` agora conta como confirmação inicial da gravação.
+- A verificação final da branch ganhou novas tentativas com pequenos intervalos, evitando falha por leitura momentaneamente atrasada da API do GitHub.
+- Se a branch avançar imediatamente para um commit mais novo, o AL confirma se o commit recém-publicado está no histórico em vez de acusar falha indevida.
+- Mensagens de falha passam a informar o SHA esperado e o SHA observado quando a confirmação realmente não puder ser concluída.
+- A tela **GitHub → Publicar projeto** deixa de empilhar todos os eventos: mostra uma única área com porcentagem, etapa, arquivo atual e contador.
+- O histórico completo continua preservado para **Copiar log**, sem transformar a publicação em uma página cada vez maior.
+- A Central de Atualizações usa o mesmo padrão compacto no log de arquivos durante publicação cloud.
+
 ## 1.0.129 — Publicação GitHub resiliente e sem estouro de limite
 
 - Corrige o falso diagnóstico de permissão quando o GitHub responde `403` por limite secundário de gravação.

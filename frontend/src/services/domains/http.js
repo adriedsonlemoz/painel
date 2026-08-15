@@ -105,6 +105,10 @@ export async function api(path, options = {}) {
       const err = new Error(data.erro || `Erro ${res.status}`)
       err.status = res.status
       err.codigo = data?.codigo
+      err.code = data?.codigo
+      err.data = data
+      err.acao = data?.acao || ''
+      err.jobId = data?.jobId || null
       throw err
     }
     return data

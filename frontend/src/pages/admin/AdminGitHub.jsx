@@ -1081,6 +1081,12 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
   const [uploadProgress, setUploadProgress] = useState(0)
   const [publishPhase, setPublishPhase] = useState('idle')
   const [publishError, setPublishError] = useState('')
+  const [publishErrorAction, setPublishErrorAction] = useState('')
+  const [trackingLost, setTrackingLost] = useState(false)
+  const [pollRetry, setPollRetry] = useState(0)
+  const [reviewDetailsOpen, setReviewDetailsOpen] = useState(false)
+  const [eventsOpen, setEventsOpen] = useState(false)
+  const [resultDetailsOpen, setResultDetailsOpen] = useState(false)
   const [resultado, setResultado] = useState(null)
   const [deployingRender, setDeployingRender] = useState({})
   const [passo, setPasso] = useState(1)
@@ -1115,7 +1121,7 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
   ]
 
   async function analisarPacote(file) {
-    setArquivo(file || null); setResultado(null); setPublishError(''); setPackageMeta(null); setPreflight(null); setPublishJob(null)
+    setArquivo(file || null); setResultado(null); setPublishError(''); setPublishErrorAction(''); setTrackingLost(false); setPollRetry(0); setEventsOpen(false); setResultDetailsOpen(false); setPackageMeta(null); setPreflight(null); setPublishJob(null)
     if (!file) return
     setInspectando(true)
     try {
@@ -1193,45 +1199,104 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
   function voltar() { setPasso(p => Math.max(1, p - 1)) }
   const esperar = ms => new Promise(r => setTimeout(r, ms))
 
+  async function acompanharPublicacao(initialJob) {
+    let job = initialJob
+    if (!job?.id) throw new Error('O backend não retornou o acompanhamento da publicação.')
+    const deadline = Date.now() + 15 * 60 * 1000
+    let failures = 0
+    setPublishJob(job)
+
+    while (Date.now() < deadline) {
+      if (job.status === 'succeeded') return job
+      if (job.status === 'failed') {
+        const err = new Error(job.error?.message || 'A publicação falhou no backend.')
+        err.code = job.error?.code || 'GITHUB_PUBLISH_FAILED'
+        err.action = job.error?.action || ''
+        throw err
+      }
+
+      await esperar(failures ? Math.min(8000, 900 * (2 ** Math.min(failures - 1, 3))) : 700)
+      try {
+        const d = await githubService.publicacaoJob(owner, repoNome, job.id)
+        job = d.job || job
+        failures = 0
+        setPollRetry(0)
+        setTrackingLost(false)
+        setPublishJob(job)
+        setPublishPhase(job.phase || 'backend')
+      } catch (e) {
+        failures += 1
+        setPollRetry(failures)
+        setPublishPhase('reconnecting')
+        if (failures >= 8) {
+          const err = new Error('O envio foi recebido, mas o celular perdeu o acompanhamento do backend. Isso não significa que a publicação falhou.')
+          err.code = 'TRACKING_LOST'
+          err.action = 'Toque em Reconectar. Não envie o ZIP novamente enquanto o job ainda puder estar em execução.'
+          throw err
+        }
+      }
+    }
+
+    const err = new Error('A publicação ultrapassou o tempo de acompanhamento. Ela pode continuar no backend.')
+    err.code = 'TRACKING_LOST'
+    err.action = 'Use Reconectar antes de iniciar uma nova publicação.'
+    throw err
+  }
+
+  async function concluirJob(job) {
+    const r = job?.result
+    if (!r) throw new Error('O backend concluiu o job, mas não retornou o resultado da publicação.')
+    setResultado(r); setPublishPhase('done'); setPublishError(''); setPublishErrorAction(''); setTrackingLost(false); setPollRetry(0); setEventsOpen(false); setPasso(8)
+
+    // As integrações são complementares. O GitHub já terminou, então Vercel,
+    // Render e metadados não seguram a tela de sucesso nem transformam uma
+    // publicação concluída em erro visual.
+    githubService.getMeta(repo.id).then(atualizado=>{ if(atualizado) onMetaAtualizado?.(atualizado) }).catch(()=>{})
+    updatesService.deploymentCheck(repository, branch).then(setDeployment).catch(e=>setDeployment({erro:e.message||'Produção não pôde ser conferida após o commit.'}))
+    const [o,rn]=repository.split('/')
+    if(o&&rn) githubService.insight(o,rn,branch).then(setRepoInsight).catch(()=>{})
+  }
+
   async function publicar() {
     if (!arquivo || !repository || !branch) return
-    setPublicando(true); setResultado(null); setPublishError(''); setUploadProgress(0); setPublishPhase('preflight'); setPublishJob(null)
+    setPublicando(true); setResultado(null); setPublishError(''); setPublishErrorAction(''); setTrackingLost(false); setPollRetry(0); setUploadProgress(0); setPublishPhase('upload'); setPublishJob(null); setEventsOpen(false)
+    setPasso(7)
     try {
-      // Nunca publica usando uma verificação antiga: refaz a checagem imediatamente antes do upload.
-      const pf = await verificarTudo()
-      if (!pf?.ok) { setPasso(6); return }
-      setPasso(7); setPublishPhase('upload')
+      // A revisão já fez a checagem informativa. A única checagem autoritativa
+      // acontece no backend imediatamente antes de tocar no GitHub.
       const initial = await githubService.publicarPacote(owner, repoNome, arquivo, publishConfig(), prog => {
         const pct = prog.percent || 0
         setUploadProgress(pct)
         if (pct >= 100) setPublishPhase('backend')
       })
-      let job = initial?.job
-      if (!job?.id) throw new Error('O backend não retornou o acompanhamento da publicação.')
-      setPublishJob(job); setPublishPhase(job.phase || 'backend')
-      const deadline = Date.now() + 12 * 60 * 1000
-      while (Date.now() < deadline) {
-        if (job.status === 'succeeded') break
-        if (job.status === 'failed') throw new Error(job.error?.message || 'A publicação falhou no backend.')
-        await esperar(650)
-        const d = await githubService.publicacaoJob(owner, repoNome, job.id)
-        job = d.job || job
-        setPublishJob(job); setPublishPhase(job.phase || 'backend')
-      }
-      if (job.status !== 'succeeded') throw new Error('A publicação demorou além do limite de acompanhamento. Confira o GitHub antes de tentar novamente.')
-      const r = job.result
-      setResultado(r); setPublishPhase('done')
-      const atualizado = await githubService.getMeta(repo.id).catch(() => null)
-      if (atualizado) onMetaAtualizado?.(atualizado)
-      const dep = await updatesService.deploymentCheck(repository, branch).catch(e=>({erro:e.message||'Produção não pôde ser conferida após o commit.'}))
-      setDeployment(dep)
-      const [o,rn]=repository.split('/')
-      if(o&&rn) githubService.insight(o,rn,branch).then(setRepoInsight).catch(()=>{})
-      setPasso(8)
+      const job = await acompanharPublicacao(initial?.job)
+      await concluirJob(job)
     } catch (e) {
       setPublishError(e.message || 'Não foi possível publicar o projeto.')
-      setPublishPhase('error')
+      setPublishErrorAction(e.action || e.acao || e?.data?.acao || '')
+      const recoverable = e.code === 'TRACKING_LOST' || (e.code === 'GITHUB_PUBLISH_ACTIVE' && e.jobId)
+      if (e.code === 'GITHUB_PUBLISH_ACTIVE' && e.jobId) setPublishJob({ id:e.jobId, status:'running', phase:'reconnecting', progress:publishJob?.progress || 0, logs:publishJob?.logs || [] })
+      setTrackingLost(Boolean(recoverable))
+      setPublishPhase(recoverable ? 'reconnecting' : 'error')
+      setEventsOpen(true)
       setPasso(7)
+    } finally { setPublicando(false) }
+  }
+
+  async function reconectarPublicacao() {
+    if (!publishJob?.id) return
+    setPublicando(true); setPublishError(''); setPublishErrorAction(''); setTrackingLost(false); setPollRetry(0); setPublishPhase('reconnecting')
+    try {
+      const d = await githubService.publicacaoJob(owner, repoNome, publishJob.id)
+      const job = await acompanharPublicacao(d.job || publishJob)
+      await concluirJob(job)
+    } catch (e) {
+      setPublishError(e.message || 'Não foi possível recuperar o acompanhamento.')
+      setPublishErrorAction(e.action || e.acao || e?.data?.acao || '')
+      const lost = e.code === 'TRACKING_LOST' || !e?.status
+      setTrackingLost(lost)
+      setPublishPhase(lost ? 'reconnecting' : 'error')
+      setEventsOpen(true)
     } finally { setPublicando(false) }
   }
 
@@ -1260,16 +1325,38 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
   const sentVersion = packageMeta?.versao || ''
   const versionLabel = sentVersion ? (currentVersion ? `${currentVersion} → ${sentVersion}` : `Sem versão → ${sentVersion}`) : 'Não detectada'
   const versionState = preflight?.checks?.find(c=>c.id==='version')?.state || (sentVersion && currentVersion && sentVersion===currentVersion ? 'warn' : 'ok')
+  const publishLogs = Array.isArray(publishJob?.logs) ? publishJob.logs : []
+  const latestPublishLog = publishLogs[publishLogs.length - 1] || null
+  const livePercent = publishPhase==='upload'
+    ? Math.max(0,Math.min(100,Number(uploadProgress||0)))
+    : Math.max(0,Math.min(100,Number(publishJob?.progress ?? latestPublishLog?.progress ?? 0)))
+  const liveFile = publishPhase==='upload'
+    ? arquivo?.name || 'Pacote ZIP'
+    : latestPublishLog?.details?.file || latestPublishLog?.message || 'Preparando publicação…'
+  const liveOperation = publishPhase==='upload'
+    ? 'UPLOAD'
+    : latestPublishLog?.details?.operation || latestPublishLog?.label || 'PROCESSANDO'
+  const liveCounter = latestPublishLog?.details?.total
+    ? `${latestPublishLog.details.index || 0}/${latestPublishLog.details.total}`
+    : `${publishLogs.length} evento(s)`
+  const resultUnchanged = resultado?.commit?.changed === false
+  const resultBeforeVersion = resultado?.versao?.current || ''
+  const resultAfterVersion = resultado?.versao?.after || resultado?.versao?.incoming || resultBeforeVersion || ''
+  const resultCommitLabel = resultado?.commit?.commitSha?.slice(0,10) || 'Sem novo commit'
   const footer = passo <= 6 ? <>
     <DSBtn onClick={passo === 1 ? onClose : voltar} disabled={publicando}>{passo === 1 ? 'Cancelar' : '← Voltar'}</DSBtn>
     {passo < totalPassos
       ? <DSBtn variant="primary" onClick={avancar} loading={preflightRunning && passo===5} disabled={inspectando}>Continuar →</DSBtn>
       : <DSBtn variant="primary" onClick={publicar} loading={publicando}>↑ Publicar no GitHub</DSBtn>}
   </> : passo === 7 ? <>
-    {publishError ? <DSBtn onClick={() => setPasso(6)}>← Revisar</DSBtn> : <span />}
-    {publishError ? <DSBtn variant="primary" onClick={publicar}>Tentar novamente</DSBtn> : <DSBtn disabled>Publicando…</DSBtn>}
+    {publishError && !trackingLost ? <DSBtn onClick={() => setPasso(6)}>← Revisar</DSBtn> : <span />}
+    {trackingLost
+      ? <DSBtn variant="primary" onClick={reconectarPublicacao} loading={publicando}>Reconectar</DSBtn>
+      : publishError
+        ? <DSBtn variant="primary" onClick={publicar} loading={publicando}>Tentar novamente</DSBtn>
+        : <DSBtn disabled>{pollRetry ? 'Reconectando…' : 'Publicando…'}</DSBtn>}
   </> : <>
-    <DSBtn onClick={() => setPasso(6)}>Ver revisão</DSBtn>
+    <span />
     <DSBtn variant="primary" onClick={onClose}>Concluir</DSBtn>
   </>
 
@@ -1345,69 +1432,89 @@ function AbaPublicar({ open, repo, owner, repoNome, meta, toastShow, onMetaAtual
       </div> : <div className="gh-muted-box">Ao continuar, o AL consulta automaticamente Vercel e Render.</div>}
     </section>}
 
-    {passo === 6 && <section className="gh-wizard-step gh-wizard-compact-step">
-      <div className="gh-wizard-step-head"><span>6</span><div><h3>Verificação obrigatória</h3><p>Antes de qualquer upload, o AL Sistemas valida destino, permissão, branch, versão, modo e snapshot.</p></div></div>
-      <div className={`gh-preflight-banner ${preflight?.ok ? 'ok' : 'error'}`}><span>{preflight?.ok ? '✓' : '!'}</span><div><b>{preflight?.ok ? 'Pronto para publicar' : 'Verificação necessária'}</b><small>{preflight?.ok ? 'Todos os bloqueios obrigatórios foram aprovados. A checagem será repetida ao tocar em Publicar.' : (preflight?.erro || 'Volte uma etapa ou execute a conferência novamente.')}</small></div><DSBtn size="sm" variant="ghost" onClick={verificarTudo} loading={preflightRunning}>Verificar novamente</DSBtn></div>
-      <div className="gh-preflight-grid">{(preflight?.checks || []).map(c=><div key={c.id} className={`gh-preflight-check ${c.state}`}><span>{c.state==='ok'?'✓':c.state==='warn'?'!':'×'}</span><div><b>{c.label}</b><small>{c.detail}</small></div></div>)}</div>
-      {preflight?.warnings?.length>0&&<div className="gh-preflight-warnings"><b>Atenção antes do envio</b>{preflight.warnings.map((w,i)=><span key={i}>• {w}</span>)}</div>}
-      <div className={`gh-version-journey ${versionState}`}><div><small>ATUAL</small><b>{preflight?.version?.current || currentVersion || '—'}</b><span>{preflight?.version?.productCurrent || repoInsight?.produto || repoNome}</span></div><i>→</i><div><small>APÓS ENVIO</small><b>{sentVersion || '—'}</b><span>{packageMeta?.produto || 'Projeto ZIP'}</span></div></div>
-      <div className="al-wizard-info-grid gh-final-review-grid">
-        <WizardInfo label="Arquivo" value={arquivo?.name || '—'} help={arquivo ? fmtBytes(arquivo.size) : ''} />
-        <WizardInfo label="Repositório" value={repository || '—'} />
-        <WizardInfo label="Branch" value={branch || 'main'} />
-        <WizardInfo label="Pasta" value={`/${targetPath || ''}`} help={targetPath ? 'Limitado a esta pasta' : 'Raiz do repositório'} />
-        <WizardInfo label="Modo" value={replacePath ? 'Substituir' : 'Mesclar'} />
-        <WizardInfo label="Snapshot" value={snapshotR2 ? 'R2 ✓' : 'Não'} />
-        <WizardInfo label="Vercel" value={`${deployment?.vercel?.projects?.length || 0} vínculo(s)`} />
-        <WizardInfo label="Render" value={`${deployment?.render?.services?.length || 0} vínculo(s)`} />
+    {passo === 6 && <section className="gh-wizard-step gh-review-compact">
+      <div className={`gh-preflight-banner gh-preflight-summary ${preflight?.ok ? 'ok' : 'error'}`}>
+        <span>{preflight?.ok ? '✓' : '!'}</span>
+        <div>
+          <b>{preflight?.ok ? 'Pronto para publicar' : 'Verificação necessária'}</b>
+          <small>{preflight?.ok ? `${repository} · ${branch} · /${targetPath || ''}` : (preflight?.erro || 'Revise os itens que bloquearam a publicação.')}</small>
+        </div>
       </div>
-      <div className="gh-wizard-warning">Destino final congelado para esta operação: <b>{repository}</b> · <b>{branch}</b> · <b>/{targetPath || ''}</b>.</div>
+
+      <div className="gh-review-summary-line">
+        <span><small>VERSÃO</small><b>{preflight?.version?.current || currentVersion || '—'} → {sentVersion || '—'}</b></span>
+        <span><small>MODO</small><b>{replacePath ? 'Substituir' : 'Mesclar'}</b></span>
+        <span><small>SNAPSHOT</small><b>{snapshotR2 ? 'R2 ✓' : 'Não'}</b></span>
+      </div>
+
+      {replacePath && <div className="gh-compact-warning">! Substituir removerá do destino os arquivos que não existirem no ZIP.</div>}
+
+      <button type="button" className="gh-disclosure-button" onClick={()=>setReviewDetailsOpen(v=>!v)} aria-expanded={reviewDetailsOpen}>
+        <span>{reviewDetailsOpen ? 'Ocultar detalhes da verificação' : 'Detalhes da verificação'}</span><b>{reviewDetailsOpen ? '⌃' : '⌄'}</b>
+      </button>
+      {reviewDetailsOpen && <div className="gh-disclosure-panel">
+        <div className="gh-preflight-grid">{(preflight?.checks || []).map(c=><div key={c.id} className={`gh-preflight-check ${c.state}`}><span>{c.state==='ok'?'✓':c.state==='warn'?'!':'×'}</span><div><b>{c.label}</b><small>{c.detail}</small></div></div>)}</div>
+        {preflight?.warnings?.length>0&&<div className="gh-preflight-warnings"><b>Atenção</b>{preflight.warnings.map((w,i)=><span key={i}>• {w}</span>)}</div>}
+        <div className="gh-review-detail-actions"><DSBtn size="sm" variant="ghost" onClick={verificarTudo} loading={preflightRunning}>↻ Verificar novamente</DSBtn></div>
+      </div>}
     </section>}
 
-    {passo === 7 && <section className="gh-publish-dashboard gh-publish-live">
-      <div className={`gh-publish-state-icon ${publishError ? 'error' : ''}`}>{publishError ? '!' : '↟'}</div>
-      <div className="gh-live-head"><div><h3>{publishError ? 'A publicação encontrou um problema' : 'Publicação em andamento'}</h3><p>{publishError || (publishPhase === 'upload' ? 'Transferindo o ZIP com progresso real…' : 'O backend está executando as verificações e o commit. Não feche esta janela.')}</p></div><DSBtn size="sm" variant="ghost" onClick={copiarLogPublicacao}>Copiar log</DSBtn></div>
-      <div className="gh-live-progress"><div><span>Progresso geral</span><b>{publishPhase==='upload' ? `${uploadProgress}%` : `${publishJob?.progress || (publishError?0:100)}%`}</b></div><i><em style={{width:`${publishPhase==='upload' ? uploadProgress : (publishJob?.progress || (publishError?0:100))}%`}}/></i></div>
-      <div className="gh-dashboard-grid">
-        <PublishStage label="Upload" state={uploadProgress>=100?'done':publishError?'error':'active'} value={uploadProgress>=100?'Recebido':`${uploadProgress}%`} desc={arquivo?.name || ''} />
-        <PublishStage label="Verificação" state={(publishJob?.progress||0)>=30?'done':publishError?'error':uploadProgress>=100?'active':'pending'} value={(publishJob?.progress||0)>=30?'Aprovada':'Aguardando'} desc="permissão · branch · versão · R2" />
-        <PublishStage label="Commit" state={resultado?.commit?'done':publishError?'error':(publishJob?.progress||0)>=42?'active':'pending'} value={resultado?.commit?.commitSha?.slice(0,7) || ((publishJob?.progress||0)>=42?'Processando':'Aguardando')} desc={`${repository} · ${branch}`} />
-        <PublishStage label="Pós-checagem" state={resultado?.verificacao?.ok?'done':publishError?'error':(publishJob?.progress||0)>=96?'active':'pending'} value={resultado?.verificacao?.ok?'Confirmada':'Aguardando'} desc="ref e commit no GitHub" />
+    {passo === 7 && <section className="gh-publish-live gh-publish-minimal">
+      <div className={`gh-publish-monitor ${publishError ? 'error' : ''}`} aria-live="polite">
+        <div className="gh-publish-monitor-top">
+          <div><small>{trackingLost || publishPhase==='reconnecting' ? 'ACOMPANHAMENTO' : publishPhase==='upload' ? 'ENVIANDO PACOTE' : 'PUBLICANDO NO GITHUB'}</small><b>{publishError ? (trackingLost ? 'Conexão perdida' : 'Interrompido') : pollRetry ? `Reconectando · tentativa ${pollRetry}/8` : liveOperation}</b></div>
+          <strong>{livePercent}%</strong>
+        </div>
+        <div className="gh-publish-monitor-track"><i style={{width:`${livePercent}%`}}/></div>
+        <div className="gh-publish-monitor-current">
+          <code title={liveFile}>{publishError || liveFile}</code>
+          <em>{publishPhase==='upload' ? `${fmtBytes(Math.round((arquivo?.size||0)*(livePercent/100)))} / ${fmtBytes(arquivo?.size||0)}` : liveCounter}</em>
+        </div>
       </div>
-      <div className="gh-live-log"><div className="gh-live-log-title"><b>Log da operação</b><span>{publishJob?.logs?.length || 0} evento(s)</span></div>
-        {publishPhase==='upload' && <div className="gh-log-line active"><time>agora</time><span>●</span><div><b>Enviando pacote</b><small>{fmtBytes(Math.round((arquivo?.size||0)*(uploadProgress/100)))} de {fmtBytes(arquivo?.size||0)}</small></div></div>}
-        {(publishJob?.logs || []).map((l,i)=><div key={`${l.at}-${i}`} className={`gh-log-line ${l.state || ''}`}><time>{new Date(l.at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time><span>{l.state==='done'?'✓':l.state==='error'?'×':l.state==='off'?'—':'●'}</span><div><b>{l.label}</b><small>{l.message}</small></div>{Number.isFinite(l.progress)&&<em>{l.progress}%</em>}</div>)}
-        {publishError&&<div className="gh-log-line error"><time>agora</time><span>×</span><div><b>Erro</b><small>{publishError}</small></div></div>}
-      </div>
-      <div className="gh-dashboard-destination"><span>Destino desta operação</span><b>{destinoVisual}</b></div>
+
+      {publishError && <div className="gh-publish-error-help"><b>{trackingLost ? 'A publicação pode continuar no backend.' : 'O que aconteceu'}</b><span>{publishError}</span>{publishErrorAction && <small>{publishErrorAction}</small>}</div>}
+
+      <button type="button" className="gh-disclosure-button" onClick={()=>setEventsOpen(v=>!v)} aria-expanded={eventsOpen}>
+        <span>Acontecimentos {publishLogs.length ? `(${publishLogs.length})` : ''}</span><b>{eventsOpen ? '⌃' : '⌄'}</b>
+      </button>
+      {eventsOpen && <div className="gh-disclosure-panel gh-events-panel">
+        <div className="gh-events-actions"><DSBtn size="sm" variant="ghost" onClick={copiarLogPublicacao}>Copiar log</DSBtn></div>
+        <div className="gh-live-log">
+          {(publishLogs.length ? publishLogs : [{at:new Date().toISOString(),label:'Aguardando',message:'O backend ainda não enviou novos acontecimentos.',state:'active'}]).map((l,i)=><div key={`${l.at}-${i}`} className={`gh-log-line ${l.state||''}`}><time>{new Date(l.at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time><span>{l.state==='error'?'×':l.state==='done'?'✓':'•'}</span><div><b>{l.label}</b><small>{l.message}</small></div></div>)}
+        </div>
+      </div>}
     </section>}
 
-    {passo === 8 && resultado && <section className="gh-publish-finish gh-publish-result">
-      <div className="gh-wizard-success-icon">✓</div><h3>Publicação verificada</h3><p>{resultado.commit?.initializedRepository ? 'O repositório estava vazio: o primeiro commit foi criado, o projeto foi enviado e a branch final foi conferida.' : resultado.commit?.changed===false ? 'O pacote já correspondia ao conteúdo do GitHub. Nenhum commit desnecessário foi criado.' : 'O commit foi criado e confirmado diretamente na branch de destino.'}</p>
-      <div className={`gh-version-journey ${resultado?.versao?.incoming ? 'ok' : 'warn'}`}><div><small>ANTES</small><b>{resultado?.versao?.current || '—'}</b><span>{resultado?.versao?.productCurrent || repoNome}</span></div><i>→</i><div><small>DEPOIS</small><b>{resultado?.versao?.incoming || 'Não detectada'}</b><span>{resultado?.versao?.productIncoming || packageMeta?.produto || 'Projeto'}</span></div></div>
-      <div className="al-wizard-info-grid gh-finish-grid">
-        <WizardInfo label="Commit" value={resultado.commit?.commitSha?.slice(0,10) || 'Sem alteração'} help={resultado.commit?.verified ? 'Verificado no GitHub ✓' : ''} />
-        <WizardInfo label="Pacote" value={`${resultado.pacote?.arquivos || 0} arquivo(s)`} help={fmtBytes(resultado.pacote?.bytes || 0)} />
-        <WizardInfo label="Alterados" value={`${resultado.commit?.enviados || 0}`} help={`${resultado.commit?.inlineTree || 0} na árvore · ${resultado.commit?.blobsCriados || 0} blob(s)`} />
-        <WizardInfo label="Inalterados" value={`${resultado.commit?.inalterados || 0}`} help="reutilizados sem novo upload" />
-        <WizardInfo label="Removidos" value={`${resultado.commit?.removidos || 0}`} help={replacePath?'modo substituir':'nenhum pelo modo mesclar'} />
-        <WizardInfo label="R2" value={resultado.snapshot ? 'Snapshot ✓' : 'Não usado'} />
-        <WizardInfo label="Vercel" value={deployment?.vercel?.projects?.length ? `${deployment.vercel.projects.length} vínculo(s)` : 'Não vinculado'} />
-        <WizardInfo label="Render" value={deployment?.render?.services?.length ? `${deployment.render.services.length} vínculo(s)` : 'Não vinculado'} />
-        <WizardInfo label="Destino" value={`${resultado.destino?.branch || branch} · /${targetPath || ''}`} />
+    {passo === 8 && resultado && <section className="gh-publish-finish gh-publish-result gh-result-minimal">
+      <div className="gh-result-hero"><div className="gh-wizard-success-icon">✓</div><div><h3>{resultUnchanged ? 'Projeto já estava atualizado' : 'Publicado com sucesso'}</h3><p>{resultUnchanged ? `${resultado.pacote?.arquivos || 0} arquivos conferidos · nenhum commit necessário.` : 'Commit confirmado na branch de destino.'}</p></div></div>
+
+      <div className="gh-result-summary">
+        <span><small>VERSÃO</small><b>{resultUnchanged ? (resultAfterVersion || '—') : `${resultBeforeVersion || '—'} → ${resultAfterVersion || '—'}`}</b></span>
+        <span><small>COMMIT</small><b>{resultCommitLabel}</b></span>
+        <span><small>ARQUIVOS</small><b>{resultado.pacote?.arquivos || 0}</b></span>
+        <span><small>DESTINO</small><b>{resultado.destino?.branch || branch} · /{targetPath || ''}</b></span>
       </div>
-      <div className="gh-postcheck"><b>Checagem após o envio</b>{(resultado.verificacao?.checks||[]).map(c=><span key={c.id} className={c.state}><i>{c.state==='ok'?'✓':c.state==='warn'?'!':'×'}</i><em>{c.label}</em><small>{c.detail}</small></span>)}<span className={resultado.verificacao?.ok?'ok':'error'}><i>{resultado.verificacao?.ok?'✓':'×'}</i><em>Commit publicado</em><small>{resultado.verificacao?.ok ? `Confirmado ${resultado.verificacao?.verificadoEm ? relTime(resultado.verificacao.verificadoEm) : ''}` : 'Não confirmado'}</small></span></div>
-      <div className="gh-finish-actions"><DSBtn size="sm" variant="primary" onClick={onAbrirArquivos}>Ver arquivos no AL</DSBtn><DSBtn size="sm" variant="ghost" onClick={copiarLogPublicacao}>Copiar log</DSBtn>{resultado.commit?.commitUrl && <a href={resultado.commit.commitUrl} target="_blank" rel="noopener noreferrer">Abrir commit ↗</a>}<a href={`https://github.com/${resultado.destino?.repository || repository}/tree/${encodeURIComponent(resultado.destino?.branch || branch)}`} target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
-      {resultado.snapshot?.objectKey && <div className="gh-cloud-note">Snapshot: <code>{resultado.snapshot.bucket}/{resultado.snapshot.objectKey}</code></div>}
-      {deployment?.erro && <div className="gh-muted-box">GitHub concluído, mas a produção não pôde ser conferida: {deployment.erro}</div>}
-      {deployment?.render?.services?.length > 0 && <div className="gh-wizard-deploys"><b>Render</b>{deployment.render.services.map(svc=><div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}</small></span><DSBtn size="sm" onClick={()=>implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar este commit</DSBtn></div>)}</div>}
+
+      <button type="button" className="gh-disclosure-button" onClick={()=>setResultDetailsOpen(v=>!v)} aria-expanded={resultDetailsOpen}>
+        <span>{resultDetailsOpen ? 'Ocultar detalhes da publicação' : 'Detalhes da publicação'}</span><b>{resultDetailsOpen ? '⌃' : '⌄'}</b>
+      </button>
+      {resultDetailsOpen && <div className="gh-disclosure-panel gh-result-details">
+        <div className="al-wizard-info-grid gh-finish-grid">
+          <WizardInfo label="Alterados" value={`${resultado.commit?.enviados || 0}`} help={`${resultado.commit?.inlineTree || 0} na árvore · ${resultado.commit?.blobsCriados || 0} blob(s)`} />
+          <WizardInfo label="Inalterados" value={`${resultado.commit?.inalterados || 0}`} help="reutilizados sem novo upload" />
+          <WizardInfo label="Removidos" value={`${resultado.commit?.removidos || 0}`} help={replacePath?'modo substituir':'nenhum pelo modo mesclar'} />
+          <WizardInfo label="R2" value={resultado.snapshot ? 'Snapshot ✓' : 'Não usado'} />
+          <WizardInfo label="Vercel" value={deployment?.vercel?.projects?.length ? `${deployment.vercel.projects.length} vínculo(s)` : 'Não vinculado'} />
+          <WizardInfo label="Render" value={deployment?.render?.services?.length ? `${deployment.render.services.length} vínculo(s)` : 'Não vinculado'} />
+        </div>
+        <div className="gh-postcheck"><b>Checagem técnica</b>{(resultado.verificacao?.checks||[]).map(c=><span key={c.id} className={c.state}><i>{c.state==='ok'?'✓':c.state==='warn'?'!':'×'}</i><em>{c.label}</em><small>{c.detail}</small></span>)}<span className={resultado.verificacao?.ok?'ok':'error'}><i>{resultado.verificacao?.ok?'✓':'×'}</i><em>Commit publicado</em><small>{resultado.verificacao?.ok ? `Confirmado ${resultado.verificacao?.verificadoEm ? relTime(resultado.verificacao.verificadoEm) : ''}` : 'Não confirmado'}</small></span></div>
+        <div className="gh-finish-actions"><DSBtn size="sm" variant="primary" onClick={onAbrirArquivos}>Ver arquivos no AL</DSBtn><DSBtn size="sm" variant="ghost" onClick={copiarLogPublicacao}>Copiar log</DSBtn>{resultado.commit?.commitUrl && <a href={resultado.commit.commitUrl} target="_blank" rel="noopener noreferrer">Abrir commit ↗</a>}<a href={`https://github.com/${resultado.destino?.repository || repository}/tree/${encodeURIComponent(resultado.destino?.branch || branch)}`} target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
+        {resultado.snapshot?.objectKey && <div className="gh-cloud-note">Snapshot: <code>{resultado.snapshot.bucket}/{resultado.snapshot.objectKey}</code></div>}
+        {deployment?.erro && <div className="gh-muted-box">GitHub concluído, mas a produção não pôde ser conferida: {deployment.erro}</div>}
+        {deployment?.render?.services?.length > 0 && <div className="gh-wizard-deploys"><b>Render</b>{deployment.render.services.map(svc=><div className="gh-cloud-row" key={svc.id}><span><b>{svc.name || svc.id}</b><small>{svc.branch || branch}</small></span><DSBtn size="sm" onClick={()=>implantarRender(svc)} loading={!!deployingRender[svc.id]}>Implantar este commit</DSBtn></div>)}</div>}
+      </div>}
     </section>}
   </AdminWizardModal>
-}
-
-function PublishStage({ label, state='pending', value, desc }) {
-  const icon = state === 'done' ? '✓' : state === 'error' ? '!' : state === 'active' ? '●' : state === 'off' ? '—' : '○'
-  return <div className={`gh-dashboard-stage ${state}`}><span className="gh-dashboard-stage-icon">{icon}</span><span className="gh-dashboard-stage-copy"><small>{label}</small><b>{value}</b><em>{desc}</em></span></div>
 }
 
 function AbaDelete({ repo, repoNome, deleteStep, setDeleteStep, deleteInput, setDeleteInput, onConfirmar, deletandoRepo }) {
@@ -2095,11 +2202,13 @@ export default function AdminGitHub() {
         .gh-new-project-launch{width:100%;margin:0 0 14px;display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:11px;align-items:center;text-align:left;padding:12px 14px;border:1px solid color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border));border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));color:var(--adm-text);cursor:pointer}.gh-new-project-launch-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 30%,var(--adm-border));color:var(--adm-accent);font-size:21px;font-weight:700}.gh-new-project-launch>span:nth-child(2){display:grid;gap:2px;min-width:0}.gh-new-project-launch b{font-size:12px}.gh-new-project-launch small{font-size:9px;color:var(--adm-muted);line-height:1.35}.gh-new-project-launch-arrow{font-size:24px;color:var(--adm-muted)}
         .gh-package-picker{width:100%;display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;padding:12px;border:1.5px dashed color-mix(in srgb,var(--adm-accent) 38%,var(--adm-border));border-radius:12px;background:color-mix(in srgb,var(--adm-accent) 3%,var(--adm-surface2));color:var(--adm-text);cursor:pointer}.gh-package-picker.selected{border-style:solid;border-color:color-mix(in srgb,var(--adm-accent) 50%,var(--adm-border))}.gh-package-picker-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;background:var(--adm-surface);border:1px solid var(--adm-border);font-size:18px}.gh-package-picker-copy{min-width:0;display:grid;gap:2px}.gh-package-picker-copy b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-package-picker-copy small{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-package-picker-action{font-size:9px;font-weight:850;color:var(--adm-accent);padding:7px 8px;border:1px solid color-mix(in srgb,var(--adm-accent) 25%,var(--adm-border));border-radius:8px;background:var(--adm-surface)}.gh-version-compare{margin-top:10px}.gh-wizard-compact-step{display:grid;gap:11px;align-content:start}.gh-wizard-compact-step .gh-wizard-step-head{margin-bottom:1px}.gh-option-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.gh-option-card{min-width:0;text-align:left;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);cursor:pointer}.gh-option-card.active{border-color:color-mix(in srgb,var(--adm-accent) 55%,var(--adm-border));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--adm-accent) 20%,transparent)}.gh-option-card.danger.active{border-color:color-mix(in srgb,var(--adm-red) 42%,var(--adm-border))}.gh-option-card b{display:block;font-size:10px}.gh-option-card small{display:block;margin-top:3px;font-size:8px;line-height:1.3;color:var(--adm-muted)}.gh-cloud-action-row{display:flex;justify-content:flex-end}.gh-final-review-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.gh-publish-dashboard,.gh-publish-finish{display:grid;gap:12px;align-content:start}.gh-publish-state-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:15px;background:color-mix(in srgb,var(--adm-accent) 12%,var(--adm-surface2));color:var(--adm-accent);font-size:23px;font-weight:900}.gh-publish-state-icon.error{background:color-mix(in srgb,var(--adm-red) 10%,var(--adm-surface2));color:var(--adm-red)}.gh-publish-dashboard h3,.gh-publish-finish h3{margin:0;font-size:16px;color:var(--adm-text)}.gh-publish-dashboard>p,.gh-publish-finish>p{margin:-5px 0 0;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-dashboard-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.gh-dashboard-stage{min-width:0;display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;align-items:center;padding:10px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface2)}.gh-dashboard-stage.done{border-color:color-mix(in srgb,var(--adm-success) 28%,var(--adm-border))}.gh-dashboard-stage.error{border-color:color-mix(in srgb,var(--adm-red) 38%,var(--adm-border))}.gh-dashboard-stage.active{border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border))}.gh-dashboard-stage-icon{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:var(--adm-surface);border:1px solid var(--adm-border);font-size:11px;font-weight:900;color:var(--adm-muted)}.gh-dashboard-stage.done .gh-dashboard-stage-icon{color:var(--adm-success)}.gh-dashboard-stage.error .gh-dashboard-stage-icon{color:var(--adm-red)}.gh-dashboard-stage.active .gh-dashboard-stage-icon{color:var(--adm-accent)}.gh-dashboard-stage-copy{min-width:0;display:grid;gap:1px}.gh-dashboard-stage-copy small{font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:var(--adm-muted)}.gh-dashboard-stage-copy b{font-size:10px;color:var(--adm-text);overflow-wrap:anywhere}.gh-dashboard-stage-copy em{font-style:normal;font-size:8px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-dashboard-progress{height:8px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.gh-dashboard-progress i{display:block;height:100%;border-radius:inherit;background:var(--adm-accent);transition:width .2s}.gh-dashboard-destination{display:grid;gap:3px;padding:10px;border-radius:10px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-dashboard-destination span{font-size:7px;font-weight:900;text-transform:uppercase;color:var(--adm-muted)}.gh-dashboard-destination b{font-size:9px;color:var(--adm-text);overflow-wrap:anywhere}.gh-finish-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-finish-actions{display:flex;gap:8px;flex-wrap:wrap}.gh-finish-actions a{display:inline-flex;align-items:center;min-height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-size:9px;font-weight:850;color:var(--adm-accent);text-decoration:none}
         .gh-files-explorer{display:grid;gap:10px}.gh-files-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px;border:1px solid var(--adm-border);border-radius:14px;background:linear-gradient(145deg,var(--adm-surface2),var(--adm-surface));overflow:hidden}.gh-files-hero-copy>span{font-size:7px;font-weight:900;letter-spacing:.13em;color:var(--adm-accent)}.gh-files-hero-copy h3{margin:3px 0 0;font-size:15px;color:var(--adm-text)}.gh-files-hero-copy p{margin:4px 0 0;font-size:9px;color:var(--adm-muted);line-height:1.45}.gh-files-hero-actions{display:flex;gap:6px;align-items:flex-start}.gh-files-stats{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.gh-files-stats>div{min-width:0;padding:8px 9px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface)}.gh-files-stats small{display:block;font-size:6.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--adm-muted)}.gh-files-stats b{display:block;margin-top:2px;font-size:11px;color:var(--adm-text)}.gh-files-stats em{display:block;margin-top:1px;font-style:normal;font-size:7px;color:var(--adm-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-files-toolbar,.gh-files-selectionbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 9px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface)}.gh-files-breadcrumb{min-width:0;display:flex;gap:3px;align-items:center;overflow:auto;scrollbar-width:none}.gh-files-breadcrumb button{flex:0 0 auto;border:0;background:transparent;color:var(--adm-accent);font-size:9px;font-weight:750;padding:5px 4px;cursor:pointer}.gh-files-selectionbar label{display:flex;align-items:center;gap:7px;font-size:9px;color:var(--adm-text);font-weight:750}.gh-files-selectionbar>div{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.gh-files-list{display:grid;gap:7px}.gh-file-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface);transition:border-color .15s,background .15s}.gh-file-card.selected{border-color:color-mix(in srgb,var(--adm-accent) 45%,var(--adm-border));background:color-mix(in srgb,var(--adm-accent) 3%,var(--adm-surface))}.gh-file-check{display:grid;place-items:center}.gh-file-main{min-width:0;border:0;background:transparent;padding:0;display:grid;grid-template-columns:34px minmax(0,1fr);gap:9px;align-items:center;text-align:left;color:var(--adm-text);cursor:pointer}.gh-file-icon{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;border:1px solid var(--adm-border);background:var(--adm-surface2);font-size:15px}.gh-file-icon.pasta{color:var(--adm-blue,var(--adm-accent))}.gh-file-copy{min-width:0;display:grid;gap:1px}.gh-file-copy b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-file-copy small{font-size:8px;color:var(--adm-muted)}.gh-file-copy em{font-size:7px;color:var(--adm-muted);font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-file-meta{display:grid;justify-items:end;gap:2px}.gh-file-meta span{font-size:7px;color:var(--adm-muted)}.gh-file-meta code{font-size:7px;color:var(--adm-text);background:var(--adm-surface2);padding:2px 4px;border-radius:5px}.gh-file-row-actions{display:flex;gap:5px}.gh-files-empty{min-height:120px;display:grid;place-items:center;align-content:center;gap:4px;text-align:center;border:1px dashed var(--adm-border);border-radius:12px;color:var(--adm-muted);font-size:9px}.gh-files-empty b{font-size:11px;color:var(--adm-text)}.gh-files-empty.error{color:var(--adm-red)}.gh-file-detail{display:grid;gap:10px}.gh-file-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-file-pathbox,.gh-file-history{display:grid;gap:4px;padding:10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2)}.gh-file-pathbox span,.gh-file-history>small{font-size:7px;font-weight:900;letter-spacing:.07em;color:var(--adm-muted)}.gh-file-pathbox code{font-size:9px;overflow-wrap:anywhere;color:var(--adm-text)}.gh-file-history b{font-size:10px;color:var(--adm-text)}.gh-file-history span{font-size:8px;color:var(--adm-muted)}.gh-file-history code{width:max-content;font-size:8px;color:var(--adm-accent)}.gh-file-detail-actions{display:flex;gap:7px;flex-wrap:wrap}.gh-file-preview{display:grid;border:1px solid var(--adm-border);border-radius:10px;overflow:hidden;background:var(--adm-surface)}.gh-file-preview>div{display:flex;justify-content:space-between;gap:8px;padding:7px 9px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-file-preview b{font-size:8px;color:var(--adm-text)}.gh-file-preview span{font-size:7px;color:var(--adm-muted)}.gh-file-preview pre{margin:0;max-height:260px;overflow:auto;padding:10px;font-size:8px;line-height:1.5;color:var(--adm-text);white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.gh-modal-link{display:inline-flex;align-items:center;min-height:32px;padding:0 9px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface2);color:var(--adm-accent);font-size:9px;font-weight:800;text-decoration:none}.gh-danger-summary{display:grid;gap:5px;padding:11px;border:1px solid color-mix(in srgb,var(--adm-red) 30%,var(--adm-border));border-radius:10px;background:color-mix(in srgb,var(--adm-red) 6%,var(--adm-surface))}.gh-danger-summary b{font-size:11px;color:var(--adm-red)}.gh-danger-summary span{font-size:8px;line-height:1.45;color:var(--adm-muted)}
-        .gh-version-journey{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);gap:7px;align-items:center;padding:10px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2)}.gh-version-journey>div{min-width:0;display:grid;gap:2px}.gh-version-journey>div:last-child{text-align:right}.gh-version-journey small{font-size:6.5px;font-weight:900;letter-spacing:.07em;color:var(--adm-muted)}.gh-version-journey b{font-size:15px;color:var(--adm-text)}.gh-version-journey span{font-size:8px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-version-journey>i{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--adm-border);background:var(--adm-surface);font-style:normal;font-weight:900;color:var(--adm-accent)}.gh-version-journey.warn{border-color:color-mix(in srgb,var(--adm-amber) 35%,var(--adm-border))}.gh-version-journey.error{border-color:color-mix(in srgb,var(--adm-red) 35%,var(--adm-border))}.gh-preflight-banner{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px;border-radius:11px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-preflight-banner>span{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--adm-surface);font-weight:900}.gh-preflight-banner.ok{border-color:color-mix(in srgb,var(--adm-success) 35%,var(--adm-border))}.gh-preflight-banner.ok>span{color:var(--adm-success)}.gh-preflight-banner.error>span{color:var(--adm-red)}.gh-preflight-banner>div{display:grid;gap:2px}.gh-preflight-banner b{font-size:10px;color:var(--adm-text)}.gh-preflight-banner small{font-size:8px;line-height:1.35;color:var(--adm-muted)}.gh-preflight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-preflight-check{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;align-items:center;padding:8px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface)}.gh-preflight-check>span{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:var(--adm-surface2);font-weight:900}.gh-preflight-check.ok>span{color:var(--adm-success)}.gh-preflight-check.warn>span{color:var(--adm-amber)}.gh-preflight-check.error>span{color:var(--adm-red)}.gh-preflight-check div{min-width:0;display:grid;gap:1px}.gh-preflight-check b{font-size:8.5px;color:var(--adm-text)}.gh-preflight-check small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-preflight-warnings{display:grid;gap:3px;padding:9px;border-radius:9px;background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-amber) 25%,var(--adm-border));font-size:8px;color:var(--adm-muted)}.gh-preflight-warnings b{color:var(--adm-amber);font-size:9px}.gh-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.gh-live-head h3{margin:0}.gh-live-head p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-live-progress{display:grid;gap:5px}.gh-live-progress>div{display:flex;justify-content:space-between;font-size:8px;color:var(--adm-muted)}.gh-live-progress b{color:var(--adm-text)}.gh-live-progress>i{height:7px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.gh-live-progress>i>em{display:block;height:100%;background:var(--adm-accent);border-radius:inherit;transition:width .25s}.gh-live-log{display:grid;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface);overflow:hidden;max-height:260px;overflow-y:auto}.gh-live-log-title{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;padding:8px 9px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-live-log-title b{font-size:9px;color:var(--adm-text)}.gh-live-log-title span{font-size:7px;color:var(--adm-muted)}.gh-log-line{display:grid;grid-template-columns:54px 18px minmax(0,1fr) auto;gap:6px;align-items:start;padding:7px 9px;border-bottom:1px solid var(--adm-border)}.gh-log-line:last-child{border-bottom:0}.gh-log-line time{font-size:7px;color:var(--adm-muted)}.gh-log-line>span{font-size:9px;font-weight:900;color:var(--adm-accent)}.gh-log-line.done>span{color:var(--adm-success)}.gh-log-line.error>span{color:var(--adm-red)}.gh-log-line.off>span{color:var(--adm-muted)}.gh-log-line>div{min-width:0;display:grid;gap:1px}.gh-log-line b{font-size:8.5px;color:var(--adm-text)}.gh-log-line small{font-size:7.5px;line-height:1.4;color:var(--adm-muted);overflow-wrap:anywhere}.gh-log-line>em{font-size:7px;font-style:normal;color:var(--adm-muted)}.gh-postcheck{display:grid;gap:5px}.gh-postcheck>b{font-size:9px;color:var(--adm-text)}.gh-postcheck>span{display:grid;grid-template-columns:20px 120px minmax(0,1fr);gap:6px;align-items:center;padding:7px 8px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface)}.gh-postcheck i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;background:var(--adm-surface2);font-style:normal;font-weight:900}.gh-postcheck .ok i{color:var(--adm-success)}.gh-postcheck .warn i{color:var(--adm-amber)}.gh-postcheck .error i{color:var(--adm-red)}.gh-postcheck em{font-size:8px;font-style:normal;font-weight:800;color:var(--adm-text)}.gh-postcheck small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}
+        .gh-version-journey{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);gap:7px;align-items:center;padding:10px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2)}.gh-version-journey>div{min-width:0;display:grid;gap:2px}.gh-version-journey>div:last-child{text-align:right}.gh-version-journey small{font-size:6.5px;font-weight:900;letter-spacing:.07em;color:var(--adm-muted)}.gh-version-journey b{font-size:15px;color:var(--adm-text)}.gh-version-journey span{font-size:8px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-version-journey>i{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--adm-border);background:var(--adm-surface);font-style:normal;font-weight:900;color:var(--adm-accent)}.gh-version-journey.warn{border-color:color-mix(in srgb,var(--adm-amber) 35%,var(--adm-border))}.gh-version-journey.error{border-color:color-mix(in srgb,var(--adm-red) 35%,var(--adm-border))}.gh-preflight-banner{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px;border-radius:11px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-preflight-banner>span{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--adm-surface);font-weight:900}.gh-preflight-banner.ok{border-color:color-mix(in srgb,var(--adm-success) 35%,var(--adm-border))}.gh-preflight-banner.ok>span{color:var(--adm-success)}.gh-preflight-banner.error>span{color:var(--adm-red)}.gh-preflight-banner>div{display:grid;gap:2px}.gh-preflight-banner b{font-size:10px;color:var(--adm-text)}.gh-preflight-banner small{font-size:8px;line-height:1.35;color:var(--adm-muted)}.gh-preflight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-preflight-check{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;align-items:center;padding:8px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface)}.gh-preflight-check>span{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:var(--adm-surface2);font-weight:900}.gh-preflight-check.ok>span{color:var(--adm-success)}.gh-preflight-check.warn>span{color:var(--adm-amber)}.gh-preflight-check.error>span{color:var(--adm-red)}.gh-preflight-check div{min-width:0;display:grid;gap:1px}.gh-preflight-check b{font-size:8.5px;color:var(--adm-text)}.gh-preflight-check small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-preflight-warnings{display:grid;gap:3px;padding:9px;border-radius:9px;background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-amber) 25%,var(--adm-border));font-size:8px;color:var(--adm-muted)}.gh-preflight-warnings b{color:var(--adm-amber);font-size:9px}.gh-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.gh-live-head h3{margin:0}.gh-live-head p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-live-progress{display:grid;gap:5px}.gh-live-progress>div{display:flex;justify-content:space-between;font-size:8px;color:var(--adm-muted)}.gh-live-progress b{color:var(--adm-text)}.gh-live-progress>i{height:7px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.gh-live-progress>i>em{display:block;height:100%;background:var(--adm-accent);border-radius:inherit;transition:width .25s}.gh-publish-monitor{display:grid;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--adm-accent) 34%,var(--adm-border));border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));box-shadow:0 8px 24px rgba(15,23,42,.045)}.gh-publish-monitor.error{border-color:color-mix(in srgb,var(--adm-red) 42%,var(--adm-border))}.gh-publish-monitor-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.gh-publish-monitor-top>div{min-width:0;display:grid;gap:3px}.gh-publish-monitor-top small{font-size:7px;font-weight:900;letter-spacing:.1em;color:var(--adm-muted)}.gh-publish-monitor-top b{font-size:12px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-top strong{font-size:28px;line-height:1;color:var(--adm-accent);font-variant-numeric:tabular-nums}.gh-publish-monitor.error .gh-publish-monitor-top strong{color:var(--adm-red)}.gh-publish-monitor-track{height:9px;border-radius:999px;overflow:hidden;background:var(--adm-bg);border:1px solid var(--adm-border)}.gh-publish-monitor-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--adm-accent),color-mix(in srgb,var(--adm-accent) 72%,white));transition:width .25s ease}.gh-publish-monitor.error .gh-publish-monitor-track i{background:var(--adm-red)}.gh-publish-monitor-current{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-publish-op{max-width:110px;padding:4px 6px;border-radius:7px;background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));color:var(--adm-accent);font-size:7px;font-weight:900;font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-current code{min-width:0;font-size:9px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-current em{font-size:7px;font-style:normal;color:var(--adm-muted);white-space:nowrap}.gh-publish-monitor-stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.gh-publish-monitor-stages span{min-width:0;padding:5px 4px;border-radius:7px;border:1px solid var(--adm-border);background:var(--adm-bg);text-align:center;font-size:7px;font-weight:850;color:var(--adm-muted)}.gh-publish-monitor-stages span.active{border-color:color-mix(in srgb,var(--adm-accent) 45%,var(--adm-border));color:var(--adm-accent)}.gh-publish-monitor-stages span.done{border-color:color-mix(in srgb,var(--adm-success) 35%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 5%,var(--adm-bg))}.gh-live-log{display:grid;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface);overflow:hidden;max-height:260px;overflow-y:auto}.gh-live-log-title{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;padding:8px 9px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-live-log-title b{font-size:9px;color:var(--adm-text)}.gh-live-log-title span{font-size:7px;color:var(--adm-muted)}.gh-log-line{display:grid;grid-template-columns:54px 18px minmax(0,1fr) auto;gap:6px;align-items:start;padding:7px 9px;border-bottom:1px solid var(--adm-border)}.gh-log-line:last-child{border-bottom:0}.gh-log-line time{font-size:7px;color:var(--adm-muted)}.gh-log-line>span{font-size:9px;font-weight:900;color:var(--adm-accent)}.gh-log-line.done>span{color:var(--adm-success)}.gh-log-line.error>span{color:var(--adm-red)}.gh-log-line.off>span{color:var(--adm-muted)}.gh-log-line>div{min-width:0;display:grid;gap:1px}.gh-log-line b{font-size:8.5px;color:var(--adm-text)}.gh-log-line small{font-size:7.5px;line-height:1.4;color:var(--adm-muted);overflow-wrap:anywhere}.gh-log-line>em{font-size:7px;font-style:normal;color:var(--adm-muted)}.gh-postcheck{display:grid;gap:5px}.gh-postcheck>b{font-size:9px;color:var(--adm-text)}.gh-postcheck>span{display:grid;grid-template-columns:20px 120px minmax(0,1fr);gap:6px;align-items:center;padding:7px 8px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface)}.gh-postcheck i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;background:var(--adm-surface2);font-style:normal;font-weight:900}.gh-postcheck .ok i{color:var(--adm-success)}.gh-postcheck .warn i{color:var(--adm-amber)}.gh-postcheck .error i{color:var(--adm-red)}.gh-postcheck em{font-size:8px;font-style:normal;font-weight:800;color:var(--adm-text)}.gh-postcheck small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}
+        .gh-review-compact,.gh-publish-minimal,.gh-result-minimal{min-height:0!important;display:grid;gap:10px;padding:2px 0}.gh-preflight-summary{grid-template-columns:30px minmax(0,1fr)!important;padding:10px 11px!important}.gh-preflight-summary small{font-size:9px!important}.gh-review-summary-line,.gh-result-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.gh-review-summary-line>span,.gh-result-summary>span{min-width:0;padding:8px 9px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2)}.gh-review-summary-line small,.gh-result-summary small{display:block;font-size:6.5px;letter-spacing:.08em;font-weight:900;color:var(--adm-muted)}.gh-review-summary-line b,.gh-result-summary b{display:block;margin-top:2px;font-size:9.5px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-compact-warning{padding:7px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--adm-amber) 30%,var(--adm-border));background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));font-size:8.5px;color:var(--adm-amber)}.gh-disclosure-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:9px;padding:9px 10px;font-size:9.5px;font-weight:850;cursor:pointer}.gh-disclosure-button b{font-size:12px;color:var(--adm-muted)}.gh-disclosure-panel{display:grid;gap:8px;padding:9px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2)}.gh-review-detail-actions,.gh-events-actions{display:flex;justify-content:flex-end}.gh-publish-minimal .gh-publish-monitor{padding:12px;gap:9px}.gh-publish-minimal .gh-publish-monitor-current{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px 9px}.gh-publish-minimal .gh-publish-monitor-current code{font-size:9px}.gh-publish-minimal .gh-publish-monitor-current em{font-size:7.5px}.gh-publish-error-help{display:grid;gap:4px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--adm-red) 34%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-red) 5%,var(--adm-surface))}.gh-publish-error-help b{font-size:9px;color:var(--adm-red)}.gh-publish-error-help span{font-size:8.5px;color:var(--adm-text);line-height:1.4}.gh-publish-error-help small{font-size:8px;color:var(--adm-muted);line-height:1.4}.gh-events-panel{padding:7px}.gh-events-panel .gh-live-log{max-height:210px}.gh-events-panel .gh-log-line{grid-template-columns:48px 14px minmax(0,1fr);padding:6px 7px}.gh-events-panel .gh-log-line b{font-size:8px}.gh-events-panel .gh-log-line small{font-size:7px}.gh-result-hero{display:flex;align-items:center;gap:10px;padding:5px 1px}.gh-result-hero .gh-wizard-success-icon{margin:0!important;flex:0 0 auto;width:38px;height:38px}.gh-result-hero h3{margin:0;font-size:15px;color:var(--adm-text)}.gh-result-hero p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-result-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.gh-result-details{padding:9px}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-result-minimal .gh-postcheck{margin-top:2px}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto!important;width:100%;gap:7px!important}.gh-repo-header-actions>a,.gh-repo-header-actions>button:not(:last-child){width:100%!important;min-width:0!important}.gh-repo-header-actions>a{font-size:10px!important;padding:6px 7px!important}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-command-card{min-height:0;padding:13px 12px;grid-template-columns:40px minmax(0,1fr);align-items:center;gap:10px;border-radius:14px}.gh-command-card-icon{width:40px;height:40px;font-size:18px;border-radius:12px}.gh-command-card-copy b{font-size:13.5px}.gh-command-card-copy small{font-size:10.5px;line-height:1.35}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
         @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px}.gh-command-card{min-width:0;min-height:118px;padding:10px 5px 9px;border-radius:13px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;text-align:center}.gh-command-card-icon{width:42px;height:42px;flex:0 0 42px;font-size:18px;border-radius:50%}.gh-command-card-copy{width:100%;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px}.gh-command-card-copy b{width:100%;font-size:11px;line-height:1.15;overflow-wrap:anywhere}.gh-command-card-copy small{width:100%;font-size:8.5px;line-height:1.25;-webkit-line-clamp:2;overflow-wrap:anywhere}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-package-picker{grid-template-columns:34px minmax(0,1fr) auto;padding:9px;gap:7px}.gh-package-picker-icon{width:32px;height:32px;font-size:15px}.gh-package-picker-copy b{font-size:10.5px}.gh-package-picker-copy small{font-size:8px}.gh-package-picker-action{font-size:8px;padding:6px}.gh-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-option-grid .gh-option-card:last-child{grid-column:1/-1}.gh-final-review-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-dashboard-stage{grid-template-columns:24px minmax(0,1fr);padding:8px;gap:6px}.gh-dashboard-stage-icon{width:24px;height:24px}.gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:620px){.gh-files-hero{grid-template-columns:1fr}.gh-files-hero-actions{display:grid;grid-template-columns:1fr 1fr}.gh-files-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-files-toolbar{align-items:flex-start}.gh-files-selectionbar{align-items:flex-start;flex-direction:column}.gh-files-selectionbar>div{width:100%;justify-content:flex-start}.gh-file-card{grid-template-columns:22px minmax(0,1fr) auto}.gh-file-meta{grid-column:2/3;justify-items:start;display:flex;gap:5px}.gh-file-row-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-file-row-actions>*{width:100%;justify-content:center}.gh-preflight-banner{grid-template-columns:28px minmax(0,1fr)}.gh-preflight-banner>button{grid-column:1/-1;width:100%}.gh-preflight-grid{grid-template-columns:1fr}.gh-version-journey b{font-size:13px}.gh-log-line{grid-template-columns:44px 16px minmax(0,1fr)}.gh-log-line>em{display:none}.gh-postcheck>span{grid-template-columns:20px 90px minmax(0,1fr)}.gh-live-head{display:grid;grid-template-columns:1fr auto}.gh-file-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media(max-width:620px){.gh-files-hero{grid-template-columns:1fr}.gh-files-hero-actions{display:grid;grid-template-columns:1fr 1fr}.gh-files-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-files-toolbar{align-items:flex-start}.gh-files-selectionbar{align-items:flex-start;flex-direction:column}.gh-files-selectionbar>div{width:100%;justify-content:flex-start}.gh-file-card{grid-template-columns:22px minmax(0,1fr) auto}.gh-file-meta{grid-column:2/3;justify-items:start;display:flex;gap:5px}.gh-file-row-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-file-row-actions>*{width:100%;justify-content:center}.gh-preflight-banner{grid-template-columns:28px minmax(0,1fr)}.gh-preflight-banner>button{grid-column:1/-1;width:100%}.gh-preflight-grid{grid-template-columns:1fr}.gh-version-journey b{font-size:13px}.gh-log-line{grid-template-columns:44px 16px minmax(0,1fr)}.gh-log-line>em{display:none}.gh-postcheck>span{grid-template-columns:20px 90px minmax(0,1fr)}.gh-live-head{display:grid;grid-template-columns:1fr auto}.gh-publish-monitor{padding:12px}.gh-publish-monitor-top strong{font-size:24px}.gh-publish-monitor-current{grid-template-columns:auto minmax(0,1fr)}.gh-publish-monitor-current em{grid-column:1/-1;text-align:right}.gh-publish-op{max-width:86px}.gh-file-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media(max-width:620px){.gh-review-summary-line{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-review-summary-line>span{padding:7px 6px}.gh-review-summary-line b{font-size:8.5px}.gh-result-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-publish-minimal .gh-publish-monitor-current{grid-template-columns:minmax(0,1fr) auto}.gh-publish-minimal .gh-publish-monitor-current em{grid-column:auto;text-align:right}.gh-postcheck>span{grid-template-columns:20px 78px minmax(0,1fr)}}
       `}</style>
 
       <PerfilGitHubModal

@@ -164,7 +164,11 @@ export const githubService = {
       xhr.onload = () => {
         let data = {}
         try { data = JSON.parse(xhr.responseText || '{}') } catch { /* resposta inesperada */ }
-        if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(data.erro || `Erro ${xhr.status}`))
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const err = new Error(data.erro || `Erro ${xhr.status}`)
+          err.status = xhr.status; err.code = data.codigo || null; err.acao = data.acao || ''; err.jobId = data.jobId || null; err.data = data
+          return reject(err)
+        }
         if (typeof onProgress === 'function') onProgress({ loaded: file.size, total: file.size, percent: 100, uploaded: true })
         resolve(data)
       }
