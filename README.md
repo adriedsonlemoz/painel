@@ -209,7 +209,7 @@ Isso permite que uma nova instância Render reconheça o mesmo administrador e a
 
 ### Atualizações do próprio sistema
 
-O painel inclui **Admin → Desenvolvimento → Atualizações** para preparar pacotes versionados `alsistemas-X.Y.Z.zip`. Em Render/Vercel, o pacote validado fica no R2, o estado da release no MongoDB e o código publicado no GitHub; o painel acompanha Vercel e Render até a verificação da produção. Em VPS persistente, permanece disponível o motor local com staging, snapshot, migrations, health check e rollback.
+O painel inclui **Admin → Desenvolvimento → Atualizações** para preparar pacotes ZIP de atualização. O nome do arquivo é livre; produto, tipo e versão são identificados pelo conteúdo do pacote. Em Render/Vercel, o pacote validado fica no R2, o estado da release no MongoDB e o código publicado no GitHub; o painel acompanha Vercel e Render até a verificação da produção. Em VPS persistente, permanece disponível o motor local com staging, snapshot, migrations, health check e rollback.
 
 ### Fluxo editorial e capa jornalística (1.0.17)
 

@@ -1,3 +1,18 @@
+# 1.0.134
+
+
+## 1.0.135
+
+- Corrige a falha de compilação causada pelo ícone `CircleCheck` incompatível com a versão atual do `lucide-react`, usando `Check` no lugar.
+- Coleta logs de build da Vercel e Render quando uma atualização falha e exibe um relatório técnico dentro da Central de Atualizações.
+- Permite copiar ou baixar o relatório de falha em TXT.
+- Redesenha a área de Artefatos do GitHub e padroniza os botões Baixar arquivo e Fechar no cabeçalho do projeto.
+
+- Remove a restrição de nome `alsistemas-X.Y.Z.zip` e `alsistemas-update-X.Y.Z-to-A.B.C.zip` no módulo Atualizações.
+- Pacotes passam a ser identificados pelo conteúdo (`al-sistemas.json`, `al-update.json` e `package.json`).
+- Mantém as validações de versão, produto e compatibilidade; somente o nome do ZIP deixa de ser obrigatório.
+- A prévia da atualização também reconhece pacotes completos e incrementais sem depender do nome do arquivo.
+
 # Changelog
 
 ## 1.0.133 — Inicialização mais clara e amigável

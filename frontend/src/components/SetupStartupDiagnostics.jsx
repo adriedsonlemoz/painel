@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, CircleCheck, Cloud, Server, Wifi } from 'lucide-react'
+import { ChevronDown, ChevronUp, Check, Cloud, Server, Wifi } from 'lucide-react'
 
 function fmt(ms) {
   if (ms == null) return ''
@@ -24,7 +24,7 @@ function friendlyStatus(total, stages) {
       eyebrow: 'SERVIDOR DISPONÍVEL',
       title: 'Tudo pronto',
       text: 'A conexão com o servidor foi concluída. Estamos abrindo o painel.',
-      icon: CircleCheck,
+      icon: Check,
     }
   }
 

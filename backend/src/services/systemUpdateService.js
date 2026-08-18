@@ -213,21 +213,19 @@ async function pruneStagedStorage(keep=5){
 }
 
 
-function parsePackageFilename(name=''){
-  const full=String(name).match(/^alsistemas-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/i)
-  if(full) return {type:'full',version:full[1],baseVersion:null}
-  const delta=String(name).match(/^alsistemas-update-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)-to-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/i)
-  if(delta) return {type:'incremental',baseVersion:delta[1],version:delta[2]}
-  return null
-}
-
-async function locateIncrementalRoot(dir){
+async function findIncrementalRoot(dir){
   if(await exists(path.join(dir,'al-update.json'))) return dir
   const entries=(await fs.readdir(dir,{withFileTypes:true})).filter(e=>e.isDirectory())
   for(const e of entries){
     const candidate=path.join(dir,e.name)
     if(await exists(path.join(candidate,'al-update.json'))) return candidate
   }
+  return null
+}
+
+async function locateIncrementalRoot(dir){
+  const root=await findIncrementalRoot(dir)
+  if(root)return root
   throw new Error('Pacote incremental inválido: al-update.json não encontrado.')
 }
 
@@ -267,9 +265,6 @@ async function verifyIncrementalManifestFiles(root,manifest){
 
 export async function validateAndStage(zipPath, originalName, { persist = !IS_VERCEL } = {}) {
   await ensureUpdateDirs()
-  const packageInfo=parsePackageFilename(originalName)
-  if(!packageInfo) throw new Error('Nome inválido. Use alsistemas-X.Y.Z.zip ou alsistemas-update-X.Y.Z-to-A.B.C.zip.')
-  if(!validVersion(packageInfo.version)||(packageInfo.baseVersion&&!validVersion(packageInfo.baseVersion))) throw new Error('Versão do arquivo inválida.')
 
   const directory = await unzipper.Open.file(zipPath)
   if (!directory.files.length) throw new Error('Pacote ZIP vazio.')
@@ -291,12 +286,13 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
   try {
     await directory.extract({ path: temp })
     const current=await installedVersion()
+    const incrementalRoot=await findIncrementalRoot(temp)
 
-    if(packageInfo.type==='incremental'){
-      const packageRoot=await locateIncrementalRoot(temp)
+    if(incrementalRoot){
+      const packageRoot=incrementalRoot
       const updateManifest=await json(path.join(packageRoot,'al-update.json'))
       if(updateManifest.product!=='AL Sistemas'||updateManifest.packageType!=='incremental') throw new Error('Manifesto incremental inválido.')
-      if(updateManifest.baseVersion!==packageInfo.baseVersion||updateManifest.version!==packageInfo.version) throw new Error('Versões do nome do arquivo e do manifesto incremental não correspondem.')
+      if(!validVersion(updateManifest.baseVersion)||!validVersion(updateManifest.version)) throw new Error('O manifesto incremental contém uma versão inválida.')
       if(current.version!==updateManifest.baseVersion) throw new Error(`Este pacote incremental exige AL Sistemas ${updateManifest.baseVersion}. A versão instalada é ${current.version}. Use o pacote completo ou um incremental compatível.`)
       if(compareVersions(updateManifest.version,current.version)<=0) throw new Error(`A versão ${updateManifest.version} não é superior à instalada (${current.version}).`)
       const backendPkg=await json(path.join(packageRoot,'backend/package.json')).catch(()=>null)
@@ -335,7 +331,7 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
     const backendPkg = await json(path.join(packageRoot, 'backend/package.json'))
     const frontendPkg = await json(path.join(packageRoot, 'frontend/package.json'))
     if (backendPkg.name !== 'al-sistemas-backend' || frontendPkg.name !== 'al-sistemas') throw new Error('O pacote não foi identificado como AL Sistemas.')
-    if (!validVersion(backendPkg.version) || backendPkg.version !== frontendPkg.version || backendPkg.version !== packageInfo.version) throw new Error('Versões do nome, backend e frontend não correspondem.')
+    if (!validVersion(backendPkg.version) || !validVersion(frontendPkg.version) || backendPkg.version !== frontendPkg.version) throw new Error('As versões do backend e frontend do pacote não correspondem.')
 
     const manifestPath = path.join(packageRoot, 'al-sistemas.json')
     let manifest = null

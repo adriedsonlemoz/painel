@@ -26,14 +26,18 @@ const compareVersions=(a,b)=>{const A=versionParts(a),B=versionParts(b);for(let 
 async function inspectUpdatePackage(file){
   const zip=await JSZip.loadAsync(file)
   const entries=Object.values(zip.files||{}).filter(x=>!x.dir)
-  const manifestEntry=entries
-    .filter(x=>/(^|\/)al-sistemas\.json$/i.test(x.name))
-    .sort((a,b)=>a.name.split('/').length-b.name.split('/').length)[0]
-  if(!manifestEntry)throw new Error('O pacote não contém al-sistemas.json.')
+  const byDepth=(pattern)=>entries.filter(x=>pattern.test(x.name)).sort((a,b)=>a.name.split('/').length-b.name.split('/').length)[0]
+  const fullManifestEntry=byDepth(/(^|\/)al-sistemas\.json$/i)
+  const incrementalManifestEntry=byDepth(/(^|\/)al-update\.json$/i)
+  const manifestEntry=incrementalManifestEntry||fullManifestEntry
+  if(!manifestEntry)throw new Error('Não foi possível identificar este pacote como uma atualização do AL Sistemas.')
   const manifest=JSON.parse(await manifestEntry.async('string'))
+  const incremental=Boolean(incrementalManifestEntry)
+  if(String(manifest.product||'')!=='AL Sistemas')throw new Error('O pacote não foi identificado como AL Sistemas.')
+  if(incremental&&manifest.packageType!=='incremental')throw new Error('O manifesto incremental é inválido.')
   let changelog=Array.isArray(manifest.changelog)?manifest.changelog.map(String).filter(Boolean):releaseNotes(manifest.changelog||'')
   if(!changelog.length){
-    const changeEntry=entries.filter(x=>/(^|\/)CHANGELOG\.md$/i.test(x.name)).sort((a,b)=>a.name.split('/').length-b.name.split('/').length)[0]
+    const changeEntry=byDepth(/(^|\/)CHANGELOG\.md$/i)
     if(changeEntry)changelog=releaseNotes(await changeEntry.async('string')).slice(0,12)
   }
   const names=entries.map(x=>x.name.replace(/^\.\//,''))
@@ -42,7 +46,14 @@ async function inspectUpdatePackage(file){
   if(names.some(x=>/(^|\/)backend\//.test(x)))modules.push('Backend')
   if(names.some(x=>/(^|\/)backend\/migrations\//.test(x)))modules.push('Migrações')
   if(names.some(x=>/(^|\/)(scripts?|setup)\//i.test(x)))modules.push('Setup / Scripts')
-  return {version:String(manifest.version||''),product:String(manifest.product||'AL Sistemas'),packageFormat:manifest.packageFormat,changelog,manifestPath:manifestEntry.name,fileCount:entries.length,modules}
+  return {
+    version:String(manifest.version||''),
+    baseVersion:incremental?String(manifest.baseVersion||''):null,
+    product:String(manifest.product||'AL Sistemas'),
+    packageType:incremental?'incremental':'full',
+    packageFormat:manifest.packageFormat,
+    changelog,manifestPath:manifestEntry.name,fileCount:entries.length,modules,
+  }
 }
 
 export default function AdminAtualizacoes(){
@@ -97,8 +108,7 @@ export default function AdminAtualizacoes(){
       const info=await inspectUpdatePackage(nextFile)
       setPackagePreview({...info,loading:false,error:'',relation:compareVersions(info.version,data?.installed?.version||'0.0.0')})
     }catch(e){
-      const inferred=String(nextFile.name||'').match(/alsistemas-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.zip$/i)?.[1]||''
-      setPackagePreview({loading:false,error:e.message,version:inferred,changelog:[],relation:inferred?compareVersions(inferred,data?.installed?.version||'0.0.0'):null})
+      setPackagePreview({loading:false,error:e.message,version:'',changelog:[],relation:null})
     }
   }
   async function prepare(){
@@ -541,7 +551,7 @@ export default function AdminAtualizacoes(){
         <input ref={packageInput} className="updates-file-input-hidden" type="file" accept=".zip" onChange={e=>{void selectPackage(e.target.files?.[0]||null);e.target.value=''}}/>
         <button type="button" className="updates-wizard-drop" disabled={uploading} onClick={()=>packageInput.current?.click()}>
           <span className="updates-wizard-drop-icon">📦</span>
-          <span><b>{file?file.name:'Selecionar pacote .zip'}</b><small>{file?`${bytes(file.size)} · toque para trocar`:'Pacote completo do AL Sistemas'}</small></span>
+          <span><b>{file?file.name:'Selecionar pacote .zip'}</b><small>{file?`${bytes(file.size)} · toque para trocar`:'O nome do arquivo é livre; o conteúdo identifica a atualização'}</small></span>
         </button>
         {file&&<div className={`updates-wizard-package ${packagePreview?.relation<0?'bad':packagePreview?.relation===0?'repair':''}`}>
           <div className="updates-wizard-version"><small>VERSÃO</small><strong>{data?.installed?.version||'—'} <span>→</span> {packagePreview?.loading?'…':packagePreview?.version||'?'}</strong></div>
@@ -730,7 +740,7 @@ export default function AdminAtualizacoes(){
       .updates-wizard-review-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}.updates-wizard-review-head>div{display:grid;gap:3px}.updates-wizard-review-head h3{margin:0;font-size:18px;color:var(--adm-text)}.updates-review-badge{font-size:9px;font-weight:900;border-radius:999px;padding:6px 8px;border:1px solid var(--adm-border);color:var(--adm-success)}.updates-review-badge.repair{color:var(--adm-warning)}.updates-module-pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.updates-module-pills span{font-size:9px;padding:5px 7px;border-radius:999px;border:1px solid var(--adm-border);background:var(--adm-surface)}.updates-wizard-notes{margin-top:10px;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface2);padding:10px 12px}.updates-wizard-notes summary{font-size:11px;font-weight:800;color:var(--adm-text);cursor:pointer}.updates-wizard-notes ul{margin:9px 0 0;padding-left:18px;display:grid;gap:5px}.updates-wizard-notes li{font-size:10px;line-height:1.45;color:var(--adm-muted)}
       .updates-protection-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:13px;align-items:start;padding:14px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface2)}.updates-protection-icon{width:48px;height:48px;border-radius:14px;border:1px solid var(--adm-border);background:var(--adm-surface);display:grid;place-items:center;font-size:15px;font-weight:900;color:var(--adm-accent)}.updates-protection-card h3{margin:3px 0 5px;font-size:15px;color:var(--adm-text)}.updates-protection-card p{margin:0;font-size:10.5px;line-height:1.55;color:var(--adm-muted)}
       .updates-wizard-footer{position:sticky;bottom:-20px;z-index:4;margin:16px -20px -20px;padding:12px 20px;background:color-mix(in srgb,var(--adm-surface) 96%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--adm-border);display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.updates-wizard-footer>span{text-align:center;font-size:9px;font-weight:800;color:var(--adm-muted)}.updates-wizard-footer button{border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);padding:10px 13px;font-weight:850;cursor:pointer}.updates-primary-action{background:var(--adm-accent)!important;border-color:var(--adm-accent)!important;color:var(--adm-accent-contrast,#fff)!important}.updates-wizard-footer button:disabled{opacity:.5;cursor:not-allowed}
-      .updates-progress-stepper{padding:0 20px 4px}.updates-progress-stepper .updates-wizard-steps{margin-bottom:8px}.updates-live-log{margin:12px 0 2px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2);overflow:hidden}.updates-live-log-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:10px 11px}.updates-live-log-head>div{min-width:0;display:grid;gap:2px}.updates-live-log-head b{font-size:10.5px;color:var(--adm-text);overflow-wrap:anywhere}.updates-live-log-head>span{font-size:9px;font-weight:850;color:var(--adm-muted);white-space:nowrap}.updates-live-log-track{height:5px;background:var(--adm-surface);overflow:hidden}.updates-live-log-track i{display:block;height:100%;background:var(--adm-accent);transition:width .2s ease}.updates-live-log-current{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent)}.updates-live-log-current em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-current code{min-width:0;font-size:9px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.updates-live-log-current strong{font-size:9px;color:var(--adm-text);font-variant-numeric:tabular-nums}.updates-live-log-list{max-height:180px;overflow:auto;padding:4px 0}.updates-live-log-list>div{display:grid;grid-template-columns:42px minmax(0,1fr) 16px;gap:7px;align-items:center;padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent);font-size:9px}.updates-live-log-list em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-list .act-add{color:var(--adm-success)}.updates-live-log-list .act-del{color:var(--adm-danger)}.updates-live-log-list .act-mod{color:var(--adm-warning)}.updates-live-log-list code{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere;white-space:normal}.updates-live-log-list>div>span{color:var(--adm-success)}.updates-live-log-list .current>span{color:var(--adm-accent)}.updates-cloud-filelog-wrap{margin:0 20px}.updates-modal-overlay{background:var(--adm-overlay,rgba(15,23,42,.46))}
+      .updates-progress-stepper{padding:0 20px 4px}.updates-progress-stepper .updates-wizard-steps{margin-bottom:8px}.updates-live-log{margin:12px 0 2px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2);overflow:hidden}.updates-live-log-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:10px 11px}.updates-live-log-head>div{min-width:0;display:grid;gap:2px}.updates-live-log-head b{font-size:10.5px;color:var(--adm-text);overflow-wrap:anywhere}.updates-live-log-head>span{font-size:9px;font-weight:850;color:var(--adm-muted);white-space:nowrap}.updates-live-log-track{height:5px;background:var(--adm-surface);overflow:hidden}.updates-live-log-track i{display:block;height:100%;background:var(--adm-accent);transition:width .2s ease}.updates-live-log-current{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent)}.updates-live-log-current em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-current code{min-width:0;font-size:9px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.updates-live-log-current strong{font-size:9px;color:var(--adm-text);font-variant-numeric:tabular-nums}.updates-live-log-list{max-height:180px;overflow:auto;padding:4px 0}.updates-live-log-list>div{display:grid;grid-template-columns:42px minmax(0,1fr) 16px;gap:7px;align-items:center;padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent);font-size:9px}.updates-live-log-list em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-list .act-add{color:var(--adm-success)}.updates-live-log-list .act-del{color:var(--adm-danger)}.updates-live-log-list .act-mod{color:var(--adm-warning)}.updates-live-log-list code{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere;white-space:normal}.updates-live-log-list>div>span{color:var(--adm-success)}.updates-live-log-list .current>span{color:var(--adm-accent)}.updates-cloud-filelog-wrap{margin:0 20px}.updates-failure-report{margin:14px 0 0;border:1px solid color-mix(in srgb,var(--adm-danger) 32%,var(--adm-border));border-radius:14px;background:color-mix(in srgb,var(--adm-danger) 3%,var(--adm-surface));overflow:hidden}.updates-failure-report-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:13px 14px;border-bottom:1px solid var(--adm-border)}.updates-failure-report-head>div:first-child{display:grid;gap:3px;min-width:0}.updates-failure-report-head small{font-size:8px;font-weight:900;letter-spacing:.09em;color:var(--adm-danger)}.updates-failure-report-head b{font-size:13px;color:var(--adm-text)}.updates-failure-report-head span{font-size:10px;line-height:1.4;color:var(--adm-muted)}.updates-failure-report-head>div:last-child{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.updates-failure-report-head button{border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:8px;padding:7px 9px;font-size:9px;font-weight:800;cursor:pointer}.updates-failure-primary{display:grid;gap:4px;padding:10px 14px;background:color-mix(in srgb,var(--adm-danger) 7%,transparent);border-bottom:1px solid var(--adm-border)}.updates-failure-primary b{font-size:9px;color:var(--adm-danger);text-transform:uppercase;letter-spacing:.06em}.updates-failure-primary span{font-size:10px;line-height:1.45;color:var(--adm-text);overflow-wrap:anywhere}.updates-failure-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.updates-failure-grid section{min-width:0;border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:11px;padding:10px}.updates-failure-grid section.bad{border-color:color-mix(in srgb,var(--adm-danger) 35%,var(--adm-border))}.updates-failure-grid header{display:flex;align-items:center;gap:7px}.updates-failure-grid header>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:var(--adm-surface2);font-size:10px;color:var(--adm-muted)}.updates-failure-grid section.bad header>span{color:var(--adm-danger);background:color-mix(in srgb,var(--adm-danger) 8%,var(--adm-surface))}.updates-failure-grid header>div{display:grid;gap:1px}.updates-failure-grid header b{font-size:10px;color:var(--adm-text)}.updates-failure-grid header small{font-size:8px;color:var(--adm-muted)}.updates-failure-grid p{margin:8px 0 0;font-size:10px;line-height:1.45;color:var(--adm-text);overflow-wrap:anywhere}.updates-failure-grid pre{margin:8px 0 0;max-height:190px;overflow:auto;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:8.5px;line-height:1.45;color:var(--adm-muted)}.updates-failure-empty{margin-top:8px;font-size:9px;line-height:1.45;color:var(--adm-muted)}@media(max-width:700px){.updates-failure-report-head{display:grid}.updates-failure-report-head>div:last-child{justify-content:flex-start}.updates-failure-grid{grid-template-columns:1fr}}.updates-modal-overlay{background:var(--adm-overlay,rgba(15,23,42,.46))}
       @media(max-width:760px){.updates-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-status-pill{display:none}}
       .updates-cloud-wizard{max-width:560px;margin:0 auto;padding:0 20px 10px}.updates-cloud-wizard-dots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.updates-cloud-wizard-dots>span{min-width:0;display:grid;justify-items:center;gap:4px;color:var(--adm-muted)}.updates-cloud-wizard-dots i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-style:normal;font-size:9px;font-weight:900}.updates-cloud-wizard-dots small{font-size:7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.updates-cloud-wizard-dots .active i{border-color:var(--adm-accent);color:var(--adm-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--adm-accent) 12%,transparent)}.updates-cloud-wizard-dots .ok i{border-color:color-mix(in srgb,var(--adm-success) 38%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 7%,var(--adm-surface2))}.updates-cloud-wizard-dots .bad i{border-color:color-mix(in srgb,var(--adm-danger) 45%,var(--adm-border));color:var(--adm-danger)}.updates-cloud-current{display:grid;gap:10px;align-content:start}.updates-cloud-current .updates-cloud-stage{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:center}.updates-cloud-current-caption{text-align:center;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-cloud-finish{min-height:250px;display:grid;justify-items:center;align-content:center;gap:8px;text-align:center;padding:20px}.updates-cloud-finish-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--adm-success) 9%,var(--adm-surface2));color:var(--adm-success);font-size:28px;font-weight:900}.updates-cloud-finish h3{margin:0;color:var(--adm-text);font-size:18px}.updates-cloud-finish p{margin:0;max-width:390px;font-size:11px;line-height:1.5;color:var(--adm-muted)}.updates-cloud-finish-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:5px}.updates-cloud-finish-list span{font-size:8px;font-weight:850;padding:5px 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--adm-success) 30%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 6%,var(--adm-surface2))}.updates-progress-overlay{align-items:center!important;justify-content:center!important;padding:14px!important}.updates-cloud-progress-modal{max-height:88dvh!important}
       @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:13px 12px;gap:10px}.updates-command-icon{width:38px;height:38px;font-size:18px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:12px;align-items:center;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px;border-bottom:1px solid var(--adm-border);padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-finished-modal{width:calc(100% - 28px)!important;border-radius:18px!important;padding:20px 16px!important;margin-bottom:14px}.updates-finished-modal h2{font-size:19px;margin-bottom:14px}.updates-finished-version strong{font-size:15px}.updates-finished-changes li,.updates-finished-changes p{font-size:10.5px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}.updates-recovery-actions{padding:0 10px 8px;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.updates-recovery-actions button{min-height:38px;padding:7px 6px;font-size:9px}.updates-wizard-mini-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-wizard-footer{bottom:-16px;margin:14px -16px -16px;padding:11px 16px}.updates-wizard-footer{grid-template-columns:auto minmax(0,1fr) auto}.updates-wizard-step span{font-size:7px}.updates-live-log-list{max-height:150px}}
@@ -970,6 +980,65 @@ function CloudStage({number,name,subtitle,state,meta,children}){
   </div>
 }
 
+function CloudFailureReport({job}){
+  const rel=job?.cloudRelease||{}
+  const publish=rel.publishJob||{}
+  const githubLines=[...(Array.isArray(publish.timeline)?publish.timeline.map(x=>x?.label||x?.key||'').filter(Boolean):[]),...(Array.isArray(publish.fileLog)?publish.fileLog.slice(-20).map(x=>`${x?.action||'SYNC'} ${x?.path||''}`.trim()):[])]
+  const rows=[
+    {name:'GitHub',status:rel.githubStatus||publish.status||'',message:publish.error||'',diagnostics:{summary:publish.error||'',lines:githubLines}},
+    {name:'Vercel',status:rel.vercel?.status||'',message:rel.vercel?.message||'',diagnostics:rel.vercel?.diagnostics||{}},
+    {name:'Render',status:rel.render?.status||'',message:rel.render?.message||'',diagnostics:rel.render?.diagnostics||{}},
+  ]
+  const failedRows=rows.filter(row=>/error|fail|cancel/i.test(String(row.status||''))||row.diagnostics?.summary||row.diagnostics?.error)
+  const show=job?.status==='failed'||rel?.error||failedRows.length>0
+  if(!show)return null
+  const lines=[]
+  lines.push(`RELATÓRIO DE ATUALIZAÇÃO — AL Sistemas ${job?.version||rel?.version||''}`)
+  lines.push(`Gerado em: ${new Date().toLocaleString('pt-BR')}`)
+  lines.push(`Status: ${rel?.status||job?.status||'falha'}`)
+  if(rel?.repository)lines.push(`GitHub: ${rel.repository} @ ${rel.branch||'main'}`)
+  if(rel?.commitSha)lines.push(`Commit: ${rel.commitSha}`)
+  if(job?.error||rel?.error)lines.push(`Erro geral: ${job?.error||rel?.error}`)
+  for(const row of rows){
+    lines.push('',`[${row.name}] status=${row.status||'não informado'}`)
+    if(row.message)lines.push(`Resumo: ${row.message}`)
+    if(row.diagnostics?.error)lines.push(`Falha ao consultar logs: ${row.diagnostics.error}`)
+    const buildLines=Array.isArray(row.diagnostics?.lines)?row.diagnostics.lines:[]
+    if(buildLines.length){
+      lines.push('Logs relevantes:')
+      for(const line of buildLines.slice(-40))lines.push(`  ${line}`)
+    }
+  }
+  const report=lines.join('\n')
+  const copy=async()=>{
+    try{await navigator.clipboard.writeText(report);toast.success('Relatório copiado.')}catch{toast.error('Não foi possível copiar o relatório.')}
+  }
+  const download=()=>{
+    const blob=new Blob([report],{type:'text/plain;charset=utf-8'})
+    const url=URL.createObjectURL(blob),a=document.createElement('a')
+    a.href=url;a.download=`alsistemas-update-${job?.version||rel?.version||'falha'}-relatorio.txt`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)
+  }
+  return <div className="updates-failure-report">
+    <div className="updates-failure-report-head">
+      <div><small>RELATÓRIO DA FALHA</small><b>O que impediu a atualização</b><span>Os logs são buscados automaticamente nas plataformas quando um deploy termina com erro.</span></div>
+      <div><button onClick={copy}>Copiar</button><button onClick={download}>Baixar .txt</button></div>
+    </div>
+    {(job?.error||rel?.error)&&<div className="updates-failure-primary"><b>Erro principal</b><span>{job?.error||rel?.error}</span></div>}
+    <div className="updates-failure-grid">
+      {rows.map(row=>{
+        const buildLines=Array.isArray(row.diagnostics?.lines)?row.diagnostics.lines:[]
+        const summary=row.diagnostics?.summary||row.message||row.diagnostics?.error||''
+        const bad=/error|fail|cancel/i.test(String(row.status||''))
+        return <section key={row.name} className={bad?'bad':''}>
+          <header><span>{bad?'✕':'•'}</span><div><b>{row.name}</b><small>{row.status||'sem status'}</small></div></header>
+          {summary&&<p>{summary}</p>}
+          {buildLines.length>0?<pre>{buildLines.slice(-14).join('\n')}</pre>:bad?<div className="updates-failure-empty">A plataforma marcou falha, mas ainda não devolveu linhas detalhadas de build.</div>:null}
+        </section>
+      })}
+    </div>
+  </div>
+}
+
 function CloudPublishProgress({job}){
   const rel=job.cloudRelease||{}
   const hasR2=Boolean(job.releaseId||job.bucket||rel.bucket||rel.objectKey)
@@ -1032,6 +1101,7 @@ function CloudPublishProgress({job}){
       <div className="updates-cloud-current-caption">{completedCount} de 4 etapa(s) concluída(s). A próxima tela aparece automaticamente quando esta etapa terminar.</div>
     </div>}
     {job.error&&<div className="updates-cloud-error"><b>Falha da etapa:</b> {job.error}</div>}
+    <CloudFailureReport job={job}/>
   </div>
 }
 
@@ -1050,9 +1120,9 @@ function PublishProgressModal({job,onClose,onReconcile,onRetry,onRepublish,onInt
       </div>
       <div className="updates-progress-stepper"><UpdateWizardSteps managed step={job.status==='completed'?4:(job.commitSha||job.cloudRelease?.commitSha)?4:job.releaseId?3:2}/></div>
       {cloud?<><CloudPublishProgress job={job}/><div className="updates-cloud-filelog-wrap"><FileLiveLog job={job} cloud/></div></>:<UpdateProgress job={job} embedded/>}
-      {cloud&&job.status==='attention'&&job.releaseId&&<div className="updates-recovery-actions"><button onClick={()=>onReconcile?.(job.releaseId)}>Reconsultar</button><button onClick={()=>onRetry?.(job.releaseId)}>Tentar deploy novamente</button><button className="primary-blue" onClick={()=>onRepublish?.(job.releaseId)}>Publicar novamente do R2</button><button className="updates-delete-action" onClick={()=>onInterrupt?.(job.releaseId)}>Encerrar acompanhamento</button></div>}
+      {cloud&&['attention','failed'].includes(job.status)&&job.releaseId&&<div className="updates-recovery-actions"><button onClick={()=>onReconcile?.(job.releaseId)}>Reconsultar</button><button onClick={()=>onRetry?.(job.releaseId)}>Tentar deploy novamente</button><button className="primary-blue" onClick={()=>onRepublish?.(job.releaseId)}>Publicar novamente do R2</button><button className="updates-delete-action" onClick={()=>onInterrupt?.(job.releaseId)}>Encerrar acompanhamento</button></div>}
       <div className="updates-progress-footer updates-progress-footer-clean">
-        <span>{!canClose?(cloud?'Você pode acompanhar Vercel e Render nesta mesma tela; os estados são atualizados pelas APIs das plataformas.':'Mantenha esta tela aberta enquanto o commit é preparado.'):job.status==='completed'?'Atualização concluída. Use × no topo para fechar.':job.status==='failed'?'A atualização terminou com erro. Confira o card marcado acima e use × para fechar.':job.status==='attention'?'O acompanhamento foi interrompido com segurança. Escolha uma ação de recuperação acima ou feche esta janela.':'Operação finalizada.'}</span>
+        <span>{!canClose?(cloud?'Você pode acompanhar Vercel e Render nesta mesma tela; os estados são atualizados pelas APIs das plataformas.':'Mantenha esta tela aberta enquanto o commit é preparado.'):job.status==='completed'?'Atualização concluída. Use × no topo para fechar.':job.status==='failed'?'A atualização terminou com erro. Confira o relatório e use as ações de recuperação acima para tentar novamente.':job.status==='attention'?'O acompanhamento foi interrompido com segurança. Escolha uma ação de recuperação acima ou feche esta janela.':'Operação finalizada.'}</span>
       </div>
     </div>
   </div>

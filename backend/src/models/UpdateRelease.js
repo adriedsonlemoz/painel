@@ -5,6 +5,7 @@ const platformStateSchema = new mongoose.Schema({
   status: { type:String, default:'pending' },
   url: { type:String, default:'' },
   message: { type:String, default:'' },
+  diagnostics: { type:mongoose.Schema.Types.Mixed, default:{} },
   checkedAt: { type:Date, default:null },
 }, { _id:false })
 

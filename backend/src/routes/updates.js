@@ -15,6 +15,7 @@ import UpdateRelease from '../models/UpdateRelease.js'
 import { storeUpdatePackage, downloadUpdatePackage, deleteUpdatePackage, testR2UpdateStorage } from '../services/cloudUpdateStorage.js'
 import { runUpdateSelfTest } from '../update/updateSelfTest.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
+import { redactAiText } from '../services/aiRedactor.js'
 import { installedVersion, validateAndStage, listStaged, readHistory, createJob, createRollbackJob, listSnapshots, deleteStaged, deleteSnapshot, getUpdatePreflight, getUpdaterDiagnostics, reserveUpdateLock, releaseUpdateLock, readUpdateLock, JOB_DIR, STATE_DIR, ROOT_DIR, IS_VERCEL, IS_RENDER, IS_MANAGED_PLATFORM, IS_TERMUX } from '../services/systemUpdateService.js'
 
 const router=Router(); router.use(autenticar); router.use(verificarPermissao('atualizacoes.gerenciar'))
@@ -242,6 +243,62 @@ async function verifyGithubReleaseCommit({token,repository,branch,commitSha,vers
   if(!branchContainsCommit)throw new Error(`O commit ${String(commitSha).slice(0,12)} existe no GitHub, porém a branch ${branch||'main'} não aponta para ele nem o contém em sua história (estado: ${branchRelation}).`)
   return {ok:true,repository:normalized,branch:branch||'main',commitSha:commit.sha,branchHeadSha:headSha,branchContainsCommit,branchRelation,version:String(manifest.version||''),verifiedAt:new Date()}
 }
+function normalizeBuildLogText(value=''){
+  return redactAiText(String(value||''))
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g,'')
+    .replace(/\r/g,'')
+    .trim()
+    .slice(0,1800)
+}
+function buildDiagnosticSummary(lines=[]){
+  const clean=(Array.isArray(lines)?lines:[]).map(normalizeBuildLogText).filter(Boolean)
+  const priority=[
+    /not exported by/i,/error during build/i,/build failed/i,/failed to compile/i,/cannot find module/i,
+    /module not found/i,/syntaxerror/i,/typeerror/i,/referenceerror/i,/npm err/i,/error:/i,/failed/i,
+  ]
+  for(const rule of priority){
+    const line=clean.find(x=>rule.test(x))
+    if(line)return line.slice(0,900)
+  }
+  return clean.slice(-1)[0]?.slice(0,900)||''
+}
+async function fetchVercelBuildDiagnostics(token,teamId,deploymentId){
+  if(!token||!deploymentId)return {source:'vercel',lines:[],summary:'',fetchedAt:new Date()}
+  try{
+    const r=await fetch(vercelApiUrl(`/v3/deployments/${encodeURIComponent(deploymentId)}/events?direction=backward&limit=100`,teamId),{
+      headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(15000),
+    })
+    const raw=await r.text()
+    if(!r.ok)throw new Error(`Vercel logs respondeu ${r.status}`)
+    let rows=[]
+    try{const parsed=JSON.parse(raw);rows=Array.isArray(parsed)?parsed:(parsed?.events||[])}catch{
+      rows=raw.split(/\n+/).map(line=>{try{return JSON.parse(line)}catch{return {payload:{text:line}}}})
+    }
+    const lines=rows.map(event=>normalizeBuildLogText(event?.payload?.text||event?.text||event?.message||event?.payload?.info?.name||event?.payload?.info?.step||'')).filter(Boolean).slice(-100)
+    return {source:'vercel',lines,summary:buildDiagnosticSummary(lines),fetchedAt:new Date()}
+  }catch(e){return {source:'vercel',lines:[],summary:'',error:normalizeBuildLogText(e.message),fetchedAt:new Date()}}
+}
+async function fetchRenderBuildDiagnostics(apiKey,serviceId){
+  if(!apiKey||!serviceId)return {source:'render',lines:[],summary:'',fetchedAt:new Date()}
+  try{
+    const serviceResp=await fetch(`https://api.render.com/v1/services/${encodeURIComponent(serviceId)}`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(12000)})
+    const serviceBody=await serviceResp.json().catch(()=>({}))
+    if(!serviceResp.ok)throw new Error(serviceBody?.message||serviceBody?.error||`Render service respondeu ${serviceResp.status}`)
+    const service=serviceBody?.service||serviceBody||{}
+    const ownerId=service.ownerId||service.owner_id||service.owner?.id||''
+    if(!ownerId)throw new Error('Workspace da Render não identificado para consultar os logs.')
+    const params=new URLSearchParams({ownerId,direction:'backward',limit:'100'})
+    params.append('resource',serviceId)
+    params.append('type','build')
+    const r=await fetch(`https://api.render.com/v1/logs?${params.toString()}`,{headers:{Authorization:`Bearer ${apiKey}`,Accept:'application/json'},signal:AbortSignal.timeout(15000)})
+    const body=await r.json().catch(()=>({}))
+    if(!r.ok)throw new Error(body?.message||body?.error||`Render logs respondeu ${r.status}`)
+    const rows=body?.logs||body?.items||[]
+    const lines=(Array.isArray(rows)?rows:[]).map(row=>normalizeBuildLogText(row?.message||row?.text||row?.body||'')).filter(Boolean).slice(-100)
+    return {source:'render',lines,summary:buildDiagnosticSummary(lines),fetchedAt:new Date()}
+  }catch(e){return {source:'render',lines:[],summary:'',error:normalizeBuildLogText(e.message),fetchedAt:new Date()}}
+}
+
 async function platformDeployState(release){
   const [vercelCred,renderCred]=await Promise.all([
     getCredential('vercel','VERCEL_TOKEN'),
@@ -261,7 +318,12 @@ async function platformDeployState(release){
       const found=(body.deployments||[]).find(d=>String(d.meta?.githubCommitSha||'').toLowerCase()===commitSha.toLowerCase() && String(d.target||'').toLowerCase()==='production')
         ||(body.deployments||[]).find(d=>String(d.meta?.githubCommitSha||'').toLowerCase()===commitSha.toLowerCase())
       if(found){
-        out.vercel={id:found.uid||'',status:String(found.state||'').toUpperCase()||'UNKNOWN',url:vercelCred.metadata?.productionOrigin||(found.url?`https://${found.url}`:''),message:found.meta?.githubCommitMessage||'',checkedAt:new Date()}
+        const state=String(found.state||'').toUpperCase()||'UNKNOWN'
+        let diagnostics=release?.vercel?.diagnostics||{}
+        if(state==='ERROR'&&!(Array.isArray(diagnostics?.lines)&&diagnostics.lines.length)){
+          diagnostics=await fetchVercelBuildDiagnostics(vercelCred.value,teamId,found.uid||'')
+        }
+        out.vercel={id:found.uid||'',status:state,url:vercelCred.metadata?.productionOrigin||(found.url?`https://${found.url}`:''),message:diagnostics?.summary||found.errorMessage||found.readyStateReason||found.meta?.githubCommitMessage||'',diagnostics,checkedAt:new Date()}
       }
     }catch(e){out.vercel={...out.vercel,status:'error',message:e.message}}
   }else if(vercelCred.value&&!vercelCred.metadata?.primaryProjectId){out.vercel={...out.vercel,status:'not-linked',message:'Selecione o projeto Vercel principal na Central de Plataformas.'}}
@@ -273,7 +335,14 @@ async function platformDeployState(release){
       if(!r.ok)throw new Error(body?.message||body?.error||`Render respondeu ${r.status}`)
       const rows=Array.isArray(body)?body:[]
       const found=rows.map(x=>x?.deploy||x||{}).find(d=>String(d.commit?.id||'').toLowerCase()===commitSha.toLowerCase())
-      if(found){out.render={id:found.id||'',status:String(found.status||'').toLowerCase()||'unknown',url:renderCred.metadata?.backendUrl||'',message:found.commit?.message||'',checkedAt:new Date()}}
+      if(found){
+        const state=String(found.status||'').toLowerCase()||'unknown'
+        let diagnostics=release?.render?.diagnostics||{}
+        if(/fail|error|cancel/i.test(state)&&!(Array.isArray(diagnostics?.lines)&&diagnostics.lines.length)){
+          diagnostics=await fetchRenderBuildDiagnostics(renderCred.value,renderCred.metadata?.primaryServiceId||'')
+        }
+        out.render={id:found.id||'',status:state,url:renderCred.metadata?.backendUrl||'',message:diagnostics?.summary||found.commit?.message||'',diagnostics,checkedAt:new Date()}
+      }
     }catch(e){out.render={...out.render,status:'error',message:e.message}}
   }else if(renderCred.value&&!renderCred.metadata?.primaryServiceId){out.render={...out.render,status:'not-linked',message:'Selecione o serviço Render principal na Central de Plataformas.'}}
   return out
@@ -321,7 +390,11 @@ async function refreshCloudRelease(release,{force=false}={}){
   let status=ready?'completed':failed?'deploy-failed':blocked?'deploy-blocked':stalled?'deploy-stalled':'deploying'
   let error=''
   if(blocked) error=[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Vincule Vercel e Render na Central de Plataformas.'
-  else if(failed) error=[platform.vercel?.message,platform.render?.message].filter(Boolean).join(' ')||'Um dos deploys falhou.'
+  else if(failed){
+    const vcFailed=String(platform.vercel?.status||'').toUpperCase()==='ERROR'||/fail|error|cancel/i.test(String(platform.vercel?.status||''))
+    const rdFailed=/fail|error|cancel/i.test(String(platform.render?.status||''))
+    error=[vcFailed?platform.vercel?.message:'',rdFailed?platform.render?.message:''].filter(Boolean).join(' ')||'Um dos deploys falhou.'
+  }
   else if(stalled) error=vcWaiting&&rdWaiting
     ?`Vercel e Render não reconheceram o commit ${String(release.commitSha).slice(0,12)} dentro do tempo esperado. O acompanhamento foi pausado; o pacote continua preservado no R2.`
     :'O deploy excedeu o tempo esperado. O acompanhamento foi pausado para não deixar a Central travada indefinidamente.'
