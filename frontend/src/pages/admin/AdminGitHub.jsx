@@ -1690,7 +1690,23 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
     finally   { setLoadRuns(false) }
   }
 
-  async function abrirRun(run) {
+  async function abrirLogDoJob(job) {
+    if (!job?.id) return
+    setJobLogAberto(job.id)
+    setLoadLog(true)
+    setLogTexto(null)
+    try {
+      const texto = await githubService.jobLogs(job.id, owner, repo)
+      setLogTexto(texto)
+    } catch (e) {
+      setLogTexto(`Erro ao carregar log: ${e.message}`)
+    } finally {
+      setLoadLog(false)
+    }
+  }
+
+  async function abrirRun(run, options = {}) {
+    const { openFirstLog = false } = options
     setRunAberto(run); setJobs(null); setJobLogAberto(null); setLogTexto(null)
     if (!run?.id) return
     setLoadJobs(true)
@@ -1698,7 +1714,15 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
       githubService.jobs(run.id, owner, repo),
       artifactsCache === null ? githubService.artifacts(owner, repo) : Promise.resolve(null),
     ]
-    try { const d = await jobsP; setJobs(d.jobs || []) }
+    try {
+      const d = await jobsP
+      const list = d.jobs || []
+      setJobs(list)
+      if (openFirstLog && list.length > 0) {
+        const preferido = list.find(job => ['failure', 'failed'].includes(job.conclusao) || ['failure', 'failed'].includes(job.status)) || list[0]
+        await abrirLogDoJob(preferido)
+      }
+    }
     catch (e) { toastShow('Erro ao carregar jobs: ' + e.message, 'erro') }
     finally   { setLoadJobs(false) }
     if (artifactsCache === null) artsP.then(d => setArtifactsCache(d?.artifacts || [])).catch(() => setArtifactsCache([]))
@@ -1707,23 +1731,27 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   function fecharRun() { setRunAberto(null); setJobs(null); setJobLogAberto(null); setLogTexto(null) }
 
   async function verLog(job) {
-    setJobLogAberto(job.id === jobLogAberto ? null : job.id)
-    if (job.id === jobLogAberto) return
-    setLoadLog(true); setLogTexto(null)
-    try { const texto = await githubService.jobLogs(job.id, owner, repo); setLogTexto(texto) }
-    catch (e) { setLogTexto(`Erro ao carregar log: ${e.message}`) }
-    finally   { setLoadLog(false) }
+    if (job.id === jobLogAberto) {
+      setJobLogAberto(null)
+      setLogTexto(null)
+      return
+    }
+    await abrirLogDoJob(job)
   }
 
-  async function analisarRun(run, modo) {
-    const titulo = modo === 'resumo' ? 'Resumo da execução' : modo === 'correcao' ? 'Sugestão de correção por IA' : 'Análise de erro por IA'
-    setAnaliseModal({ run, modo, titulo })
+  async function abrirLogsDaRun(run) {
+    await abrirRun(run, { openFirstLog: true })
+  }
+
+  async function analisarRun(run) {
+    const titulo = 'Resumo da execução'
+    setAnaliseModal({ run, modo: 'resumo', titulo })
     setAnaliseDados(null); setAnaliseLoad(true)
     try {
-      const d = await githubService.analyzeRun(run.id, owner, repo, modo, wfSel?.nome || '', job=>setAnaliseDados({job:true,id:job.id,progress:job.progress||0,message:job.message||'Processando',status:job.status}))
+      const d = await githubService.analyzeRun(run.id, owner, repo, 'resumo', wfSel?.nome || '', job=>setAnaliseDados({job:true,id:job.id,progress:job.progress||0,message:job.message||'Processando',status:job.status}))
       setAnaliseDados(d)
     } catch (e) {
-      setAnaliseDados({ erro: e.code==='AI_JOB_CANCELLED'?'Análise cancelada.':(e.message || 'Falha ao analisar a execução.') })
+      setAnaliseDados({ erro: e.code==='AI_JOB_CANCELLED'?'Resumo cancelado.':(e.message || 'Falha ao gerar o resumo da execução.') })
     } finally { setAnaliseLoad(false); setAnaliseCancelando(false) }
   }
 
@@ -1731,7 +1759,7 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
     const id=analiseDados?.id
     if(!id||analiseCancelando)return
     setAnaliseCancelando(true)
-    try{await githubService.cancelAiJob(id);setAnaliseDados(d=>({...d,job:true,status:'cancelled',message:'Cancelando análise…'}))}
+    try{await githubService.cancelAiJob(id);setAnaliseDados(d=>({...d,job:true,status:'cancelled',message:'Cancelando resumo…'}))}
     catch(e){toastShow('Não foi possível cancelar: '+e.message,'erro');setAnaliseCancelando(false)}
   }
 
@@ -1796,18 +1824,20 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                           {run.duracaoMs > 0 && <span>⏱ {fmtDuracao(run.duracaoMs)}</span>}
                         </div>
                       </div>
-                      <div className="gh-run-actions" style={{ display: 'flex', gap: SPACE.sm, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        <DSBtn size="sm" onClick={() => analisarRun(run, 'resumo')}>Resumo</DSBtn>
-                        <DSBtn size="sm" variant="primary" onClick={() => analisarRun(run, 'diagnostico')} title="Analisar esta execução com IA">✨ IA</DSBtn>
-                        {run.conclusao === 'failure' && <DSBtn size="sm" onClick={() => analisarRun(run, 'correcao')} title="Gerar sugestão de correção">🛠 Correção</DSBtn>}
-                        <DSBtn size="sm" onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
-                          {isAberto ? 'Fechar' : 'Jobs'}
+                      <div className="gh-run-actions" style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))',
+                        gap: SPACE.sm,
+                        flexShrink: 0,
+                        width: 'min(100%, 420px)',
+                      }}>
+                        <DSBtn size="sm" variant="primary" style={{ width: '100%', justifyContent: 'center', minHeight: 40 }} onClick={() => analisarRun(run)}>Resumo</DSBtn>
+                        <DSBtn size="sm" style={{ width: '100%', justifyContent: 'center', minHeight: 40 }} onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
+                          {isAberto ? 'Fechar jobs' : 'Jobs'}
                         </DSBtn>
-                        <button type="button"
-                          onClick={() => githubService.baixarLogs(run.id, owner, repo)
-                            .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}
-                          style={{ fontSize: FONT.sm, fontWeight: 600, color: C.text, cursor: 'pointer', background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: `${SPACE.xs}px ${SPACE.md + 2}px`, whiteSpace: 'nowrap' }}
-                          title="Baixar todos os logs como ZIP">⬇ Logs</button>
+                        <DSBtn size="sm" style={{ width: '100%', justifyContent: 'center', minHeight: 40 }} onClick={() => abrirLogsDaRun(run)}>
+                          Logs
+                        </DSBtn>
                       </div>
                     </div>
 
@@ -1821,36 +1851,47 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                           return (
                             <div key={job.id}>
                               <div style={{
-                                background: C.bg, border: `1px solid ${logAberto ? jcor : C.border}`,
-                                borderRadius: RADIUS.sm, padding: `${SPACE.md}px ${SPACE.lg}px`,
-                                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: SPACE.md,
-                              }}>
-                                <div>
-                                  <div style={{ fontSize: FONT.sm, fontWeight: 700, color: C.text, display: 'flex', gap: SPACE.sm, alignItems: 'center' }}>
-                                    <RunBadge status={job.status} conclusao={job.conclusao} />
-                                    {job.nome}
+                                  background: C.bg, border: `1px solid ${logAberto ? jcor : C.border}`,
+                                  borderRadius: RADIUS.sm, padding: `${SPACE.md}px ${SPACE.lg}px`,
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap',
+                                }}>
+                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                    <div style={{ fontSize: FONT.sm, fontWeight: 700, color: C.text, display: 'flex', gap: SPACE.sm, alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <RunBadge status={job.status} conclusao={job.conclusao} />
+                                      <span style={{ wordBreak: 'break-word' }}>{job.nome}</span>
+                                    </div>
+                                    {job.fimEm && job.inicioEm && (
+                                      <div style={{ fontSize: FONT.xs, color: C.muted }}>⏱ {fmtDuracao(new Date(job.fimEm) - new Date(job.inicioEm))}</div>
+                                    )}
                                   </div>
-                                  {job.fimEm && job.inicioEm && (
-                                    <div style={{ fontSize: FONT.xs, color: C.muted }}>⏱ {fmtDuracao(new Date(job.fimEm) - new Date(job.inicioEm))}</div>
-                                  )}
+                                  <div style={{ display:'flex', gap:SPACE.sm, flexWrap:'wrap', width:'100%', justifyContent:'flex-end' }}>
+                                    <DSBtn size="sm" style={{ minHeight: 38 }} onClick={() => verLog(job)}>{logAberto ? 'Fechar log' : 'Ver log'}</DSBtn>
+                                    <DSBtn size="sm" style={{ minHeight: 38 }} onClick={async () => {
+                                      try {
+                                        if (!navigator?.clipboard?.writeText) throw new Error('Clipboard indisponível')
+                                        await navigator.clipboard.writeText(logTexto || '')
+                                        toastShow?.('Log copiado.', 'ok')
+                                      } catch {
+                                        toastShow?.('Não foi possível copiar o log.', 'erro')
+                                      }
+                                    }} disabled={!logAberto || !logTexto}>Copiar</DSBtn>
+                                  </div>
                                 </div>
-                                <DSBtn size="sm" onClick={() => verLog(job)}>{logAberto ? '✕ Fechar Log' : '📋 Ver Log'}</DSBtn>
-                              </div>
 
                               {logAberto && (
                                 <div style={{
-                                  background: '#0a0a0a', border: `1px solid ${jcor}40`,
+                                  background: C.surf2, border: `1px solid ${jcor}35`,
                                   borderRadius: `0 0 ${RADIUS.sm}px ${RADIUS.sm}px`, marginTop: -1,
-                                  padding: SPACE.lg, maxHeight: 320, overflowY: 'auto',
-                                  fontFamily: 'monospace', fontSize: FONT.xs, color: '#d4d4d4',
-                                  lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                  padding: SPACE.lg, maxHeight: 360, overflowY: 'auto',
+                                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: FONT.xs, color: C.text,
+                                  lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                                 }}>
                                   {loadLog ? <span style={{ color: C.muted }}>Carregando log...</span>
                                     : logTexto ? logTexto.split('\n').map((linha, i) => {
-                                        const lcor = /error|fail|✗/i.test(linha) ? '#f87171'
-                                          : /success|passed|✓/i.test(linha) ? '#86efac'
-                                          : /warning|warn/i.test(linha) ? '#fcd34d' : '#d4d4d4'
-                                        return <div key={i} style={{ color: lcor }}>{linha || '\u00a0'}</div>
+                                        const lcor = /error|fail|✗/i.test(linha) ? C.red
+                                          : /success|passed|✓/i.test(linha) ? C.greenSolid
+                                          : /warning|warn/i.test(linha) ? C.amber : C.text
+                                        return <div key={i} style={{ color: lcor, padding: '2px 0' }}>{linha || '\u00a0'}</div>
                                       })
                                     : <span style={{ color: C.muted }}>Log vazio.</span>}
                                 </div>
@@ -1865,7 +1906,12 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                           if (arts.length === 0) return null
                           return (
                             <div style={{ marginTop: SPACE.sm, background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px ${SPACE.lg}px` }}>
-                              <div style={{ fontSize: FONT.xs, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: .5, marginBottom: SPACE.md }}>📦 Artefatos desta execução</div>
+                              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:SPACE.sm, flexWrap:'wrap', marginBottom: SPACE.md }}>
+                                <div style={{ fontSize: FONT.xs, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: .5 }}>📦 Artefatos desta execução</div>
+                                <DSBtn size="sm" onClick={() => githubService.baixarLogs(run.id, owner, repo)
+                                  .then(() => toastShow?.('Download dos logs iniciado.', 'ok'))
+                                  .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}>Baixar ZIP de logs</DSBtn>
+                              </div>
                               <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap' }}>
                                 {arts.map(a => {
                                   const isApk = /apk/i.test(a.nome)
@@ -1904,22 +1950,52 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
       <DSModal open={!!analiseModal} onClose={() => setAnaliseModal(null)} title={analiseModal?.titulo || 'Execução'} size="lg">
         {analiseLoad ? (
           <div style={{ color: C.muted, fontSize: FONT.base, padding: `${SPACE.xl}px 0`, display:'grid', gap:10 }}>
-            <span>{analiseDados?.job ? analiseDados.message : analiseModal?.modo === 'resumo' ? 'Montando resumo da execução...' : 'Criando job persistente e preparando a análise...'}</span>
+            <span>{analiseDados?.job ? analiseDados.message : 'Montando resumo da execução...'}</span>
             {analiseDados?.job&&<div style={{height:8,borderRadius:999,background:C.surf2,overflow:'hidden'}}><div style={{height:'100%',width:`${analiseDados.progress||0}%`,background:C.accent,transition:'width .25s'}}/></div>}
             {analiseDados?.job&&<small>{analiseDados.progress||0}% · você pode fechar este popup; o resultado fica persistido no backend.</small>}
-            {analiseDados?.job&&analiseDados?.id&&<div><DSBtn size="sm" variant="danger" onClick={cancelarAnalise} disabled={analiseCancelando}>{analiseCancelando?'Cancelando…':'Cancelar análise'}</DSBtn></div>}
+            {analiseDados?.job&&analiseDados?.id&&<div><DSBtn size="sm" variant="danger" onClick={cancelarAnalise} disabled={analiseCancelando}>{analiseCancelando?'Cancelando…':'Cancelar resumo'}</DSBtn></div>}
           </div>
         ) : analiseDados?.erro ? (
           <div style={{ color: C.red, fontSize: FONT.base }}>{analiseDados.erro}</div>
         ) : analiseDados ? (
-          <AnaliseWorkflowConteudo dados={analiseDados} modo={analiseModal?.modo} />
+          <AnaliseWorkflowConteudo dados={analiseDados} modo={analiseModal?.modo} onCopy={async () => {
+            try {
+              if (!navigator?.clipboard?.writeText) throw new Error('Clipboard indisponível')
+              await navigator.clipboard.writeText(buildResumoTexto(analiseDados, analiseModal?.modo))
+              toastShow('Resumo copiado.')
+            } catch {
+              toastShow('Não foi possível copiar o resumo.', 'erro')
+            }
+          }} />
         ) : null}
       </DSModal>
     </div>
   )
 }
 
-function AnaliseWorkflowConteudo({ dados, modo }) {
+function buildResumoTexto(dados, modo = 'resumo') {
+  const r = dados?.resumo || {}
+  const a = dados?.analise || {}
+  const lines = []
+  lines.push('Resumo da execução')
+  lines.push('')
+  lines.push(`Jobs: ${r.totalJobs ?? 0}`)
+  lines.push(`Etapas OK: ${r.etapasConcluidas ?? 0}`)
+  lines.push(`Falhas: ${r.etapasFalhas ?? 0}`)
+  lines.push(`Ignoradas: ${r.etapasIgnoradas ?? 0}`)
+  if (Array.isArray(r.falhas) && r.falhas.length) {
+    lines.push('')
+    lines.push('Etapas que falharam:')
+    r.falhas.forEach(f => lines.push(`- ${f.job}${f.etapa ? ` → ${f.etapa}` : ''}`))
+  }
+  if (modo !== 'resumo') {
+    if (a.erro_principal) { lines.push(''); lines.push('Erro principal: ' + a.erro_principal) }
+    if (a.causa_provavel) { lines.push('Causa provável: ' + a.causa_provavel) }
+  }
+  return lines.join('\n')
+}
+
+function AnaliseWorkflowConteudo({ dados, modo, onCopy }) {
   const r = dados?.resumo || {}
   const a = dados?.analise || {}
   const lista = (titulo, itens) => Array.isArray(itens) && itens.filter(Boolean).length ? (
@@ -1932,6 +2008,10 @@ function AnaliseWorkflowConteudo({ dados, modo }) {
   ) : null
   return (
     <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:SPACE.sm, flexWrap:'wrap', marginBottom:SPACE.lg }}>
+        <div style={{ fontSize:FONT.sm, color:C.muted }}>Resumo pronto para copiar e compartilhar.</div>
+        <DSBtn size="sm" onClick={onCopy}>Copiar resumo</DSBtn>
+      </div>
       <div className="gh-log-summary-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:SPACE.sm }}>
         {[['Jobs',r.totalJobs],['Etapas OK',r.etapasConcluidas],['Falhas',r.etapasFalhas],['Ignoradas',r.etapasIgnoradas]].map(([label,value]) => (
           <div key={label} style={{ background:C.surf2, border:`1px solid ${C.border}`, borderRadius:RADIUS.md, padding:SPACE.md, minWidth:0 }}>
@@ -1953,7 +2033,7 @@ function AnaliseWorkflowConteudo({ dados, modo }) {
           {a._meta && <div style={{fontSize:FONT.xs,color:C.muted,marginTop:SPACE.xl}}>IA: {a._meta.provedor} · {a._meta.modelo}{a._meta.fallback ? ' · fallback automático' : ''}</div>}
         </>
       )}
-      <div style={{fontSize:FONT.xs,color:C.muted,marginTop:SPACE.xl,lineHeight:1.5}}>O ZIP de logs continua disponível. A análise por IA lê os logs no backend, seleciona trechos relevantes e não altera arquivos nem workflows automaticamente.</div>
+      <div style={{fontSize:FONT.xs,color:C.muted,marginTop:SPACE.xl,lineHeight:1.5}}>O ZIP de logs continua disponível. O resumo lê os logs no backend, destaca o que importa e não altera arquivos nem workflows automaticamente.</div>
     </div>
   )
 }

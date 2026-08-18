@@ -1,5 +1,10 @@
-# 1.0.134
+# 1.0.136
 
+- MongoDB reorganizado em Visão geral, Explorar dados, Documentos e Ferramentas.
+- Configuração do MongoDB centralizada em Integrações e APIs.
+- Logs de Vercel/Render redesenhados com diagnóstico, filtros e exportação.
+- Render consulta 24 h e amplia automaticamente para 7 dias quando necessário.
+- Redeploy/cancelamento Vercel disponíveis no painel; Render ganha retry normal e com cache limpo.
 
 ## 1.0.135
 

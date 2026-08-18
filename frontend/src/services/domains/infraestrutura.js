@@ -96,7 +96,11 @@ export const infraestruturaService = {
       method:'POST', body:'{}',
     })
   },
-  async renderLogs(svcId)       { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/logs`) },
+  async renderLogs(svcId, { scope='all', hours=24, limit=100, deploymentId='' } = {}) {
+    const p = new URLSearchParams({ scope, hours: String(hours), limit: String(limit) })
+    if (deploymentId) p.set('deploymentId', deploymentId)
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/logs?${p}`)
+  },
   async vercelConfiguracao()      { return api('/admin/infraestrutura/plataformas/vercel/configuracao') },
   async salvarVercelConfiguracao(token, teamId = '') {
     return api('/admin/infraestrutura/plataformas/vercel/configuracao', {
@@ -115,4 +119,14 @@ export const infraestruturaService = {
   async vercelDeploys(projId)    { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${projId}/deploys`) },
   async vercelVariaveis(projId)  { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env`) },
   async vercelDeployLogs(deployId){ return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/logs`) },
+  async vercelRedeploy(deployId, name = '') {
+    return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/redeploy`, {
+      method:'POST', body:JSON.stringify({name}),
+    })
+  },
+  async vercelCancelarDeploy(deployId) {
+    return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/cancelar`, {
+      method:'PATCH', body:'{}',
+    })
+  },
 }

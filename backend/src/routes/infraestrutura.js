@@ -977,6 +977,7 @@ async function renderApi(apiKey,pathName,{method='GET',body=null}={}) {
       ...(body?{'Content-Type':'application/json'}:{}),
     },
     ...(body?{body:JSON.stringify(body)}:{}),
+    signal:AbortSignal.timeout(15000),
   })
   const payload=await r.json().catch(()=>null)
   if(!r.ok) {
@@ -986,9 +987,18 @@ async function renderApi(apiKey,pathName,{method='GET',body=null}={}) {
   return payload
 }
 
-async function vercelApi(token,pathName,teamId='') {
+async function vercelApi(token,pathName,teamId='',{method='GET',body=null}={}) {
   const url=vercelUrl(pathName,teamId)
-  const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}})
+  const r=await fetch(url,{
+    method,
+    headers:{
+      Authorization:`Bearer ${token}`,
+      Accept:'application/json',
+      ...(body?{'Content-Type':'application/json'}:{}),
+    },
+    ...(body?{body:JSON.stringify(body)}:{}),
+    signal:AbortSignal.timeout(15000),
+  })
   const payload=await r.json().catch(()=>null)
   if(!r.ok) {
     const detail=payload?.error?.message||payload?.message||`HTTP ${r.status}`
@@ -1029,30 +1039,71 @@ async function smartVercelEnv(token,teamId,projectId) {
   })).filter(x=>x.key)
 }
 
-async function smartVercelLogs(token,teamId,deploymentId) {
-  const data=await vercelApi(token,`/v3/deployments/${encodeURIComponent(deploymentId)}/events?direction=backward&limit=100`,teamId)
-  return (Array.isArray(data)?data:[]).map((event,index)=>({
-    id:event?.payload?.id||`${deploymentId}-${index}`,
-    tipo:event.type||'event',
-    criado:event.created||event?.payload?.created||null,
-    texto:event?.payload?.text||event?.payload?.info?.name||event?.payload?.info?.step||'',
-    statusCode:event?.payload?.statusCode||null,
-  })).filter(x=>x.texto||x.tipo)
+function normalizarLinhaLog(row={},index=0,prefix='log') {
+  const payload=row?.payload||{}
+  const info=payload?.info||{}
+  const labels=row?.labels||payload?.labels||{}
+  const texto=[
+    row?.message,row?.text,row?.body,row?.msg,row?.log,
+    payload?.text,payload?.message,payload?.error,
+    info?.name,info?.step,labels?.message,
+  ].find(v=>typeof v==='string'&&v.trim())||''
+  const tipo=String(row?.type||payload?.type||labels?.type||'log')
+  const nivel=String(row?.level||row?.severity||payload?.level||labels?.level||'')
+  return {
+    id:row?.id||payload?.id||`${prefix}-${index}`,
+    criado:row?.timestamp||row?.createdAt||row?.created||payload?.created||payload?.timestamp||null,
+    nivel,tipo,texto,statusCode:row?.statusCode||payload?.statusCode||null,
+  }
 }
 
-async function smartRenderLogs(apiKey,ownerId,serviceId) {
-  if(!ownerId||!serviceId)return []
-  const p=new URLSearchParams({ownerId,direction:'backward',limit:'80'})
+function diagnosticarLogs(logs=[],provider='') {
+  const relevantes=logs.filter(x=>/error|erro|failed|failure|falhou|cannot|could not|not found|invalid|exception|fatal|npm err|command failed|build failed|exit code|module not found|does not provide an export/i.test(String(x?.texto||'')))
+  const principal=relevantes[0]?.texto||''
+  const aviso=logs.find(x=>/warning|warn|aviso|deprecated/i.test(String(x?.texto||'')))?.texto||''
+  return {
+    provider,
+    erroPrincipal:principal,
+    avisoPrincipal:aviso,
+    linhasRelevantes:relevantes.slice(0,12),
+    encontrouErro:Boolean(principal),
+  }
+}
+
+async function smartVercelLogs(token,teamId,deploymentId) {
+  const data=await vercelApi(token,`/v3/deployments/${encodeURIComponent(deploymentId)}/events?direction=backward&limit=200`,teamId)
+  const rows=Array.isArray(data)?data:(data?.events||data?.logs||data?.items||[])
+  const logs=rows.map((event,index)=>normalizarLinhaLog(event,index,deploymentId)).filter(x=>x.texto)
+  return {logs,diagnostico:diagnosticarLogs(logs,'vercel')}
+}
+
+async function smartRenderLogs(apiKey,ownerId,serviceId,{scope='all',hours=24,limit=100,startTime='',endTime='',allowFallback=true}={}) {
+  if(!ownerId||!serviceId)return {logs:[],diagnostico:diagnosticarLogs([],'render'),janelaHoras:hours}
+  const safeHours=Math.max(1,Math.min(24*14,Number(hours)||24))
+  const safeLimit=Math.max(1,Math.min(100,Number(limit)||100))
+  const fim=endTime?new Date(endTime):new Date()
+  const inicio=startTime?new Date(startTime):new Date(fim.getTime()-(safeHours*60*60*1000))
+  const p=new URLSearchParams({ownerId,direction:'backward',limit:String(safeLimit),startTime:inicio.toISOString(),endTime:fim.toISOString()})
   p.append('resource',serviceId)
+  if(scope==='build')p.append('type','build')
+  if(scope==='app')p.append('type','app')
+  if(scope==='request')p.append('type','request')
   const data=await renderApi(apiKey,`/v1/logs?${p.toString()}`)
-  const rows=data?.logs||data?.items||[]
-  return rows.map((row,index)=>({
-    id:row.id||`${serviceId}-${index}`,
-    criado:row.timestamp||row.createdAt||row.time||null,
-    nivel:row.level||row.severity||'',
-    tipo:row.type||'app',
-    texto:row.message||row.text||row.body||'',
-  })).filter(x=>x.texto)
+  const rows=data?.logs||data?.items||data?.results||[]
+  let logs=rows.map((row,index)=>normalizarLinhaLog(row,index,serviceId)).filter(x=>x.texto)
+  let janelaHoras=safeHours
+  let fallback=false
+  if(!logs.length && allowFallback && !startTime && safeHours<168) {
+    const inicio7d=new Date(fim.getTime()-(168*60*60*1000))
+    p.set('startTime',inicio7d.toISOString())
+    const fallbackData=await renderApi(apiKey,`/v1/logs?${p.toString()}`)
+    const fallbackRows=fallbackData?.logs||fallbackData?.items||fallbackData?.results||[]
+    logs=fallbackRows.map((row,index)=>normalizarLinhaLog(row,index,`${serviceId}-7d`)).filter(x=>x.texto)
+    janelaHoras=168
+    fallback=true
+  }
+  if(scope==='errors')logs=logs.filter(x=>/error|erro|failed|failure|falhou|fatal|exception|exit code|build failed/i.test(String(x.texto||'')))
+  return {logs,diagnostico:diagnosticarLogs(logs,'render'),janelaHoras,fallback,hasMore:Boolean(data?.hasMore)}
 }
 
 
@@ -1576,8 +1627,29 @@ router.get('/plataformas/render/servicos/:serviceId/logs', async (req,res,next)=
     const services=await smartRenderServices(cred.value)
     const service=services.find(x=>x.id===req.params.serviceId)
     if(!service)return res.status(404).json({erro:'Serviço Render não encontrado.'})
-    const logs=await smartRenderLogs(cred.value,service.ownerId,service.id)
-    res.json({logs,total:logs.length,service:{id:service.id,nome:service.nome}})
+    const deploymentId=String(req.query.deploymentId||'').trim()
+    let range={startTime:'',endTime:'',allowFallback:true}
+    let deployment=null
+    if(deploymentId) {
+      const depData=await renderApi(cred.value,`/v1/services/${encodeURIComponent(service.id)}/deploys/${encodeURIComponent(deploymentId)}`)
+      deployment=depData?.deploy||depData||null
+      const created=deployment?.createdAt?new Date(deployment.createdAt):null
+      const finished=deployment?.finishedAt?new Date(deployment.finishedAt):new Date()
+      if(created&&!Number.isNaN(created.getTime())) {
+        range={
+          startTime:new Date(created.getTime()-(5*60*1000)).toISOString(),
+          endTime:new Date(finished.getTime()+(10*60*1000)).toISOString(),
+          allowFallback:false,
+        }
+      }
+    }
+    const result=await smartRenderLogs(cred.value,service.ownerId,service.id,{
+      scope:String(req.query.scope||'all'),
+      hours:Number(req.query.hours||24),
+      limit:Number(req.query.limit||100),
+      ...range,
+    })
+    res.json({...result,total:result.logs.length,deploymentId:deploymentId||null,deploymentScoped:Boolean(range.startTime),service:{id:service.id,nome:service.nome}})
   } catch(err){next(err)}
 })
 
@@ -1595,8 +1667,39 @@ router.get('/plataformas/vercel/deploys/:deploymentId/logs', async (req,res,next
   try {
     const cred=await getCredential('vercel','VERCEL_TOKEN')
     if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
-    const logs=await smartVercelLogs(cred.value,cred.metadata?.teamId||'',req.params.deploymentId)
-    res.json({logs,total:logs.length,deploymentId:req.params.deploymentId})
+    const result=await smartVercelLogs(cred.value,cred.metadata?.teamId||'',req.params.deploymentId)
+    res.json({...result,total:result.logs.length,deploymentId:req.params.deploymentId})
+  } catch(err){next(err)}
+})
+
+router.post('/plataformas/vercel/deploys/:deploymentId/redeploy', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('vercel','VERCEL_TOKEN')
+    if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
+    const deploymentId=String(req.params.deploymentId||'').trim()
+    if(!deploymentId)return res.status(400).json({erro:'Deployment Vercel inválido.'})
+    const body={deploymentId}
+    const name=String(req.body?.name||'').trim()
+    if(name)body.name=name
+    const deploy=await vercelApi(cred.value,'/v13/deployments',cred.metadata?.teamId||'',{method:'POST',body})
+    res.status(201).json({
+      ok:true,deploy,
+      mensagem:'Redeploy iniciado na Vercel usando as configurações do deployment selecionado.',
+    })
+  } catch(err){next(err)}
+})
+
+router.patch('/plataformas/vercel/deploys/:deploymentId/cancelar', async (req,res,next)=>{
+  try {
+    const cred=await getCredential('vercel','VERCEL_TOKEN')
+    if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
+    const result=await vercelApi(
+      cred.value,
+      `/v12/deployments/${encodeURIComponent(req.params.deploymentId)}/cancel`,
+      cred.metadata?.teamId||'',
+      {method:'PATCH'},
+    )
+    res.json({ok:true,result,mensagem:'Cancelamento solicitado na Vercel.'})
   } catch(err){next(err)}
 })
 

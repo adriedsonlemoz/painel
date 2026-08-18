@@ -19,6 +19,33 @@ function aplicarVars(vars, temaId) {
   document.documentElement.setAttribute('data-adm-tema', temaId)
 }
 
+function aplicarCoresDoSistema(tema) {
+  if (typeof document === 'undefined') return
+
+  const bg = tema?.vars?.['--adm-topnav-bg'] || tema?.vars?.['--adm-surface'] || tema?.vars?.['--adm-bg'] || '#ffffff'
+  const temaEhEscuro = String(tema?.id || '').includes('dark')
+
+  document.documentElement.style.backgroundColor = bg
+  document.body.style.backgroundColor = bg
+  document.documentElement.style.colorScheme = temaEhEscuro ? 'dark' : 'light'
+
+  let metaTheme = document.querySelector('meta[name="theme-color"]')
+  if (!metaTheme) {
+    metaTheme = document.createElement('meta')
+    metaTheme.setAttribute('name', 'theme-color')
+    document.head.appendChild(metaTheme)
+  }
+  metaTheme.setAttribute('content', bg)
+
+  let metaStatus = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+  if (!metaStatus) {
+    metaStatus = document.createElement('meta')
+    metaStatus.setAttribute('name', 'apple-mobile-web-app-status-bar-style')
+    document.head.appendChild(metaStatus)
+  }
+  metaStatus.setAttribute('content', temaEhEscuro ? 'black-translucent' : 'default')
+}
+
 export function ThemeProvider({ children }) {
   const [temaId, setTemaId] = useState(() => {
     try { return localStorage.getItem(STORAGE_KEY) || TEMA_PADRAO_ID } catch { return TEMA_PADRAO_ID }
@@ -28,9 +55,13 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     aplicarVars(tema.vars, temaId)
+    aplicarCoresDoSistema(tema)
     // Reaplica após a montagem para páginas antigas que ainda dependem de
     // variáveis inline no .admin-shell.
-    const t = setTimeout(() => aplicarVars(tema.vars, temaId), 0)
+    const t = setTimeout(() => {
+      aplicarVars(tema.vars, temaId)
+      aplicarCoresDoSistema(tema)
+    }, 0)
     return () => clearTimeout(t)
   }, [tema, temaId])
 
