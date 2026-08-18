@@ -119,7 +119,7 @@ function PublicMaintenanceGuard({children}){
 function SetupRouteFallback() {
   const [startedAt] = useState(() => { const now = performance.now(); window.__AL_SETUP_CHUNK_STARTED__ = now; return now })
   return (
-    <div style={{ minHeight: '100vh', background: '#f8faf9', padding: '42px 16px' }}>
+    <div style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, #f1f8f4 0%, #f8faf9 42%, #f6f8f7 100%)', padding: '24px 16px' }}>
       <SetupStartupDiagnostics
         startedAt={startedAt}
         stages={[
@@ -191,15 +191,15 @@ function FirstRunGuard({ children }) {
   }, [state.retry])
 
   const probeStages = [
-    { label: 'Frontend carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android' : 'navegador'}` },
+    { label: 'Aplicativo carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android' : 'navegador'}` },
     state.error
-      ? { label: 'Backend / estado do setup', status: 'error', elapsed: probeElapsed, detail: state.error?.message || 'Falha ao consultar /api/setup/status' }
+      ? { label: 'Servidor / configuração', status: 'error', elapsed: probeElapsed, detail: state.error?.message || 'Falha ao consultar o estado do servidor' }
       : state.checked
-        ? { label: 'Backend / estado do setup', status: 'done', elapsed: probeElapsed, detail: state.needed ? 'Instalação nova detectada' : 'Instalação existente detectada' }
-        : { label: 'Backend / estado do setup', status: 'running', startedAt: probeStartedAt, detail: 'Aguardando GET /api/setup/status' },
+        ? { label: 'Servidor / configuração', status: 'done', elapsed: probeElapsed, detail: state.needed ? 'Instalação nova detectada' : 'Instalação existente detectada' }
+        : { label: 'Servidor / configuração', status: 'running', startedAt: probeStartedAt, detail: 'Aguardando resposta do servidor' },
     state.checked && state.needed
-      ? { label: 'Redirecionamento para o assistente', status: rotaSetup ? 'done' : 'running', startedAt: performance.now(), detail: rotaSetup ? '/admin/setup aberto' : 'Preparando /admin/setup' }
-      : { label: 'Redirecionamento para o assistente', status: 'pending', detail: 'Aguardando resultado da verificação' },
+      ? { label: 'Preparando próxima tela', status: rotaSetup ? 'done' : 'running', startedAt: performance.now(), detail: rotaSetup ? 'Assistente aberto' : 'Preparando assistente de configuração' }
+      : { label: 'Preparando próxima tela', status: 'pending', detail: 'Aguardando a verificação do servidor' },
   ]
 
   if (state.checked && state.needed && !rotaSetup) {
@@ -213,7 +213,7 @@ function FirstRunGuard({ children }) {
     // spinner genérico. Quando já instalado, desaparece automaticamente após a resposta.
     if (!state.checked || state.needed || state.error) {
       return (
-        <div style={{ minHeight: '100vh', background: '#f8faf9', padding: '42px 16px' }}>
+        <div style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, #f1f8f4 0%, #f8faf9 42%, #f6f8f7 100%)', padding: '24px 16px' }}>
           <SetupStartupDiagnostics startedAt={probeStartedAt} stages={probeStages} />
         </div>
       )

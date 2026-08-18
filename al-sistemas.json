@@ -1,14 +1,17 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.131",
+  "version": "1.0.133",
   "packageFormat": 2,
   "changelog": [
-    "Publicação GitHub agora usa revisão, progresso e resultado compactos; detalhes técnicos ficam recolhidos por padrão.",
-    "Acontecimentos ficam ocultos durante o fluxo normal e abrem automaticamente apenas quando há erro.",
-    "Polling tolera oscilações de rede com reconexão progressiva sem reenviar o ZIP.",
-    "Jobs de publicação passam a persistir no MongoDB e uma trava impede duas publicações simultâneas na mesma branch.",
-    "Corrige versão final desatualizada por cache e remove a revalidação duplicada do frontend antes do upload.",
-    "Erros passam a informar a próxima ação recomendada e resultados sem mudanças exibem Projeto já estava atualizado."
+    "Redesenha a inicialização do painel com uma tela limpa e amigável em vez do diagnóstico técnico exposto.",
+    "Quando o backend demora, informa que o servidor pode estar iniciando após um período sem uso e orienta a não recarregar a página.",
+    "Mantém tempos e etapas de diagnóstico disponíveis sob o botão Ver detalhes técnicos, sem poluir a experiência principal.",
+    "Adiciona barra de atividade e estados visuais para conexão, servidor disponível e falha de comunicação.",
+    "Corrige novos repositórios GitHub inicializando a branch padrão e recupera automaticamente repositórios vazios criados por versões anteriores.",
+    "Versões diferentes de frontend e backend passam a ser tratadas como aviso de versionamento independente, sem bloquear a publicação.",
+    "Novo Projeto agora explica a função de R2 e GridFS, testa a disponibilidade do armazenamento e mostra erros acionáveis antes do upload.",
+    "Diagnóstico do R2 valida também Access Key ID e Secret Access Key usados no upload S3.",
+    "Corrige o encerramento prematuro do streaming de commit ao acompanhar publicações pelo POST."
   ],
   "updatePackages": {
     "full": true,

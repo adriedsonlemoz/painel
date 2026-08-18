@@ -595,6 +595,18 @@ router.post('/upload-gridfs', autenticar, upload.single('zip'), async (req, res)
   }
 })
 
+/* ── GET /gridfs/health — diagnóstico leve para o wizard GitHub ── */
+router.get('/gridfs/health', autenticar, async (_req, res) => {
+  try {
+    const connected = mongoose.connection.readyState === 1
+    if (!connected) return res.json({ ok:false, etapa:'mongodb', erro:'MongoDB não está conectado; GridFS indisponível no momento.' })
+    gridBucket()
+    return res.json({ ok:true, etapa:'gridfs', mensagem:'MongoDB GridFS disponível para preparar o pacote.' })
+  } catch (err) {
+    return res.json({ ok:false, etapa:'gridfs', erro:err.message || 'Não foi possível inicializar o GridFS.' })
+  }
+})
+
 /* ── GET /gridfs ─────────────────────────────────────────────── */
 router.get('/gridfs', autenticar, async (req, res) => {
   try {
@@ -1018,13 +1030,17 @@ router.get('/r2/health', autenticar, async (_req, res) => {
   const accountId = process.env.CF_ACCOUNT_ID
   const bucket    = process.env.CF_R2_BUCKET
   const token     = process.env.CF_API_TOKEN
+  const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID
+  const secretAccessKey = process.env.CF_R2_SECRET_ACCESS_KEY
   const publicUrl = process.env.CF_R2_PUBLIC_URL || null
 
   // ── 1. Verificar variáveis de ambiente ───────────────────────
   const faltando = []
-  if (!accountId) faltando.push('CF_ACCOUNT_ID')
-  if (!token)     faltando.push('CF_API_TOKEN')
-  if (!bucket)    faltando.push('CF_R2_BUCKET')
+  if (!accountId)       faltando.push('CF_ACCOUNT_ID')
+  if (!token)           faltando.push('CF_API_TOKEN')
+  if (!bucket)          faltando.push('CF_R2_BUCKET')
+  if (!accessKeyId)     faltando.push('CF_R2_ACCESS_KEY_ID')
+  if (!secretAccessKey) faltando.push('CF_R2_SECRET_ACCESS_KEY')
 
   if (faltando.length > 0) {
     return res.json({
@@ -2126,7 +2142,7 @@ async function commitStreamHandler(req, res) {
     }
   }, 20_000)
 
-  req.on('close', () => { encerrado = true; clearInterval(pingInterval) })
+  res.on('close', () => { encerrado = true; clearInterval(pingInterval) })
 
   /* ════════════════════════════════════════════════════════════
      PIPELINE DE COMMIT + PUSH NARRADO
@@ -2256,7 +2272,46 @@ async function commitStreamHandler(req, res) {
       if (err.status === 404 || err.status === 409) {
         emptyBranch = true
         githubTreeMap = new Map()
-        narrar(`Branch "${targetBranch}" ainda não existe. O primeiro commit criará a branch automaticamente.`, 'info')
+
+        // A API de refs do GitHub não cria a primeira branch de um repositório
+        // totalmente vazio. Para repositórios antigos criados pelo wizard antes
+        // da 1.0.132, inicializamos a branch padrão pela Contents API e seguimos
+        // com o commit normal; o README inicial será substituído/removido conforme
+        // o conteúdo real do ZIP.
+        if (Number(repoData?.size || 0) === 0) {
+          narrar('Repositório ainda está vazio. Inicializando a branch padrão antes do primeiro commit...', 'info')
+          try {
+            const initial = await githubFetch(`/repos/${owner}/${repo}/contents/README.md`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                message: `chore: inicializa ${repo}`,
+                content: Buffer.from(`# ${repo}\n`).toString('base64'),
+              }),
+            })
+            headCommitSha = initial?.commit?.sha || null
+            if (!headCommitSha) throw new Error('GitHub não retornou o commit de inicialização.')
+
+            const defaultBranch = repoData.default_branch || 'main'
+            if (targetBranch !== defaultBranch) {
+              await githubFetch(`/repos/${owner}/${repo}/git/refs`, {
+                method: 'POST',
+                body: JSON.stringify({ ref:`refs/heads/${targetBranch}`, sha:headCommitSha }),
+              })
+            }
+            const initialCommit = await githubFetch(`/repos/${owner}/${repo}/git/commits/${headCommitSha}`)
+            baseTreeSha = initialCommit.tree?.sha || null
+            if (!baseTreeSha) throw new Error('Não foi possível obter a tree da inicialização.')
+            const treeData = await githubFetch(`/repos/${owner}/${repo}/git/trees/${baseTreeSha}?recursive=1`)
+            for (const item of treeData.tree || []) if (item.type === 'blob') githubTreeMap.set(item.path, item.sha)
+            emptyBranch = false
+            narrar(`Repositório inicializado em ${defaultBranch}; primeiro commit pode continuar.`, 'success')
+          } catch (initErr) {
+            narrar(`Não foi possível inicializar o repositório vazio: ${initErr.message}`, 'error')
+            return done('error', { msg:`Falha ao inicializar o repositório vazio: ${initErr.message}` })
+          }
+        } else {
+          narrar(`Branch "${targetBranch}" ainda não existe. O primeiro commit criará a branch automaticamente.`, 'info')
+        }
       } else {
         narrar(`Erro ao consultar a branch: ${err.message}`, 'error')
         return done('error', { msg: `GitHub inacessível: ${err.message}` })

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.133 — Inicialização mais clara e amigável
+
+- Substitui o diagnóstico técnico exposto por uma tela de conexão limpa e adequada ao uso normal do painel.
+- Após alguns segundos, informa automaticamente que o servidor pode estar acordando depois de um período sem uso.
+- Orienta a aguardar sem recarregar a página durante a inicialização do backend.
+- Mantém etapas, tempos e informações de diagnóstico disponíveis em **Ver detalhes técnicos**.
+- Adiciona barra de atividade e estados visuais para conexão e servidor disponível.
+
+## 1.0.132 — GitHub: novo projeto e versionamento independente
+
+- Corrige o primeiro commit de repositórios recém-criados e recupera automaticamente repositórios vazios deixados por versões anteriores.
+- Frontend/backend com versões diferentes deixam de bloquear o envio de projetos monorepo; a tela passa a explicar o versionamento independente.
+- A etapa de armazenamento do Novo Projeto explica R2 x GridFS e testa a disponibilidade antes de enviar o ZIP.
+- O diagnóstico R2 passa a validar também as credenciais S3 usadas no upload.
+- Corrige o evento de fechamento usado no SSE de commit para evitar interrupção prematura do acompanhamento.
+
+
 ## 1.0.131 — Publicação GitHub compacta e recuperável
 
 - Compacta a revisão para mostrar apenas destino, versão, modo e snapshot; detalhes técnicos ficam recolhidos.

@@ -650,7 +650,7 @@ router.post('/repos/criar', autenticar, async (req, res) => {
         has_projects: Boolean(projects),
         has_wiki: Boolean(wiki),
         has_discussions: Boolean(discussions),
-        auto_init: false,
+        auto_init: true,
       }),
     })
     res.json({

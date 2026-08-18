@@ -125,6 +125,9 @@ export const projetosService = {
   uploadGridFSStatus: (jobId) =>
     api(`/projetos/upload-gridfs/status/${encodeURIComponent(jobId)}`),
 
+  /** Diagnóstico do MongoDB/GridFS antes de preparar um pacote. */
+  gridfsHealth: () => api('/projetos/gridfs/health'),
+
   /** Lista todos os projetos armazenados no GridFS */
   listarGridFS: () => api('/projetos/gridfs'),
 
