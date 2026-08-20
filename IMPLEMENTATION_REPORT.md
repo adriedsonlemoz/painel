@@ -1,3 +1,17 @@
+# Relatório de implementação — 1.0.149
+
+## Auditoria completa de credenciais e correção Cloudflare/R2
+
+- Corrigido o fluxo de revelação na Central Cloudflare: o valor salvo é buscado individualmente no backend; o campo de edição continua vazio e serve apenas para substituição.
+- Cloudflare API Token e credenciais R2 S3 possuem estado, origem, Visualizar/Ocultar/Copiar e teste independente.
+- Cofre criptografado e variáveis `CF_*` são resolvidos por campo, preservando instalações legadas sem duplicar segredos no banco ao salvar metadados.
+- MongoDB/Cloudinary deixam de revelar apenas a máscara do campo legado e usam o inspetor de credencial real.
+- Setup de manutenção protegido após instalação; Vercel/Render passam a distinguir segredos recuperáveis e protegidos.
+- Revisão de logs e transporte de segredos remove token de métricas de query string e evita token de reset em log.
+- Validações estáticas cobrem backend, JSX e imports; build/lint/testes dependentes de pacotes não foram executados porque `node_modules` não está presente e a instalação expirou.
+
+---
+
 # Relatório de implementação — 1.0.145
 
 ## Variáveis Vercel + Render via API

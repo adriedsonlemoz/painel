@@ -16,3 +16,8 @@ O frontend será aberto somente quando o backend estiver disponível.
 - Não criar confirmação com overlay/Tailwind local: usar `ConfirmModal`/`DSModal`.
 - Cores estruturais devem vir de `--adm-accent`; vermelho/âmbar/verde/azul ficam reservados a estados semânticos.
 - Para três métricas compactas no celular, usar `mobileColumns={3}`; o CSS responsivo agora respeita essa configuração.
+## 1.0.149 — credenciais
+- A Central Cloudflare revela o valor efetivamente configurado somente sob demanda; o campo “novo valor” não representa mais a credencial salva.
+- Fallbacks `CF_*` locais continuam reconhecidos por campo.
+- O Setup continua livre para a instalação inicial, mas a manutenção de credenciais exige sessão administrativa após a instalação.
+

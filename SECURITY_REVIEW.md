@@ -1,5 +1,14 @@
 # Revisão geral de segurança — AL Sistemas
 
+## Endurecimento de credenciais — 1.0.149
+
+- Revelação de segredos é individual, autenticada, permissionada e enviada somente em resposta `no-store`; o status inicial permanece mascarado.
+- Cloudflare/R2 resolve cofre e ambiente por campo e não envia o conjunto de segredos ao frontend.
+- `/api/setup/env-config` exige autenticação e `configuracoes.gerenciar` após instalação concluída.
+- Máscaras de Vercel/Render/MongoDB/Cloudinary não são interpretadas como valor original.
+- `METRICS_TOKEN` não é aceito por query string e tokens de redefinição de senha não são emitidos em logs de desenvolvimento.
+- Valores revelados permanecem apenas em estado volátil da tela e são removidos ao ocultar/desmontar; não são persistidos em `localStorage`.
+
 ## Melhorias aplicadas nesta revisão
 
 - Centro de Segurança em `/admin/seguranca`.

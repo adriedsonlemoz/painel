@@ -1,7 +1,7 @@
-# Auditoria de credenciais e segredos — 1.0.148
+# Auditoria de credenciais e segredos — 1.0.149
 
 ## Escopo
-Varredura do frontend e backend por credenciais, tokens, senhas, variáveis de ambiente e integrações externas. A versão recebida no ZIP declara internamente `1.0.145`; este trabalho foi feito **diretamente sobre esse ZIP**, sem recuperar ou misturar versões anteriores. A entrega foi numerada 1.0.148 para seguir a sequência informada pelo solicitante (estado esperado 1.0.147).
+Segunda varredura completa do frontend e backend por credenciais, tokens, senhas, variáveis de ambiente e integrações externas, executada diretamente sobre a árvore entregue na 1.0.148. O foco adicional desta revisão foi seguir cada segredo do ponto de cadastro até armazenamento, status, teste e revelação, com atenção especial à Central Cloudflare/R2 e aos fluxos legados de Setup/Infraestrutura.
 
 ## Cofre do AL Sistemas (MongoDB)
 `PlataformaCredencial` armazena segredos criptografados com AES-256-GCM. `credentialStore` usa a chave derivada do material do cofre local e mantém migração de credenciais antigas. O endpoint `/admin/integracoes/status` entrega apenas máscara/metadados. A revelação completa agora é sob demanda, individual, autenticada e com `Cache-Control: no-store`; o valor não vai em URL/query string e a auditoria registra somente o nome do campo, nunca o segredo.
@@ -48,3 +48,30 @@ A Central já testa GitHub, Cloudinary, Cloudflare/R2, Render, Vercel, Gemini, O
 
 ## Diálogos nativos
 A varredura encontrou confirmações nativas em Cloudflare/R2, Atualizações, Newsletter, revisão de notícia, Projeto/Plataformas, Projetos, Mídia e Variáveis. Nesta entrega esses pontos administrativos foram migrados para confirmações personalizadas assíncronas (`ConfirmModal` ou `confirmAction`), preservando a semântica das operações destrutivas. A busca final não encontrou chamadas ativas a `alert()`, `confirm()` ou `prompt()` no frontend administrativo; restam apenas comentários/documentação sobre a migração.
+## Segunda varredura — correções 1.0.149
+
+### Cloudflare/R2
+O problema relatado no botão **Mostrar** foi reproduzido no código: o controle existente apenas alternava o tipo do campo de **novo valor**, que é limpo após salvar. Portanto, ele nunca poderia exibir a credencial já armazenada. A Central Cloudflare agora separa explicitamente:
+
+- **credencial cadastrada**: máscara + origem + estado + Visualizar/Ocultar/Copiar;
+- **novo valor/substituição**: campo de senha destinado somente a alterar a configuração.
+
+A rota de revelação recebe apenas o identificador do campo (`secret`, `r2AccessKeyId` ou `r2SecretAccessKey`) e retorna somente aquele valor. O status inicial continua mascarado. O backend resolve cada campo de forma independente entre cofre criptografado, cofre local legado e variável de ambiente.
+
+A tela Cloudflare também deixou de depender de `status.ok` para renderizar R2. Assim, um token REST inválido não esconde Access Key/Secret S3 válidos. O teste S3 permanece não destrutivo (`ListBuckets`).
+
+### MongoDB/Cloudinary e Setup
+Fluxos legados exibiam uma máscara dentro de campos de senha e o botão de olho apenas mostrava a própria máscara. Esses campos foram reinterpretados como **substituição**, enquanto a credencial efetiva cadastrada é consultada pela rota administrativa individual. A máscara nunca é enviada como segredo para teste/salvamento.
+
+Depois da instalação, `/api/setup/env-config` exige autenticação e a permissão `configuracoes.gerenciar`; antes da instalação, continua disponível para o bootstrap inicial.
+
+### Vercel/Render
+A listagem não considera mais “revelável” um valor apenas porque o provedor devolveu algum texto. A revelação ocorre por chamada individual. Variáveis Vercel do tipo `sensitive` são declaradas protegidas e não recebem botão de revelação. Se Vercel/Render devolverem apenas uma máscara, o backend responde que o original não está disponível e oferece somente substituição pela interface.
+
+### Validação estática desta revisão
+- 129 arquivos JavaScript do backend: `node --check` sem erro;
+- 157 arquivos JavaScript/JSX do frontend: parser/transpilador TypeScript sem erro de sintaxe;
+- 815 imports relativos verificados: nenhum destino ausente;
+- nenhuma chamada ativa `alert()`, `confirm()`, `prompt()`, `window.alert()`, `window.confirm()` ou `window.prompt()` encontrada no frontend;
+- tentativa de `npm install` do frontend expirou sem criar `node_modules`, portanto build Vite, ESLint e Jest completos não são marcados como executados.
+

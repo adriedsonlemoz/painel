@@ -60,6 +60,14 @@ GitHub ──push──► Render  → Backend Node.js  (api.seudominio.com)
 
 ### 3.2 Variáveis de ambiente
 
+### Credenciais no painel (1.0.149+)
+
+Cloudflare/R2, GitHub, Vercel, Render e demais integrações devem preferencialmente ser cadastradas em **Admin → Integrações e APIs**. Variáveis de ambiente continuam válidas como fallback de migração. A interface não recebe todos os segredos no carregamento: cada valor recuperável é solicitado individualmente ao backend somente quando o administrador escolhe **Visualizar** ou **Copiar**.
+
+Na Vercel/Render, uma variável pode estar configurada e ainda assim não ser recuperável. O painel respeita a resposta/tipo fornecido pelo provedor e nunca substitui uma máscara pelo suposto valor original.
+
+
+
 Para uma instalação já migrada para a 1.0.83, o único segredo externo obrigatório no Render é:
 
 ```env

@@ -26,6 +26,7 @@ import { Onibus }       from '../models/Onibus.js'
 import { Evento }       from '../models/Evento.js'
 import Fonte            from '../models/Fonte.js'
 import { autenticar }   from '../middleware/auth.js'
+import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { readBootstrap, writeBootstrap, bootstrapValue, isBootstrapConfigured, resetBootstrapVault } from '../utils/localVault.js'
 import { installationState, markInstallationCompleted } from '../utils/hostedBootstrap.js'
 import { conectarMongo } from '../config/index.js'
@@ -78,15 +79,23 @@ async function importPortableVariables(vars={}) {
   return { imported:[...new Set(imported)], skipped:[...new Set(skipped)], found:[...new Set(found)] }
 }
 
+const permitirConfiguracoes = verificarPermissao('configuracoes.gerenciar')
+function autenticarManutencaoSetup(req,res,next){
+  return autenticar(req,res,(err)=>{
+    if(err)return next(err)
+    return permitirConfiguracoes(req,res,next)
+  })
+}
+
 async function permitirManutencaoSetup(req, res, next) {
   try {
     const estado = await installationState()
     if (!estado.installed) return next()
-    return autenticar(req, res, next)
+    return autenticarManutencaoSetup(req, res, next)
   } catch {
     const localInstalado = Boolean(readBootstrap().INSTALL_COMPLETED)
     if (!localInstalado) return next()
-    return autenticar(req, res, next)
+    return autenticarManutencaoSetup(req, res, next)
   }
 }
 
@@ -428,7 +437,7 @@ router.get('/status', async (_req, res) => {
 // O POST ignora o campo se vier com a sentinel (= usuário não alterou).
 export const ENV_SECRET_PLACEHOLDER = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'
 
-router.get('/env-config', async (_req, res) => {
+router.get('/env-config', permitirManutencaoSetup, async (_req, res) => {
   const cfg = readBootstrap()
   const mascarar = (val) => val ? ENV_SECRET_PLACEHOLDER : ''
   const mongo = mongoPublicConfig({ ...process.env, ...cfg })
@@ -442,15 +451,15 @@ router.get('/env-config', async (_req, res) => {
     mongo_tls: mongo.tls,
     mongo_username: cfg.MONGO_USERNAME ? mascarar(cfg.MONGO_USERNAME) : '',
     mongo_password: cfg.MONGO_PASSWORD ? mascarar(cfg.MONGO_PASSWORD) : '',
-    cloudinary_cloud_name: cfg.CLOUDINARY_CLOUD_NAME || '',
-    cloudinary_api_key: cfg.CLOUDINARY_API_KEY || '',
-    cloudinary_api_secret: mascarar(cfg.CLOUDINARY_API_SECRET || ''),
+    cloudinary_cloud_name: cfg.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || '',
+    cloudinary_api_key: mascarar(cfg.CLOUDINARY_API_KEY || process.env.CLOUDINARY_API_KEY || ''),
+    cloudinary_api_secret: mascarar(cfg.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET || ''),
     armazenamento: 'cofre_local_criptografado',
   })
 })
 
 // ─── POST /api/setup/env-config — grava config no cofre ─────────────────────
-router.post('/env-config', async (req, res) => {
+router.post('/env-config', permitirManutencaoSetup, async (req, res) => {
   try {
     const current = readBootstrap()
     const isSentinel = (v) => !v || v === ENV_SECRET_PLACEHOLDER
@@ -490,7 +499,7 @@ router.post('/env-config', async (req, res) => {
     const patch = { ...mongoPatch }
     const { cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret } = req.body
     if (cloudinary_cloud_name?.trim()) patch.CLOUDINARY_CLOUD_NAME = cloudinary_cloud_name.trim()
-    if (cloudinary_api_key?.trim()) patch.CLOUDINARY_API_KEY = cloudinary_api_key.trim()
+    if (!isSentinel(cloudinary_api_key)) patch.CLOUDINARY_API_KEY = cloudinary_api_key.trim()
     if (!isSentinel(cloudinary_api_secret)) patch.CLOUDINARY_API_SECRET = cloudinary_api_secret.trim()
 
     const saved = writeBootstrap(patch)
@@ -635,19 +644,20 @@ router.post('/seed', autenticar, async (req, res, next) => {
 })
 
 // ─── POST /api/setup/test-mongo — testa conexão com a URI fornecida ──────────
-router.post('/test-mongo', async (req, res, next) => {
+router.post('/test-mongo', permitirManutencaoSetup, async (req, res, next) => {
   try {
     const current = readBootstrap()
+    const isSentinel = (v) => !v || v === ENV_SECRET_PLACEHOLDER
     const cfg = {
-      provider: req.body.mongo_provider || (req.body.mongo_uri ? 'custom' : current.MONGO_PROVIDER || 'custom'),
-      databaseName: req.body.mongo_db_name || current.MONGO_DB_NAME || 'alsistemas',
-      uri: req.body.mongo_uri || current.MONGO_URI,
-      host: req.body.mongo_host || current.MONGO_HOST,
-      port: req.body.mongo_port || current.MONGO_PORT,
-      authSource: req.body.mongo_auth_source || current.MONGO_AUTH_SOURCE,
-      tls: req.body.mongo_tls ?? current.MONGO_TLS,
-      username: req.body.mongo_username || current.MONGO_USERNAME,
-      password: req.body.mongo_password || current.MONGO_PASSWORD,
+      provider: req.body.mongo_provider || (!isSentinel(req.body.mongo_uri) ? 'custom' : current.MONGO_PROVIDER || 'custom'),
+      databaseName: req.body.mongo_db_name || current.MONGO_DB_NAME || process.env.MONGO_DB_NAME || 'alsistemas',
+      uri: !isSentinel(req.body.mongo_uri) ? req.body.mongo_uri : current.MONGO_URI || process.env.MONGO_URI,
+      host: req.body.mongo_host || current.MONGO_HOST || process.env.MONGO_HOST,
+      port: req.body.mongo_port || current.MONGO_PORT || process.env.MONGO_PORT,
+      authSource: req.body.mongo_auth_source || current.MONGO_AUTH_SOURCE || process.env.MONGO_AUTH_SOURCE,
+      tls: req.body.mongo_tls ?? current.MONGO_TLS ?? process.env.MONGO_TLS,
+      username: !isSentinel(req.body.mongo_username) ? req.body.mongo_username : current.MONGO_USERNAME || process.env.MONGO_USERNAME,
+      password: !isSentinel(req.body.mongo_password) ? req.body.mongo_password : current.MONGO_PASSWORD || process.env.MONGO_PASSWORD,
     }
     let built
     try { built = buildMongoUri(cfg) }
@@ -685,16 +695,17 @@ router.post('/test-mongo', async (req, res, next) => {
 router.post('/adotar-instalacao', permitirManutencaoSetup, async (req, res) => {
   try {
     const current = readBootstrap()
+    const isSentinel = (v) => !v || v === ENV_SECRET_PLACEHOLDER
     const cfg = {
-      provider: req.body.mongo_provider || (req.body.mongo_uri ? 'custom' : current.MONGO_PROVIDER || 'custom'),
-      databaseName: req.body.mongo_db_name || current.MONGO_DB_NAME || 'alsistemas',
-      uri: req.body.mongo_uri || current.MONGO_URI,
-      host: req.body.mongo_host || current.MONGO_HOST,
-      port: req.body.mongo_port || current.MONGO_PORT,
-      authSource: req.body.mongo_auth_source || current.MONGO_AUTH_SOURCE,
-      tls: req.body.mongo_tls ?? current.MONGO_TLS,
-      username: req.body.mongo_username || current.MONGO_USERNAME,
-      password: req.body.mongo_password || current.MONGO_PASSWORD,
+      provider: req.body.mongo_provider || (!isSentinel(req.body.mongo_uri) ? 'custom' : current.MONGO_PROVIDER || 'custom'),
+      databaseName: req.body.mongo_db_name || current.MONGO_DB_NAME || process.env.MONGO_DB_NAME || 'alsistemas',
+      uri: !isSentinel(req.body.mongo_uri) ? req.body.mongo_uri : current.MONGO_URI || process.env.MONGO_URI,
+      host: req.body.mongo_host || current.MONGO_HOST || process.env.MONGO_HOST,
+      port: req.body.mongo_port || current.MONGO_PORT || process.env.MONGO_PORT,
+      authSource: req.body.mongo_auth_source || current.MONGO_AUTH_SOURCE || process.env.MONGO_AUTH_SOURCE,
+      tls: req.body.mongo_tls ?? current.MONGO_TLS ?? process.env.MONGO_TLS,
+      username: !isSentinel(req.body.mongo_username) ? req.body.mongo_username : current.MONGO_USERNAME || process.env.MONGO_USERNAME,
+      password: !isSentinel(req.body.mongo_password) ? req.body.mongo_password : current.MONGO_PASSWORD || process.env.MONGO_PASSWORD,
     }
     let built
     try { built = buildMongoUri(cfg) }
@@ -760,14 +771,18 @@ router.post('/limpar-config-local', permitirManutencaoSetup, async (req, res) =>
 })
 
 // ─── POST /api/setup/test-cloudinary — testa credenciais Cloudinary ──────────
-router.post('/test-cloudinary', async (req, res, next) => {
+router.post('/test-cloudinary', permitirManutencaoSetup, async (req, res, next) => {
   try {
-    const { cloudinary_cloud_name, cloudinary_api_key } = req.body
-    let { cloudinary_api_secret } = req.body
-
-    // Se o secret vier como sentinel (usuário não alterou), usa o valor do ambiente
+    let { cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret } = req.body
+    const bootstrap = readBootstrap()
+    cloudinary_cloud_name = cloudinary_cloud_name || bootstrap.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || ''
+    if (!cloudinary_api_key || cloudinary_api_key === ENV_SECRET_PLACEHOLDER) {
+      cloudinary_api_key = bootstrap.CLOUDINARY_API_KEY || process.env.CLOUDINARY_API_KEY || ''
+    }
+    // Se o secret vier como sentinel (usuário não alterou), usa a fonte efetiva
+    // sem devolver o valor ao navegador: cofre local primeiro, depois ambiente.
     if (!cloudinary_api_secret || cloudinary_api_secret === ENV_SECRET_PLACEHOLDER) {
-      cloudinary_api_secret = process.env.CLOUDINARY_API_SECRET || ''
+      cloudinary_api_secret = bootstrap.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET || ''
     }
 
     if (!cloudinary_cloud_name || !cloudinary_api_key || !cloudinary_api_secret) {
@@ -789,7 +804,7 @@ router.post('/test-cloudinary', async (req, res, next) => {
 })
 
 // ─── POST /api/setup/reset-db — apaga TUDO (confirmação por texto) ───────────
-router.post('/reset-db', async (req, res, next) => {
+router.post('/reset-db', permitirManutencaoSetup, async (req, res, next) => {
   try {
     const { confirmar, manter_usuarios = true } = req.body
     if (confirmar !== 'CONFIRMAR_RESET') {
@@ -823,11 +838,9 @@ router.post('/reset-db', async (req, res, next) => {
 })
 
 // ─── POST /api/setup/desativar-arquivo — desativa o setup após instalação ────
-// IMPORTANTE: apenas grava SETUP_DISABLED=true no .env.
-// O rename do arquivo setup.js foi REMOVIDO — ele quebrava o servidor na
-// reinicialização porque server.js faz import estático de './routes/setup.js'.
-// A guarda no topo deste router (process.env.SETUP_DISABLED === 'true') já é
-// suficiente para bloquear todas as rotas de setup após a instalação.
+// IMPORTANTE: grava SETUP_DISABLED=true no cofre local. O arquivo de rota não
+// é renomeado, pois server.js o importa estaticamente. Após a instalação, as
+// rotas de manutenção sensíveis usam permitirManutencaoSetup e exigem login.
 router.post('/desativar-arquivo', autenticar, async (_req, res) => {
   writeBootstrap({ SETUP_DISABLED: true })
   res.json({ mensagem: 'Instalação inicial concluída. O sistema continuará permitindo apenas manutenção autenticada.', cofre_atualizado: true })

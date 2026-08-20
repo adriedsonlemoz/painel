@@ -16,6 +16,12 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## 🔐 Credenciais e Cloudflare/R2 (1.0.149+)
+
+A Central Cloudflare separa a **credencial já cadastrada** do campo usado para **substituir** o valor. API Token, R2 Access Key ID e R2 Secret Access Key ficam mascarados no carregamento inicial e podem ser solicitados individualmente ao backend com **Visualizar/Ocultar/Copiar** quando o AL Sistemas realmente possui o valor. Um token REST Cloudflare inválido não impede mais a auditoria independente das chaves R2.
+
+A Central de Integrações também informa origem e estado das credenciais. Vercel/Render diferenciam valores recuperáveis sob demanda de valores protegidos pelo provedor; máscaras nunca são tratadas como segredo original. Após a instalação, a manutenção de configuração via Setup exige autenticação administrativa e `configuracoes.gerenciar`.
+
 ## 🧩 Variáveis de ambiente via API (1.0.145+)
 
 Em **Admin → Projetos e Deploys → Variáveis**, o AL Sistemas pode listar, criar, atualizar e excluir variáveis de projetos Vercel e serviços Render usando as credenciais já protegidas em **Integrações e APIs**. Valores completos não são devolvidos ao navegador; a interface trabalha com versões mascaradas. Alterações podem ser salvas sem publicação ou acompanhadas de um novo deploy.

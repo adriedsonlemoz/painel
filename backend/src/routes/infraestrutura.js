@@ -27,6 +27,7 @@ import ConfiguracaoHome from '../models/ConfiguracaoHome.js'
 import { registerPlatformOrigin, isPlatformOriginAllowed, hydratePlatformOrigins, platformOrigins } from '../utils/platformOrigins.js'
 import { ensurePersistentBootstrap } from '../utils/hostedBootstrap.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
+import { getCloudflareConfig } from '../utils/cloudflareConfig.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { configurarCloudinary as configurarCloudinaryCentral } from '../config/index.js'
 import { autenticar }        from '../middleware/auth.js'
@@ -1023,9 +1024,12 @@ async function smartRenderEnv(apiKey,serviceId) {
     const item=row?.envVar||row||{}
     return {
       key:item.key||item.name||'',
-      valueMasked:maskSecretValue(item.value),
-      configured:item.value!==undefined&&item.value!==null,
-      valueAvailable:item.value!==undefined&&item.value!==null && !/^[*•]+$/.test(String(item.value)),
+      valueMasked:'••••••••••••••••',
+      configured:true,
+      valueAvailable:true,
+      revealable:true,
+      valueAvailability:'on-demand',
+      status:'configured',
       origin:'Render', updatedAt:item.updatedAt||item.updated_at||null,
     }
   }).filter(x=>x.key)
@@ -1039,8 +1043,12 @@ async function smartVercelEnv(token,teamId,projectId) {
     target:Array.isArray(item.target)?item.target:[item.target].filter(Boolean),
     type:item.type||'encrypted',
     gitBranch:item.gitBranch||null,
-    valueMasked:item.value?maskSecretValue(item.value):'protegida',
-    valueAvailable:Boolean(item.value)&&!/^[*•]+$/.test(String(item.value)),
+    valueMasked:'••••••••••••••••',
+    valueAvailable:item.type!=='sensitive'&&Boolean(item.id),
+    revealable:item.type!=='sensitive'&&Boolean(item.id),
+    valueAvailability:item.type==='sensitive'?'provider-protected':'on-demand',
+    providerLimitation:item.type==='sensitive'?'A Vercel não permite recuperar o valor original de variáveis sensíveis depois de salvas.':null,
+    status:'configured',
     origin:'Vercel', updatedAt:item.updatedAt||item.updated_at||item.createdAt||null,
   })).filter(x=>x.key)
 }
@@ -1319,13 +1327,8 @@ router.get('/plataformas/compatibilidade', async (req,res,next)=>{
       getCredential('vercel','VERCEL_TOKEN').catch(()=>({value:'',locked:false,source:null})),
       getCredential('cloudflare','CF_API_TOKEN').catch(()=>({value:'',locked:false,source:null,metadata:{}})),
     ])
-    let r2Configured=false
-    try {
-      const parsed=JSON.parse(cloudflare.value||'{}')
-      r2Configured=Boolean(parsed.r2AccessKeyId&&parsed.r2SecretAccessKey)
-    } catch {
-      r2Configured=Boolean(process.env.CF_R2_ACCESS_KEY_ID&&process.env.CF_R2_SECRET_ACCESS_KEY)
-    }
+    const cloudflareResolved=await getCloudflareConfig().catch(()=>({}))
+    const r2Configured=Boolean(cloudflareResolved.r2AccessKeyId&&cloudflareResolved.r2SecretAccessKey)
 
     const siteDoc=await ConfiguracaoHome.findOne({chave:'site_url'}).lean().catch(()=>null)
     const frontendOrigin=originNormalized||String(siteDoc?.valor||process.env.FRONTEND_URL||'').split(',')[0].trim()
@@ -1565,12 +1568,13 @@ router.get('/plataformas/render/servicos/:serviceId/env', async (req,res,next)=>
 router.post('/plataformas/render/servicos/:serviceId/env/:key/reveal', async(req,res,next)=>{
   try{
     const cred=await getCredential('render','RENDER_API_KEY'); if(!cred.value)return res.status(409).json({erro:'Render não conectada.'})
-    const key=String(req.params.key||'').trim(); const env=await smartRenderEnv(cred.value,req.params.serviceId); const item=env.find(x=>x.key===key)
-    if(!item)return res.status(404).json({erro:'Variável não encontrada na Render.'})
-    const raw=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/env-vars?limit=100`)
-    const rows=Array.isArray(raw)?raw:(raw?.envVars||[]); const found=rows.map(r=>r?.envVar||r||{}).find(x=>(x.key||x.name)===key); const value=found?.value
+    const key=String(req.params.key||'').trim()
+    if(!key)return res.status(400).json({erro:'Informe a variável da Render.'})
+    const raw=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/env-vars/${encodeURIComponent(key)}`)
+    const found=raw?.envVar||raw||{}
+    const value=found?.value
     if(value===undefined||value===null||/^[*•]+$/.test(String(value)))return res.status(409).json({erro:'A Render não disponibilizou o valor original desta variável pela API. Substitua o valor para atualizá-la.'})
-    res.set('Cache-Control','no-store, private');res.json({ok:true,value:String(value),source:'Render',updatedAt:found?.updatedAt||found?.updated_at||null})
+    res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,value:String(value),source:'Render',updatedAt:found?.updatedAt||found?.updated_at||null})
   }catch(err){next(err)}
 })
 
@@ -1703,10 +1707,15 @@ router.post('/plataformas/vercel/projetos/:projectId/env/:key/reveal', async(req
   try{
     const cred=await getCredential('vercel','VERCEL_TOKEN'); if(!cred.value)return res.status(409).json({erro:'Vercel não conectada.'})
     const projectId=String(req.params.projectId||'').trim(), key=String(req.params.key||'').trim(), envId=String(req.body?.envId||'').trim(), teamId=cred.metadata?.teamId||''
-    const data=await vercelApi(cred.value,`/v9/projects/${encodeURIComponent(projectId)}/env`,teamId); const rows=data?.envs||data?.env||[]; const found=rows.find(x=>(envId&&x.id===envId)||(!envId&&x.key===key)); const value=found?.value
+    const data=await vercelApi(cred.value,`/v9/projects/${encodeURIComponent(projectId)}/env`,teamId); const rows=data?.envs||data?.env||[]; const found=rows.find(x=>(envId&&x.id===envId)||(!envId&&x.key===key))
     if(!found)return res.status(404).json({erro:'Variável não encontrada na Vercel.'})
-    if(!value||/^[*•]+$/.test(String(value)))return res.status(409).json({erro:'A Vercel não disponibilizou o valor original desta variável pela API. Substitua o valor para atualizá-la.'})
-    res.set('Cache-Control','no-store, private');res.json({ok:true,value:String(value),source:'Vercel',updatedAt:found?.updatedAt||found?.createdAt||null})
+    if(found.type==='sensitive')return res.status(409).json({erro:'Esta variável é sensível. A Vercel não permite recuperar o valor original depois de salvo; apenas substituí-lo.'})
+    const id=envId||found.id
+    if(!id)return res.status(409).json({erro:'A Vercel não forneceu o ID necessário para recuperar esta variável.'})
+    const detail=await vercelApi(cred.value,`/v1/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(id)}`,teamId)
+    const value=detail?.value
+    if(value===undefined||value===null||/^[*•]+$/.test(String(value)))return res.status(409).json({erro:'A Vercel não disponibilizou o valor original desta variável pela API. Substitua o valor para atualizá-la.'})
+    res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,value:String(value),source:'Vercel',updatedAt:detail?.updatedAt||found?.updatedAt||found?.createdAt||null})
   }catch(err){next(err)}
 })
 

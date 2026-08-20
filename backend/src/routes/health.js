@@ -7,6 +7,7 @@ import mongoose from 'mongoose'
 import { isRedisDisponivel } from '../utils/redis.js'
 import { verificarCloudinary } from '../config/index.js'
 import { diagnosticarIA } from '../utils/aiClient.js'
+import { getCloudflareConfig } from '../utils/cloudflareConfig.js'
 
 const router = Router()
 
@@ -35,17 +36,21 @@ async function verificarGitHub() {
 
 /** Verifica Cloudflare (token + S3 credentials) */
 async function verificarCloudflare() {
-  const token   = process.env.CF_API_TOKEN
-  const s3Key   = process.env.CF_R2_ACCESS_KEY_ID
-  const s3Sec   = process.env.CF_R2_SECRET_ACCESS_KEY
+  const cfg = await getCloudflareConfig()
+  const token = cfg.apiToken
+  const s3Key = cfg.r2AccessKeyId
+  const s3Sec = cfg.r2SecretAccessKey
   if (!token) return { ok: false, status: 'CF_API_TOKEN não configurado' }
   try {
-    const res = await Promise.race([
-      fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
+    const headers = { Authorization: `Bearer ${token}` }
+    const verify = async (url) => Promise.race([
+      fetch(url, { headers }),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
     ])
+    let res = cfg.accountId
+      ? await verify(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfg.accountId)}/tokens/verify`)
+      : await verify('https://api.cloudflare.com/client/v4/user/tokens/verify')
+    if (!res.ok && cfg.accountId) res = await verify('https://api.cloudflare.com/client/v4/user/tokens/verify')
     if (!res.ok) return { ok: false, status: `token inválido (${res.status})` }
     return {
       ok: true,

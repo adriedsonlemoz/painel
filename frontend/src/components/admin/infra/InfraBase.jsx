@@ -129,7 +129,7 @@ export function Input({ label, value, onChange, type = 'text', placeholder, help
           }}
         />
         {showToggle && (
-          <button type="button" onClick={() => setVis(!vis)}
+          <button type="button" onClick={() => setVis(!vis)} aria-label={vis ? 'Ocultar valor digitado' : 'Mostrar valor digitado'} title={vis ? 'Ocultar valor digitado' : 'Mostrar valor digitado'}
             style={{
               position: 'absolute', right: 10, top: '50%',
               transform: 'translateY(-50%)',

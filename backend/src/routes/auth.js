@@ -181,7 +181,7 @@ router.post('/logout', (req, res) => {
 })
 
 // ── POST /api/auth/esqueci-senha ─────────────────────────────────────────────
-// Gera token de reset e o envia (por e-mail em produção; exibido no log em dev)
+// Gera token de reset. O token nunca é gravado em logs.
 router.post('/esqueci-senha', async (req, res, next) => {
   try {
     const { email } = req.body
@@ -201,15 +201,11 @@ router.post('/esqueci-senha', async (req, res, next) => {
     usuario.token_reset_expira = new Date(Date.now() + 60 * 60 * 1000)
     await usuario.save()
 
-    const baseUrl   = process.env.FRONTEND_URL || 'http://localhost:5173'
-    const linkReset = `${baseUrl}/redefinir-senha?token=${token}`
-
-    // Em produção: integrar com serviço de e-mail (nodemailer, Resend, etc.)
-    // Em desenvolvimento: exibe o link no log do servidor
+    // O token de uso único nunca entra em logs. O envio do link deve ser feito
+    // pelo serviço de e-mail configurado, sem registrar o valor no servidor.
     if (process.env.NODE_ENV !== 'production') {
-      logger.info({ linkReset }, '🔑 Link de redefinição de senha (apenas dev)')
+      logger.info({ email: usuario.email }, 'Reset de senha gerado em desenvolvimento (token omitido do log)')
     } else {
-      // TODO: enviar e-mail com linkReset para usuario.email
       logger.warn({ email: usuario.email }, 'Reset de senha solicitado — integre com serviço de e-mail')
     }
 

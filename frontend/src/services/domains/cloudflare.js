@@ -8,6 +8,13 @@ export const cloudflareService = {
   async status() {
     return api('/admin/cloudflare/status')
   },
+  /** Revela uma única credencial Cloudflare/R2 já salva no cofre central. */
+  async revelarCredencial(field) {
+    return api('/admin/integracoes/cloudflare/reveal', {
+      method: 'POST',
+      body: JSON.stringify({ field }),
+    })
+  },
   async dashboard() { return api('/admin/cloudflare/dashboard') },
 
 

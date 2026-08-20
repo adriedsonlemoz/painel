@@ -17,7 +17,6 @@ export default function ConfigCloudinary({ initialValues = {} }) {
   const [aberta,       setAberta]       = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [testando,     setTestando]     = useState(false)
-  const [visSecret,    setVisSecret]    = useState(false)
   // secretAlterado rastreia se o usuário digitou um novo secret ou manteve o placeholder
   const [secretAlterado, setSecretAlterado] = useState(false)
   const [form, setForm] = useState({
@@ -123,18 +122,19 @@ export default function ConfigCloudinary({ initialValues = {} }) {
               placeholder="meu-cloud" style={inputSty()} />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={labelSty}>API Key</label>
-            <input value={form.cloudinary_api_key} onChange={e => set('cloudinary_api_key')(e.target.value)}
+            <label style={labelSty}>API Key (substituição)</label>
+            <input type="password" value={form.cloudinary_api_key} onChange={e => set('cloudinary_api_key')(e.target.value)}
               placeholder="123456789012345" style={inputSty()} />
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={labelSty}>API Secret</label>
-            <div style={{ position: 'relative' }}>
+            <div>
               <input
-                type={visSecret ? 'text' : 'password'}
+                type="password"
                 value={form.cloudinary_api_secret}
                 onChange={e => setSecret(e.target.value)}
-                // Ao focar, limpa a sentinel para o usuário digitar do zero
+                // Ao focar, limpa a sentinel para o usuário digitar do zero.
+                // O valor salvo só é revelado na Central de Integrações.
                 onFocus={() => {
                   if (form.cloudinary_api_secret === SECRET_PLACEHOLDER) {
                     setForm(f => ({ ...f, cloudinary_api_secret: '' }))
@@ -142,14 +142,9 @@ export default function ConfigCloudinary({ initialValues = {} }) {
                   }
                 }}
                 placeholder="••••••••••••••••••••"
-                style={{ ...inputSty(), paddingRight: 38 }}
+                style={inputSty()}
               />
-              <button type="button" onClick={() => setVisSecret(v => !v)}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer', color: C.muted,
-                  display: 'flex', alignItems: 'center' }}>
-                {visSecret ? Ico.eyeOff : Ico.eye}
-              </button>
+              <div style={{fontSize:11,color:C.muted,marginTop:6,lineHeight:1.45}}>O valor cadastrado permanece mascarado nesta tela. Use <b>Integrações e APIs</b> no painel para Visualizar/Copiar sob demanda.</div>
             </div>
           </div>
 

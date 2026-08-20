@@ -58,6 +58,64 @@ function Row({ label, value, mono = false }) {
   )
 }
 
+function CredentialSecretRow({ label, field, info }) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => () => setValue(''), [])
+
+  const fetchValue = async () => {
+    if (!info?.configured) throw new Error(`${label} não configurada.`)
+    if (info?.revealable === false) throw new Error('Esta credencial não pode ser recuperada nesta instalação.')
+    const r = await cloudflareService.revelarCredencial(field)
+    return String(r?.value || '')
+  }
+  const reveal = async () => {
+    if (value) { setValue(''); return }
+    setBusy(true)
+    try { setValue(await fetchValue()) }
+    catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+  const copy = async () => {
+    setBusy(true)
+    try {
+      const v = value || await fetchValue()
+      await navigator.clipboard.writeText(v)
+      toast.success('Copiado')
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ padding: `${SPACE.sm}px 0`, borderBottom: `1px solid ${C.border}`, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: C.muted }}>{label}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+            Origem: {info?.source || 'não identificada'} · {info?.configured ? 'Configurada' : 'Não configurada'}
+          </div>
+        </div>
+        {info?.configured && info?.revealable !== false && (
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flexShrink: 0 }}>
+            <button type="button" onClick={reveal} disabled={busy} aria-label={`${value ? 'Ocultar' : 'Visualizar'} ${label}`} title={`${value ? 'Ocultar' : 'Visualizar'} ${label}`}
+              style={{ border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: '5px 8px', background: C.surface2, color: C.text, fontSize: 10, cursor: 'pointer' }}>
+              {busy ? '…' : value ? 'Ocultar' : 'Visualizar'}
+            </button>
+            <button type="button" onClick={copy} disabled={busy} aria-label={`Copiar ${label}`} title={`Copiar ${label}`}
+              style={{ border: `1px solid ${C.border}`, borderRadius: RADIUS.sm, padding: '5px 8px', background: C.surface2, color: C.text, fontSize: 10, cursor: 'pointer' }}>
+              Copiar
+            </button>
+          </div>
+        )}
+        {info?.configured && info?.revealable === false && <small style={{color:C.muted}}>Valor protegido nesta origem</small>}
+      </div>
+      <code style={{ display: 'block', marginTop: 7, maxWidth: '100%', minWidth: 0, padding: '7px 8px', borderRadius: RADIUS.sm, background: C.surface2, color: value ? C.text : C.muted, fontSize: 10, whiteSpace: value ? 'pre-wrap' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', overflowWrap: 'anywhere', wordBreak: value ? 'break-all' : 'normal' }}>
+        {value || info?.masked || '—'}
+      </code>
+    </div>
+  )
+}
+
 // Sparkline SVG puro
 function Sparkline({ data = [], color = CF.orange, height = 36, width = 160 }) {
   if (data.length < 2) return <span style={{ color: C.muted, fontSize: 11 }}>sem dados</span>
@@ -100,24 +158,26 @@ function bytes(n) {
 function AbaGeral({ status, carregando, recarregar }) {
   if (carregando) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size={24} /></div>
 
-  if (!status?.ok) return (
-    <PageCard>
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>☁️</div>
-        <p style={{ color: CF.err, fontWeight: 600, marginBottom: 8 }}>Token não configurado</p>
-        <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>{status?.erro}</p>
-        <p style={{ color: C.muted, fontSize: 12, lineHeight:1.5 }}>
-          Configure a Cloudflare em <b>Admin → Integrações e APIs</b>. O módulo usa o cofre central; variáveis CF_* são apenas fallback de migração.
-        </p>
-      </div>
-    </PageCard>
-  )
-
-  const { token, conta } = status
+  const { token, conta } = status || {}
+  const cloudflareApiOk = Boolean(status?.ok)
   const statusCor = token?.status === 'active' ? CF.active : CF.warn
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {!cloudflareApiOk && (
+        <PageCard>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: 4 }}>
+            <div aria-hidden="true" style={{ fontSize: 24, lineHeight: 1 }}>☁️</div>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ color: CF.err, fontWeight: 700, margin: '0 0 6px' }}>API principal Cloudflare não validada</p>
+              <p style={{ color: C.muted, fontSize: 12, lineHeight: 1.5, margin: '0 0 6px', overflowWrap: 'anywhere' }}>{status?.erro || 'O token principal ainda não foi configurado ou testado.'}</p>
+              <p style={{ color: C.muted, fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+                As credenciais abaixo são verificadas separadamente. Você ainda pode visualizar, copiar ou revisar as chaves R2 que o AL Sistemas realmente possui.
+              </p>
+            </div>
+          </div>
+        </PageCard>
+      )}
       {/* Token info */}
       <PageCard>
         <SectionTitle icon={<span style={{ fontSize: 16 }}>🔑</span>}>
@@ -133,8 +193,9 @@ function AbaGeral({ status, carregando, recarregar }) {
             {token?.status === 'active' ? 'Ativo e válido' : token?.status ?? 'Desconhecido'}
           </span>
         </div>
+        <CredentialSecretRow label="API Token" field="secret" info={status?.credentialStatus?.apiToken} />
         <Row label="Nome"         value={token?.name} />
-        <Row label="Account ID"   value={status.account_id} mono />
+        <Row label="Account ID"   value={status?.account_id} mono />
         <Row label="Token ID" value={token?.id || '—'} mono />
         <Row label="Válido desde" value={token?.not_before ? new Date(token.not_before).toLocaleString('pt-BR') : 'imediatamente'} />
         <Row label="Expiração" value={token?.expires_on ? new Date(token.expires_on).toLocaleString('pt-BR') : 'Sem expiração'} />
@@ -172,8 +233,8 @@ function AbaGeral({ status, carregando, recarregar }) {
             </div>
             <Row label="Bucket padrão" value={status.s3Credentials.bucket || 'nenhum selecionado'} mono />
             <Row label="Endpoint S3" value={status.s3Credentials.endpoint || status.endpoint_s3 || '—'} mono />
-            <Row label="Access Key ID" value={status.s3Credentials.accessKeyMasked || (status.s3Credentials.configurado ? '••••••••' : '⚠ ausente')} mono />
-            <Row label="Secret Access Key" value={status.s3Credentials.secretMasked || (status.s3Credentials.configurado ? '••••••••' : '⚠ ausente')} mono />
+            <CredentialSecretRow label="Access Key ID" field="r2AccessKeyId" info={status?.credentialStatus?.r2AccessKeyId || {configured:Boolean(status.s3Credentials.accessKeyMasked),masked:status.s3Credentials.accessKeyMasked}} />
+            <CredentialSecretRow label="Secret Access Key" field="r2SecretAccessKey" info={status?.credentialStatus?.r2SecretAccessKey || {configured:Boolean(status.s3Credentials.secretMasked),masked:status.s3Credentials.secretMasked}} />
             <Row label="Teste S3" value={status.s3Credentials.configurado ? (status.s3Credentials.valido ? `✅ válido · ${(status.s3Credentials.buckets||[]).length} bucket(s)` : '⚠ credenciais não validadas') : '—'} />
             {!status.s3Credentials.configurado && (
               <p style={{ fontSize: 12, color: CF.err, marginTop: 10 }}>

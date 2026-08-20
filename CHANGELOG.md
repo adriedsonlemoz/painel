@@ -1,3 +1,19 @@
+# 1.0.149 — Segunda auditoria completa de credenciais e correção Cloudflare/R2
+
+- Corrige a causa do botão **Mostrar/Visualizar** do Cloudflare não exibir a credencial cadastrada: o controle antigo apenas alternava `password/text` no campo vazio usado para substituição. A Central Cloudflare agora solicita o valor salvo ao backend somente no clique.
+- API Token Cloudflare, R2 Access Key ID e R2 Secret Access Key possuem **Visualizar/Ocultar/Copiar** diretamente na Central Cloudflare, com máscara por padrão, `Cache-Control: no-store` e limpeza do valor revelado ao ocultar ou desmontar a tela.
+- O status Cloudflare não interrompe mais a interface inteira quando o token REST está ausente/inválido; as credenciais S3/R2 são avaliadas separadamente e continuam disponíveis para auditoria.
+- A resolução de configuração Cloudflare/R2 passa a combinar cofre criptografado e `CF_*` de ambiente **por campo**, sem exigir que `CF_API_TOKEN` exista para reconhecer/revelar chaves R2 válidas.
+- Testes e health check Cloudflare passam a considerar a configuração efetiva do cofre + ambiente, reduzindo falsos estados de “não configurado”.
+- Setup/Infraestrutura de MongoDB e Cloudinary não tratam mais `••••••` como segredo real; campos mascarados representam estado e o valor efetivo é solicitado pela rota administrativa individual quando disponível.
+- `/api/setup/env-config` passa a exigir autenticação + `configuracoes.gerenciar` após a instalação; o primeiro bootstrap continua disponível enquanto não existe instalação concluída.
+- Vercel/Render distinguem **configurada**, **recuperável sob demanda** e **protegida pelo provedor**. Máscaras retornadas pelas plataformas não são promovidas a valor real.
+- `METRICS_TOKEN` deixa de ser aceito por query string; token/link de redefinição de senha não são mais registrados em logs de desenvolvimento.
+- Nova busca global por `alert/confirm/prompt` confirma ausência de diálogos nativos ativos no frontend administrativo.
+- Validação final: 129 arquivos JS do backend passam em `node --check`; 157 arquivos JS/JSX do frontend passam no parser TypeScript; 815 imports relativos foram resolvidos sem ausências. Build/lint/Jest completos permanecem dependentes da instalação de pacotes, indisponível neste ambiente.
+
+---
+
 # 1.0.148 — Auditoria de APIs, credenciais e segredos
 
 - Auditoria completa documentada em `CREDENTIAL_AUDIT.md`.

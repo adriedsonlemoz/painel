@@ -200,41 +200,54 @@ async function discoverR2PublicAccess(bucket) {
 router.get('/status', async (_req, res, next) => {
   try {
     const cfg=await getCloudflareConfig()
-    const [verify, account, capabilities, s3] = await Promise.all([
-      verifyCloudflareToken(),
-      cfFetch(`/accounts/${accountId()}`).catch(() => null),
-      capabilitySnapshot(),
-      (async()=>{
-        if(!cfg.r2AccessKeyId || !cfg.r2SecretAccessKey)return {configured:false,ok:false,buckets:[],reason:'Credenciais S3 não configuradas'}
-        try{
-          const out=await r2S3Client().send(new ListBucketsCommand({}))
-          return {configured:true,ok:true,buckets:(out.Buckets||[]).map(x=>({name:x.Name,creationDate:x.CreationDate||null}))}
-        }catch(err){return {configured:true,ok:false,buckets:[],reason:String(err.message||err)}}
-      })(),
+    const credentialStatus={
+      apiToken:{configured:Boolean(cfg.apiToken),masked:cfg.apiToken?'••••••••••••••••':null,source:cfg.sources?.apiToken||cfg.source||null,revealable:Boolean(cfg.apiToken)},
+      r2AccessKeyId:{configured:Boolean(cfg.r2AccessKeyId),masked:cfg.r2AccessKeyId?'••••••••••••••••':null,source:cfg.sources?.r2AccessKeyId||null,revealable:Boolean(cfg.r2AccessKeyId)},
+      r2SecretAccessKey:{configured:Boolean(cfg.r2SecretAccessKey),masked:cfg.r2SecretAccessKey?'••••••••••••••••':null,source:cfg.sources?.r2SecretAccessKey||null,revealable:Boolean(cfg.r2SecretAccessKey)},
+    }
+    const s3=await (async()=>{
+      if(!cfg.r2AccessKeyId || !cfg.r2SecretAccessKey)return {configured:false,ok:false,buckets:[],reason:'Credenciais S3 não configuradas'}
+      try{
+        const out=await r2S3Client().send(new ListBucketsCommand({}))
+        return {configured:true,ok:true,buckets:(out.Buckets||[]).map(x=>({name:x.Name,creationDate:x.CreationDate||null}))}
+      }catch(err){return {configured:true,ok:false,buckets:[],reason:String(err.message||err)}}
+    })()
+
+    // O status de credenciais é sempre devolvido, mesmo quando o token REST
+    // está ausente/inválido. Assim R2 e suas chaves continuam auditáveis.
+    const [verifyResult,accountResult,capabilityResult]=await Promise.allSettled([
+      cfg.apiToken?verifyCloudflareToken():Promise.reject(new Error('CF_API_TOKEN não configurado.')),
+      cfg.apiToken&&cfg.accountId?cfFetch(`/accounts/${encodeURIComponent(cfg.accountId)}`):Promise.reject(new Error('Conta Cloudflare não disponível.')),
+      cfg.apiToken&&cfg.accountId?capabilitySnapshot():Promise.reject(new Error('Capacidades não consultadas.')),
     ])
+    const verify=verifyResult.status==='fulfilled'?verifyResult.value:null
+    const account=accountResult.status==='fulfilled'?accountResult.value:null
+    const capabilities=capabilityResult.status==='fulfilled'?capabilityResult.value:[]
+    const tokenError=verifyResult.status==='rejected'?String(verifyResult.reason?.message||verifyResult.reason):null
+    const ok=Boolean(verify?.success!==false && verify?.result)
+
     res.json({
-      ok:true,
-      token:verify.result,
+      ok,
+      erro:ok?null:tokenError||'Token Cloudflare não validado.',
+      token:verify?.result||null,
       conta:account?.result ?? null,
-      account_id:accountId(),
-      endpoint_s3:cfg.r2Endpoint,
+      account_id:cfg.accountId||null,
+      endpoint_s3:cfg.r2Endpoint||null,
       capabilities,
+      credentialStatus,
       s3Credentials:{
         configurado:Boolean(cfg.r2AccessKeyId && cfg.r2SecretAccessKey),
         valido:Boolean(s3.ok),
         bucket:cfg.r2Bucket||null,
         buckets:s3.buckets||[],
         erro:s3.ok?null:s3.reason||null,
-        endpoint:cfg.r2Endpoint,
+        endpoint:cfg.r2Endpoint||null,
         publicUrl:cfg.r2PublicUrl||null,
-        accessKeyMasked:cfg.r2AccessKeyId?`••••••••${cfg.r2AccessKeyId.slice(-4)}`:null,
-        secretMasked:cfg.r2SecretAccessKey?'••••••••••••':null,
+        accessKeyMasked:cfg.r2AccessKeyId?'••••••••••••••••':null,
+        secretMasked:cfg.r2SecretAccessKey?'••••••••••••••••':null,
       },
     })
-  } catch (err) {
-    if (err.message.includes('não configurado')) return res.json({ok:false,erro:err.message})
-    next(err)
-  }
+  } catch (err) { next(err) }
 })
 
 
@@ -706,9 +719,17 @@ router.post('/r2/default-bucket', async(req,res,next)=>{
     const bucket=String(req.body?.bucket||'').trim()
     if(!bucket)return res.status(400).json({erro:'Selecione um bucket.'})
     const current=await getCredential('cloudflare','CF_API_TOKEN')
-    if(!current.value)return res.status(409).json({erro:'Cloudflare ainda não está configurada em Integrações e APIs.'})
+    const effective=await getCloudflareConfig()
+    if(!effective.apiToken)return res.status(409).json({erro:'Cloudflare ainda não está configurada em Integrações e APIs.'})
     let secrets={}
-    try{secrets=JSON.parse(current.value)}catch{secrets={apiToken:current.value}}
+    // getCredential() devolve CF_API_TOKEN do ambiente quando não há documento
+    // no cofre. Ao salvar somente o bucket/metadados, não copie esse segredo
+    // para o MongoDB: preserve apenas segredos que já pertenciam ao cofre.
+    if(current.source==='vault'&&!current.locked){
+      try{secrets=JSON.parse(current.value||'{}')}catch{secrets={apiToken:current.value||''}}
+    }
+    // Se o token/chaves vierem somente do ambiente, não os duplicamos no cofre
+    // apenas para salvar metadados como bucket padrão.
     const list=await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
     const buckets=resultList(list)
     if(!buckets.some(b=>b.name===bucket))return res.status(404).json({erro:'Bucket não encontrado ou não acessível pelo token.'})

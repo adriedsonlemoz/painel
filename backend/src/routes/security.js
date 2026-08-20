@@ -3,6 +3,8 @@ import SecurityEvent from '../models/SecurityEvent.js'
 import AuditLog from '../models/AuditLog.js'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
+import fs from 'node:fs'
+import { readBootstrap, vaultPaths } from '../utils/localVault.js'
 
 const router = Router()
 router.use(autenticar, verificarPermissao('seguranca.gerenciar'))
@@ -17,12 +19,13 @@ router.get('/resumo', async (_req, res, next) => {
       SecurityEvent.find().sort({ criado_em: -1 }).limit(30).lean(),
       AuditLog.countDocuments({ criado_em: { $gte: desde } }),
     ])
+    const bootstrap = readBootstrap()
     const checks = {
-      masterKeyDedicada: Boolean(process.env.CREDENTIALS_MASTER_KEY),
-      setupDesativado: process.env.SETUP_DISABLED === 'true',
+      masterKeyDedicada: Boolean(process.env.CREDENTIALS_MASTER_KEY || fs.existsSync(vaultPaths().keyFile)),
+      setupDesativado: String(bootstrap.SETUP_DISABLED ?? process.env.SETUP_DISABLED ?? '') === 'true',
       ambienteProducao: process.env.NODE_ENV === 'production',
-      metricsProtegidas: Boolean(process.env.METRICS_TOKEN),
-      redisConfigurado: Boolean(process.env.REDIS_URL),
+      metricsProtegidas: Boolean(bootstrap.METRICS_TOKEN || process.env.METRICS_TOKEN),
+      redisConfigurado: Boolean(bootstrap.REDIS_URL || process.env.REDIS_URL),
     }
     const falhas = Object.values(checks).filter(v => !v).length
     const score = Math.max(0, 100 - falhas * 12 - Math.min(30, criticos * 5))

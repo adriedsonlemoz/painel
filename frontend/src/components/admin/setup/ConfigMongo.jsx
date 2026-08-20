@@ -71,12 +71,13 @@ export default function ConfigMongo({ initialUri = '' }) {
           <div style={infoBox(C.blue)}>
             <span style={{ color: C.blue, flexShrink: 0 }}>{Ico.info}</span>
             <span style={{ fontSize: 12, color: '#93c5fd', lineHeight: 1.5 }}>
-              Armazenado no cofre local criptografado do servidor. O valor completo nunca é enviado novamente ao navegador.
+              Armazenado no cofre criptografado. Nesta tela o valor salvo permanece mascarado; para conferir o valor efetivo, use Integrações e APIs após entrar no painel.
             </span>
           </div>
 
           <label style={labelSty}>URI de conexão</label>
           <input
+            type="password"
             value={uri}
             onChange={e => { setUri(e.target.value); setStatusConexao(null) }}
             placeholder="mongodb+srv://usuario:senha@cluster.mongodb.net/banco"

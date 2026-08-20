@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import mongoose from 'mongoose'
 import { v2 as cloudinary } from 'cloudinary'
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3'
 import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
-import { readBootstrap, writeBootstrap, deleteBootstrapKeys, vaultPaths } from '../utils/localVault.js'
+import { readBootstrap, writeBootstrap, deleteBootstrapKeys, vaultPaths, getRuntimeBootstrapSecrets } from '../utils/localVault.js'
 import { conectarMongo, configurarCloudinary } from '../config/index.js'
 import AuditLog from '../models/AuditLog.js'
 import { diagnosticarIA, testarProvedorIA, listarModelosIA, resetAiRuntime } from '../utils/aiClient.js'
@@ -15,8 +16,19 @@ import { getAiUsageSummary } from '../services/aiTelemetry.js'
 const router = Router(); router.use(autenticar, verificarPermissao('configuracoes.gerenciar'))
 const MASK='••••••••••••••••'
 const EXPORT_MASK='****************'
-const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY', resend:'RESEND_API_KEY' }
+const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY_API_SECRET', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY', resend:'RESEND_API_KEY' }
 const systemSecretDefs=['JWT_SECRET','CREDENTIALS_MASTER_KEY','REDIS_URL','METRICS_TOKEN','SETUP_TOKEN','AL_GITHUB_PUBLISH_TOKEN','ADMIN_SENHA']
+const fieldDefs = {
+  cloudinary:[
+    {field:'secret',label:'CLOUDINARY_API_SECRET',stored:'apiSecret',env:'CLOUDINARY_API_SECRET',primary:true},
+    {field:'apiKey',label:'CLOUDINARY_API_KEY',stored:'apiKey',env:'CLOUDINARY_API_KEY'},
+  ],
+  cloudflare:[
+    {field:'secret',label:'CF_API_TOKEN',stored:'apiToken',env:'CF_API_TOKEN',primary:true},
+    {field:'r2AccessKeyId',label:'CF_R2_ACCESS_KEY_ID',stored:'r2AccessKeyId',env:'CF_R2_ACCESS_KEY_ID'},
+    {field:'r2SecretAccessKey',label:'CF_R2_SECRET_ACCESS_KEY',stored:'r2SecretAccessKey',env:'CF_R2_SECRET_ACCESS_KEY'},
+  ],
+}
 const safe = (d) => ({
   configured:Boolean(d?.value)||Boolean(d?.locked),
   usable:Boolean(d?.value),
@@ -27,11 +39,107 @@ const safe = (d) => ({
   updatedAt:d?.updatedAt||null,
   errorCode:d?.errorCode||null,
 })
+
+function parseStoredFields(id,c){
+  if(!c?.value)return {}
+  if(id==='cloudflare'){
+    try{return JSON.parse(c.value)}catch{return {apiToken:c.value}}
+  }
+  if(id==='cloudinary'){
+    try{return JSON.parse(c.value)}catch{return {apiSecret:c.value}}
+  }
+  return {secret:c.value}
+}
+
+function credentialFields(id,c){
+  const defsForId=fieldDefs[id]||[{field:'secret',label:defs[id],stored:'secret',env:defs[id],primary:true}]
+  const stored=parseStoredFields(id,c)
+  const bootstrap=readBootstrap()
+  return Object.fromEntries(defsForId.map(def=>{
+    const fromStored=String(stored?.[def.stored]??'').trim()
+    // Compatibilidade: versões antigas gravavam algumas credenciais (especialmente
+    // Cloudinary) no cofre local de bootstrap, enquanto a Central usa o cofre Mongo.
+    const fromBootstrap=String(bootstrap?.[def.env]??'').trim()
+    const fromEnv=String(process.env[def.env]??'').trim()
+    const value=fromStored||fromBootstrap||fromEnv
+    const source=fromStored?(c?.source||'vault'):fromBootstrap?'local-vault':fromEnv?'environment':c?.locked&&def.primary?'vault':null
+    const locked=Boolean(c?.locked && !value && def.primary)
+    const unknown=Boolean(c?.locked && !value && !def.primary)
+    const configured=Boolean(value)||locked
+    return [def.field,{
+      field:def.field,label:def.label,configured,usable:Boolean(value),locked,unknown,
+      revealable:Boolean(value)&&!locked,masked:configured?MASK:'',source,
+      updatedAt:fromStored&&c?.source==='vault'?(c?.updatedAt||null):null,
+    }]
+  }))
+}
+
+function integrationSafe(id,c){
+  const base=safe(c)
+  const fields=credentialFields(id,c)
+  const fieldList=Object.values(fields)
+  const structuredFields=Boolean(fieldDefs[id])
+  const bootstrap=readBootstrap()
+  const metadata=id==='cloudinary'?{
+    ...(base.metadata||{}),
+    cloudName:base.metadata?.cloudName||bootstrap.CLOUDINARY_CLOUD_NAME||process.env.CLOUDINARY_CLOUD_NAME||'',
+    // API Key é tratada como credencial e não é enviada em claro pelo /status.
+    apiKey:'',
+  }:id==='cloudflare'?{
+    ...(base.metadata||{}),
+    // Metadados operacionais não são segredos; mantemos fallback de ambiente
+    // para instalações migradas sem copiar tokens/chaves para o payload inicial.
+    accountId:base.metadata?.accountId||process.env.CF_ACCOUNT_ID||'',
+    r2Bucket:base.metadata?.r2Bucket||process.env.CF_R2_BUCKET||'',
+    r2PublicUrl:base.metadata?.r2PublicUrl||process.env.CF_R2_PUBLIC_URL||'',
+    r2Endpoint:base.metadata?.r2Endpoint||process.env.CF_R2_ENDPOINT||(process.env.CF_ACCOUNT_ID?`https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`:''),
+  }:base.metadata
+  const hasUsableField=fieldList.some(x=>x.usable)
+  return {
+    ...base,
+    metadata,
+    // Integrações estruturadas (Cloudflare/Cloudinary) podem ter um JSON de
+    // metadados no cofre sem conter segredo. O status deve refletir os campos
+    // efetivos, não apenas o fato de existir um documento criptografado.
+    configured:structuredFields?fieldList.some(x=>x.configured):(fieldList.some(x=>x.configured)||base.configured),
+    usable:structuredFields?hasUsableField:(hasUsableField||base.usable),
+    // Uma credencial antiga pode estar bloqueada no cofre Mongo e, ao mesmo
+    // tempo, existir uma fonte local/ambiente válida. Nesse caso a integração
+    // continua utilizável e os campos recuperáveis não devem ser escondidos.
+    locked:Boolean(base.locked&&!hasUsableField),
+    fields,
+  }
+}
+
+function systemSecretState(name){
+  const runtime=getRuntimeBootstrapSecrets()
+  const bootstrap=readBootstrap()
+  let value='',source=null
+  if(runtime?.[name]){value=String(runtime[name]);source='runtime'}
+  else if(bootstrap?.[name]){value=String(bootstrap[name]);source='local-vault'}
+  else if(process.env[name]){value=String(process.env[name]);source='environment'}
+
+  // Quando a chave mestra foi gerada automaticamente, ela permanece apenas
+  // no arquivo master.key. O painel informa sua existência, mas não transfere
+  // esse material criptográfico para o navegador.
+  if(name==='CREDENTIALS_MASTER_KEY'&&!value){
+    const keyFile=vaultPaths().keyFile
+    if(keyFile&&fs.existsSync(keyFile))return {
+      name,configured:true,masked:MASK,source:'local-key',revealable:false,
+      critical:true,protectedReason:'Chave interna de criptografia gerada pelo AL Sistemas; não é revelada pelo painel.',
+    }
+  }
+  const critical=['JWT_SECRET','CREDENTIALS_MASTER_KEY','SETUP_TOKEN','ADMIN_SENHA'].includes(name)
+  return {name,configured:Boolean(value),masked:value?MASK:'',source,revealable:Boolean(value),critical}
+}
 async function audit(req, acao, detalhes={}) { try { await AuditLog.create({ usuario_id:req.usuario?.id, acao, entidade:'integracoes', detalhes, ip:req.ip }) } catch {} }
 
 router.get('/status', async (_req,res,next)=>{ try {
   const b=readBootstrap(); const integrations={}
-  for (const id of Object.keys(defs)) integrations[id]=safe(await getCredential(id, defs[id]))
+  for (const id of Object.keys(defs)) {
+    const c=await getCredential(id, defs[id])
+    integrations[id]=integrationSafe(id,c)
+  }
   if(['gemini-2.0-flash','gemini-2.0-flash-001','gemini-2.5-flash'].includes(String(integrations.gemini?.metadata?.model||''))){
     integrations.gemini.metadata={...(integrations.gemini.metadata||{}),migratedFromModel:integrations.gemini.metadata.model,model:'gemini-3.5-flash-lite'}
   }
@@ -52,7 +160,7 @@ router.get('/status', async (_req,res,next)=>{ try {
       persistentConfigPath:vaultPaths().dataDir,
     },
     integrations,
-    systemSecrets:systemSecretDefs.map(name=>({name,configured:Boolean(process.env[name]),masked:process.env[name]?MASK:'',source:process.env[name]?'environment':null,revealable:Boolean(process.env[name])})),
+    systemSecrets:systemSecretDefs.map(systemSecretState),
     vault:{ protected:true, localKey:!process.env.CREDENTIALS_MASTER_KEY, paths:Object.values(vaultPaths()).map(p=>p.split('/').pop()) }
   })
 } catch(e){next(e)} })
@@ -343,9 +451,10 @@ router.put('/:id', async(req,res,next)=>{ try {
   if(id==='cloudinary'){
     let old={}
     try{old=JSON.parse(atual.value||'{}')}catch{old={apiSecret:atual.value||''}}
-    const cloudName=String(merged.cloudName||old.cloudName||atual.metadata?.cloudName||'').trim()
-    const apiKey=String(merged.apiKey||old.apiKey||atual.metadata?.apiKey||'').trim()
-    const apiSecret=String(secret||'').trim()||old.apiSecret||''
+    const bootstrap=readBootstrap()
+    const cloudName=String(merged.cloudName||old.cloudName||atual.metadata?.cloudName||bootstrap.CLOUDINARY_CLOUD_NAME||process.env.CLOUDINARY_CLOUD_NAME||'').trim()
+    const apiKey=String(merged.apiKey||old.apiKey||atual.metadata?.apiKey||bootstrap.CLOUDINARY_API_KEY||process.env.CLOUDINARY_API_KEY||'').trim()
+    const apiSecret=String(secret||'').trim()||old.apiSecret||bootstrap.CLOUDINARY_API_SECRET||process.env.CLOUDINARY_API_SECRET||''
     if(!cloudName)return res.status(400).json({erro:'Cloud Name do Cloudinary é obrigatório.'})
     if(!apiKey)return res.status(400).json({erro:'API Key do Cloudinary é obrigatória.'})
     if(!apiSecret)return res.status(400).json({erro:'API Secret do Cloudinary é obrigatório.'})
@@ -354,14 +463,25 @@ router.put('/:id', async(req,res,next)=>{ try {
     value=JSON.stringify({cloudName,apiKey,apiSecret})
   }
   if(id==='cloudflare'){
-    let old={}; try{old=JSON.parse(atual.value||'{}')}catch{old={apiToken:atual.value||''}}
-    const apiToken=String(secret||'').trim()||old.apiToken||''
+    let old={}
+    // getCredential() também pode devolver o fallback de process.env. Só o
+    // conteúdo cuja origem já é o cofre deve ser reaproveitado como persistido.
+    if(atual.source==='vault'&&!atual.locked){
+      try{old=JSON.parse(atual.value||'{}')}catch{old={apiToken:atual.value||''}}
+    }
+    // Não migra silenciosamente segredo de process.env para o cofre Mongo.
+    // O JSON persiste somente o que já estava no cofre ou foi digitado agora;
+    // a validação considera também os fallbacks CF_* do ambiente.
+    const apiTokenStored=String(secret||'').trim()||old.apiToken||''
     const r2AccessKeyId=String(secrets.r2AccessKeyId||'').trim()||old.r2AccessKeyId||''
     const r2SecretAccessKey=String(secrets.r2SecretAccessKey||'').trim()||old.r2SecretAccessKey||''
-    if(!apiToken)return res.status(400).json({erro:'API Token da Cloudflare é obrigatório.'})
-    if(!merged.accountId)return res.status(400).json({erro:'Account ID da Cloudflare é obrigatório.'})
-    merged.r2Endpoint=String(merged.r2Endpoint||`https://${merged.accountId}.r2.cloudflarestorage.com`).trim()
-    value=JSON.stringify({apiToken,r2AccessKeyId,r2SecretAccessKey})
+    const effectiveApiToken=apiTokenStored||String(process.env.CF_API_TOKEN||'').trim()
+    const effectiveAccountId=String(merged.accountId||process.env.CF_ACCOUNT_ID||'').trim()
+    if(!effectiveApiToken)return res.status(400).json({erro:'API Token da Cloudflare é obrigatório.'})
+    if(!effectiveAccountId)return res.status(400).json({erro:'Account ID da Cloudflare é obrigatório.'})
+    merged.accountId=effectiveAccountId
+    merged.r2Endpoint=String(merged.r2Endpoint||process.env.CF_R2_ENDPOINT||`https://${effectiveAccountId}.r2.cloudflarestorage.com`).trim()
+    value=JSON.stringify({apiToken:apiTokenStored,r2AccessKeyId,r2SecretAccessKey})
   }
   if(!value)return res.status(400).json({erro:'Credencial obrigatória.'})
   await setCredential(id, value, merged)
@@ -370,7 +490,7 @@ router.put('/:id', async(req,res,next)=>{ try {
   if(id==='cloudinary') await configurarCloudinary()
   const identity=await refreshStoredIdentity(id)
   await audit(req,`${id}.atualizar`,{campos:Object.keys(metadata),identity:identity?.label||null})
-  res.json({ok:true,status:safe(await getCredential(id,defs[id])),identity})
+  res.json({ok:true,status:integrationSafe(id,await getCredential(id,defs[id])),identity})
 } catch(e){next(e)} })
 router.delete('/:id', async(req,res,next)=>{ try { await deleteCredential(req.params.id); await audit(req,`${req.params.id}.remover`); res.json({ok:true}) } catch(e){next(e)} })
 router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
@@ -379,17 +499,26 @@ router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
   let c={...stored,value:typed||stored.value,metadata:normalizeAiMetadata(id,{...(stored.metadata||{}),...(req.body?.metadata||{})})}
   if(id==='cloudinary'){
     let old={}; try{old=JSON.parse(stored.value||'{}')}catch{old={apiSecret:stored.value||''}}
+    const bootstrap=readBootstrap()
     c={...c,cloudinary:{
-      cloudName:String(c.metadata?.cloudName||old.cloudName||stored.metadata?.cloudName||'').trim(),
-      apiKey:String(c.metadata?.apiKey||old.apiKey||stored.metadata?.apiKey||'').trim(),
-      apiSecret:typed||old.apiSecret||'',
+      cloudName:String(c.metadata?.cloudName||old.cloudName||stored.metadata?.cloudName||bootstrap.CLOUDINARY_CLOUD_NAME||process.env.CLOUDINARY_CLOUD_NAME||'').trim(),
+      apiKey:String(c.metadata?.apiKey||old.apiKey||stored.metadata?.apiKey||bootstrap.CLOUDINARY_API_KEY||process.env.CLOUDINARY_API_KEY||'').trim(),
+      apiSecret:typed||old.apiSecret||bootstrap.CLOUDINARY_API_SECRET||process.env.CLOUDINARY_API_SECRET||'',
     }}
     c.value=c.cloudinary.apiSecret
   }
   if(id==='cloudflare'){
     let old={}; try{old=JSON.parse(stored.value||'{}')}catch{old={apiToken:stored.value||''}}
-    const apiToken=typed||old.apiToken||''
-    c={...c,value:apiToken,secrets:{r2AccessKeyId:String(req.body?.secrets?.r2AccessKeyId||'').trim()||old.r2AccessKeyId||'',r2SecretAccessKey:String(req.body?.secrets?.r2SecretAccessKey||'').trim()||old.r2SecretAccessKey||''}}
+    const apiToken=typed||old.apiToken||process.env.CF_API_TOKEN||''
+    c={
+      ...c,
+      value:apiToken,
+      metadata:{...c.metadata,accountId:c.metadata?.accountId||process.env.CF_ACCOUNT_ID||'',r2Endpoint:c.metadata?.r2Endpoint||process.env.CF_R2_ENDPOINT||''},
+      secrets:{
+        r2AccessKeyId:String(req.body?.secrets?.r2AccessKeyId||'').trim()||old.r2AccessKeyId||process.env.CF_R2_ACCESS_KEY_ID||'',
+        r2SecretAccessKey:String(req.body?.secrets?.r2SecretAccessKey||'').trim()||old.r2SecretAccessKey||process.env.CF_R2_SECRET_ACCESS_KEY||'',
+      },
+    }
   }
   if(stored.locked&&!typed)throw new Error('Digite uma nova credencial para testar.')
   if(!c.value)throw new Error('Digite a credencial acima ou salve-a antes de testar.')
@@ -512,22 +641,28 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
 
   for(const [id,envName] of Object.entries(defs)){
     const c=await getCredential(id,envName)
-    if(!c.value)continue
     if(id==='cloudinary'){
       let parsed={}
-      try{parsed=JSON.parse(c.value)}catch{}
-      add('CLOUDINARY_CLOUD_NAME',parsed.cloudName||c.metadata?.cloudName||'',c.source)
-      add('CLOUDINARY_API_KEY',parsed.apiKey||c.metadata?.apiKey||'',c.source)
-      add('CLOUDINARY_API_SECRET',parsed.apiSecret||c.value,c.source)
-    }else if(id==='cloudflare'){
+      try{parsed=JSON.parse(c.value||'{}')}catch{parsed={apiSecret:c.value||''}}
+      const cloudName=parsed.cloudName||c.metadata?.cloudName||bootstrap.CLOUDINARY_CLOUD_NAME||process.env.CLOUDINARY_CLOUD_NAME||''
+      const apiKey=parsed.apiKey||c.metadata?.apiKey||bootstrap.CLOUDINARY_API_KEY||process.env.CLOUDINARY_API_KEY||''
+      const apiSecret=parsed.apiSecret||bootstrap.CLOUDINARY_API_SECRET||process.env.CLOUDINARY_API_SECRET||''
+      const source=c.value?c.source:(bootstrap.CLOUDINARY_API_SECRET||bootstrap.CLOUDINARY_API_KEY?'local-vault':'environment')
+      add('CLOUDINARY_CLOUD_NAME',cloudName,source)
+      add('CLOUDINARY_API_KEY',apiKey,source)
+      add('CLOUDINARY_API_SECRET',apiSecret,source)
+      continue
+    }
+    if(!c.value)continue
+    if(id==='cloudflare'){
       let parsed={}; try{parsed=JSON.parse(c.value)}catch{parsed={apiToken:c.value}}
-      add('CF_API_TOKEN',parsed.apiToken||'',c.source)
-      add('CF_ACCOUNT_ID',c.metadata?.accountId||'',c.source)
-      add('CF_R2_ACCESS_KEY_ID',parsed.r2AccessKeyId||'',c.source)
-      add('CF_R2_SECRET_ACCESS_KEY',parsed.r2SecretAccessKey||'',c.source)
-      add('CF_R2_BUCKET',c.metadata?.r2Bucket||'',c.source)
-      add('CF_R2_PUBLIC_URL',c.metadata?.r2PublicUrl||'',c.source)
-      add('CF_R2_ENDPOINT',c.metadata?.r2Endpoint||'',c.source)
+      add('CF_API_TOKEN',parsed.apiToken||process.env.CF_API_TOKEN||'',parsed.apiToken?c.source:'environment')
+      add('CF_ACCOUNT_ID',c.metadata?.accountId||process.env.CF_ACCOUNT_ID||'',c.metadata?.accountId?c.source:'environment')
+      add('CF_R2_ACCESS_KEY_ID',parsed.r2AccessKeyId||process.env.CF_R2_ACCESS_KEY_ID||'',parsed.r2AccessKeyId?c.source:'environment')
+      add('CF_R2_SECRET_ACCESS_KEY',parsed.r2SecretAccessKey||process.env.CF_R2_SECRET_ACCESS_KEY||'',parsed.r2SecretAccessKey?c.source:'environment')
+      add('CF_R2_BUCKET',c.metadata?.r2Bucket||process.env.CF_R2_BUCKET||'',c.metadata?.r2Bucket?c.source:'environment')
+      add('CF_R2_PUBLIC_URL',c.metadata?.r2PublicUrl||process.env.CF_R2_PUBLIC_URL||'',c.metadata?.r2PublicUrl?c.source:'environment')
+      add('CF_R2_ENDPOINT',c.metadata?.r2Endpoint||process.env.CF_R2_ENDPOINT||'',c.metadata?.r2Endpoint?c.source:'environment')
     }else if(id==='vercel'){
       add('VERCEL_TOKEN',c.value,c.source)
       add('VERCEL_TEAM_ID',c.metadata?.teamId||process.env.VERCEL_TEAM_ID||'',c.source)
@@ -560,9 +695,14 @@ router.post('/mongodb/reveal', async(req,res)=>{ try {
 router.post('/system-secret/reveal', async(req,res)=>{ try{
   const name=String(req.body?.name||'').trim().toUpperCase()
   if(!systemSecretDefs.includes(name))return res.status(404).json({erro:'Segredo de sistema inválido.'})
-  const value=process.env[name]||''; if(!value)return res.status(404).json({erro:'Segredo não configurado neste ambiente.'})
-  await audit(req,'system-secret.revelar',{campo:name,origem:'environment'})
-  res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,name,value,source:'environment'})
+  const state=systemSecretState(name)
+  if(!state.configured)return res.status(404).json({erro:'Segredo não configurado neste ambiente.'})
+  if(!state.revealable)return res.status(409).json({erro:state.protectedReason||'Este segredo interno não pode ser revelado pelo painel.'})
+  const runtime=getRuntimeBootstrapSecrets(), bootstrap=readBootstrap()
+  const value=runtime?.[name]||bootstrap?.[name]||process.env[name]||''
+  if(!value)return res.status(404).json({erro:'Segredo não configurado neste ambiente.'})
+  await audit(req,'system-secret.revelar',{campo:name,origem:state.source})
+  res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,name,value,source:state.source})
  }catch{res.status(400).json({erro:'Não foi possível recuperar o segredo solicitado.'})} })
 
 router.post('/:id/reveal', async(req,res,next)=>{ try {
@@ -570,23 +710,25 @@ router.post('/:id/reveal', async(req,res,next)=>{ try {
   if(!defs[id])return res.status(404).json({erro:'Integração inválida.'})
   const field=String(req.body?.field||'secret')
   const c=await getCredential(id,defs[id])
-  if(c.locked)return res.status(409).json({erro:'A credencial está protegida por uma chave de outra instalação e não pode ser revelada.'})
-  if(!c.value)return res.status(404).json({erro:'Credencial não configurada.'})
-  let value=c.value, label=defs[id]
-  if(id==='cloudinary'){
-    let x={};try{x=JSON.parse(c.value)}catch{x={apiSecret:c.value}}
-    const map={secret:['apiSecret','CLOUDINARY_API_SECRET'],apiKey:['apiKey','CLOUDINARY_API_KEY'],cloudName:['cloudName','CLOUDINARY_CLOUD_NAME']}
-    const pair=map[field]||map.secret; value=x[pair[0]]||c.metadata?.[pair[0]]||process.env[pair[1]]||''; label=pair[1]
-  } else if(id==='cloudflare'){
-    let x={};try{x=JSON.parse(c.value)}catch{x={apiToken:c.value}}
-    const map={secret:['apiToken','CF_API_TOKEN'],r2AccessKeyId:['r2AccessKeyId','CF_R2_ACCESS_KEY_ID'],r2SecretAccessKey:['r2SecretAccessKey','CF_R2_SECRET_ACCESS_KEY']}
-    const pair=map[field]||map.secret; value=x[pair[0]]||process.env[pair[1]]||''; label=pair[1]
-  }
-  if(!value)return res.status(404).json({erro:'Este valor não está cadastrado no cofre do AL Sistemas.'})
-  await audit(req,`${id}.revelar`,{campo:label,origem:c.source||'vault'})
+  const fields=credentialFields(id,c)
+  const state=fields[field]
+  if(!state)return res.status(400).json({erro:'Campo de credencial inválido.'})
+  if(state.locked)return res.status(409).json({erro:'A credencial está protegida por uma chave de outra instalação e não pode ser revelada.'})
+  if(!state.configured)return res.status(404).json({erro:`${state.label} não está configurada.`})
+
+  const stored=parseStoredFields(id,c)
+  const def=(fieldDefs[id]||[{field:'secret',label:defs[id],stored:'secret',env:defs[id]}]).find(x=>x.field===field)
+  const bootstrap=readBootstrap()
+  const storedValue=String(stored?.[def?.stored]||'')
+  const bootstrapStoredValue=String(bootstrap?.[def?.env]||'')
+  const envValue=String(process.env[def?.env]||'')
+  const value=storedValue||bootstrapStoredValue||envValue
+  if(!value)return res.status(404).json({erro:'Este valor não está disponível para recuperação nesta instalação.'})
+  const source=storedValue?(c.source||'vault'):bootstrapStoredValue?'local-vault':'environment'
+  await audit(req,`${id}.revelar`,{campo:state.label,origem:source})
   res.set('Cache-Control','no-store, private')
   res.set('Pragma','no-cache')
-  res.json({ok:true,value,label,source:c.source||'vault',updatedAt:c.updatedAt||null})
+  res.json({ok:true,value,label:state.label,source,updatedAt:source==='vault'?(c.updatedAt||null):null})
 } catch(e){next(e)} })
 
 router.post('/identities/refresh', async(req,res)=>{ try {
@@ -609,7 +751,7 @@ router.post('/export', async(req,res,next)=>{ try {
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.131',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.149',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }
