@@ -7,28 +7,56 @@
  * Todas as chamadas passam pelo proxy backend. Token NUNCA exposto no frontend.
  */
 import { api, BASE_URL, authFetch, withAuthHeaders } from './http.js'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 
 
 
 
-async function abrirDownloadDireto(url) {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const { Browser } = await import('@capacitor/browser')
-      await Browser.open({ url, windowName: '_blank' })
-      return { mode: 'android-browser' }
-    } catch { /* fallback web abaixo */ }
+const NativeDownloadManager = registerPlugin('ALDownloadManager')
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * Download no Android sem sair do aplicativo. O plugin nativo usa o DownloadManager
+ * do sistema, grava em Downloads/AL-Sistemas e continua mesmo se a WebView pausar.
+ * Na web, o servidor continua responsável pelo Content-Disposition e o navegador baixa direto.
+ */
+async function baixarComGerenciador(url, filename = 'download', mime = 'application/octet-stream', onStatus) {
+  if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('ALDownloadManager')) {
+    onStatus?.('queued', { filename, progress: 0 })
+    const queued = await NativeDownloadManager.download({ url, filename, mime })
+    const id = queued?.id
+    if (!id) throw new Error('O Android não retornou o identificador do download.')
+    const deadline = Date.now() + 45 * 60_000
+    let lastProgress = -1
+    while (Date.now() < deadline) {
+      const state = await NativeDownloadManager.getStatus({ id })
+      const progress = Number.isFinite(Number(state?.progress)) ? Math.max(0, Math.min(100, Number(state.progress))) : 0
+      if (progress !== lastProgress || state?.status !== 'running') {
+        lastProgress = progress
+        onStatus?.(state?.status === 'successful' ? 'completed' : state?.status === 'failed' ? 'failed' : 'progress', { ...state, filename, progress, id })
+      }
+      if (state?.status === 'successful') return { ok:true, mode:'android-download-manager', id, filename, progress:100, uri:state.uri || '' }
+      if (state?.status === 'failed') throw new Error(state?.message || 'O Android não conseguiu concluir o download.')
+      await sleep(650)
+    }
+    return { ok:true, mode:'android-download-manager-background', id, filename, progress:lastProgress < 0 ? 0 : lastProgress }
   }
 
+  onStatus?.('downloading', { filename })
+  if (Capacitor.isNativePlatform()) {
+    // Compatibilidade com APKs antigos que carregam o frontend hospedado, mas ainda
+    // não possuem o plugin nativo incluído no binário.
+    const { Browser } = await import('@capacitor/browser')
+    await Browser.open({ url, windowName:'_blank' })
+    onStatus?.('started', { filename })
+    return { ok:true, mode:'android-browser-fallback', filename }
+  }
   const a = document.createElement('a')
-  a.href = url
-  a.rel = 'noopener noreferrer'
-  a.target = Capacitor.isNativePlatform() ? '_blank' : '_self'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  return { mode: Capacitor.isNativePlatform() ? 'native-fallback' : 'browser' }
+  a.href = url; a.download = filename; a.rel = 'noopener noreferrer'; a.target = '_self'
+  document.body.appendChild(a); a.click(); a.remove()
+  onStatus?.('started', { filename })
+  return { ok:true, mode:'browser', filename }
 }
 
 function artifactPublicUrl(artifactId, ticket) {
@@ -79,6 +107,7 @@ export const githubService = {
   /* ── Sprint 3 ─────────────────────────────────────────── */
   readme:    (owner, repo) => api(`/github/repos/${owner}/${repo}/readme`),
   commits:   (owner, repo, page = 1) => api(`/github/repos/${owner}/${repo}/commits?per_page=20&page=${page}`),
+  commitDetail: (owner, repo, sha) => api(`/github/repos/${owner}/${repo}/commits/${encodeURIComponent(sha)}`),
   releases:  (owner, repo) => api(`/github/repos/${owner}/${repo}/releases`),
   artifacts: (owner, repo) => api(`/github/repos/${owner}/${repo}/artifacts`),
   latestApk: (owner, repo) => api(`/github/repos/${owner}/${repo}/latest-apk`, { timeoutMs: 15000 }),
@@ -171,32 +200,33 @@ export const githubService = {
     const { onStatus } = options || {}
     onStatus?.('connecting')
     const prepared = await githubService.prepararDownloadReleaseAsset(assetId, owner, repo)
-    onStatus?.('downloading', prepared)
     const url = releaseAssetPublicUrl(assetId, prepared.ticket)
-    const opened = await abrirDownloadDireto(url)
-    onStatus?.('started', { ...prepared, ...opened })
-    return { ok: true, ...prepared, ...opened, url, nomeOriginal: nome, source: 'release' }
+    const result = await baixarComGerenciador(url, prepared.filename || nome || `${repo}.apk`, 'application/vnd.android.package-archive', onStatus)
+    return { ...result, ...prepared, url, nomeOriginal:nome, source:'release' }
   },
 
   async baixarArtifact(artifactId, owner, repo, nome = '', options = {}) {
     const { preferApk = false, onStatus } = options || {}
     onStatus?.('connecting')
     const prepared = await githubService.prepararDownloadArtifact(artifactId, owner, repo, { preferApk })
-    onStatus?.('downloading', prepared)
     const url = artifactPublicUrl(artifactId, prepared.ticket)
-    const opened = await abrirDownloadDireto(url)
-    onStatus?.('started', { ...prepared, ...opened })
-    return { ok: true, ...prepared, ...opened, url, nomeOriginal: nome }
+    const mime = prepared.format === 'apk' ? 'application/vnd.android.package-archive' : 'application/zip'
+    const result = await baixarComGerenciador(url, prepared.filename || nome || `artifact-${artifactId}.${prepared.format || 'zip'}`, mime, onStatus)
+    return { ...result, ...prepared, url, nomeOriginal:nome }
   },
 
-  /** Proxy autenticado — baixa o código-fonte do repo como ZIP */
-  downloadZipUrl: (owner, repo, branch = '') => {
-    const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
-    return `${BASE_URL}/github/repos/${owner}/${repo}/download-zip${q}`
-  },
-  baixarZip: (owner, repo, branch = '') => {
-    const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
-    return baixarAutenticado(`${BASE_URL}/github/repos/${owner}/${repo}/download-zip${q}`, `${repo || 'projeto'}-${branch || 'main'}.zip`)
+  /** Download de código-fonte com ticket temporário e nome projeto-versão.zip. */
+  prepararDownloadZip: (owner, repo, ref = '') => api(`/github/repos/${owner}/${repo}/download-ticket`, {
+    method:'POST', body:JSON.stringify({ ref }), timeoutMs:20000,
+  }),
+  downloadZipUrl: (owner, repo, ticket) => `${BASE_URL}/github/repos/${owner}/${repo}/download-public?ticket=${encodeURIComponent(ticket)}`,
+  async baixarZip(owner, repo, ref = '', options = {}) {
+    const { onStatus } = options || {}
+    onStatus?.('connecting')
+    const prepared = await githubService.prepararDownloadZip(owner, repo, ref)
+    const url = githubService.downloadZipUrl(owner, repo, prepared.ticket)
+    const result = await baixarComGerenciador(url, prepared.filename || `${repo}-source.zip`, 'application/zip', onStatus)
+    return { ...result, ...prepared, url }
   },
 
   preflightPublicacao: (owner, repo, config = {}) => api(`/github/repos/${owner}/${repo}/publicar-pacote/preflight`, { method:'POST', body:JSON.stringify(config), timeoutMs:30000 }),

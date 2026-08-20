@@ -776,83 +776,91 @@ function AbaMeta({ metaDraft, setMetaDraft, projetosLocais, salvandoMeta, onSalv
 
 /* ── ABA: Commits ────────────────────────────────────────── */
 function AbaCommits({ commits, owner, repo, toastShow }) {
+  const [lista, setLista] = useState(commits || [])
+  const [page, setPage] = useState(1)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState((commits || []).length >= 20)
+  const [busca, setBusca] = useState('')
+  const [aberto, setAberto] = useState(null)
+  const [detalhes, setDetalhes] = useState({})
+  const [loadingDetail, setLoadingDetail] = useState(null)
+  const [download, setDownload] = useState({})
+
+  useEffect(() => { setLista(commits || []); setPage(1); setHasMore((commits || []).length >= 20) }, [commits])
   if (!commits) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
   if (commits.length === 0) return <div style={{ fontSize: FONT.base, color: C.muted }}>Sem commits encontrados.</div>
-  return (
-    <>
-      <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Commits recentes ({commits.length})</DSSectionTitle>
-      <div style={{ display: 'grid', gap: SPACE.md }}>
-        {commits.map((c, i) => (
-          <div key={i} style={{
-            background: C.surface, border: `1px solid ${C.border}`,
-            borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px 14px`,
-            display: 'flex', gap: SPACE.md + 2, alignItems: 'flex-start',
-          }}>
-            {c.avatar && (
-              <img src={c.avatar} alt={c.autor}
-                style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 2 }} />
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: FONT.base, color: C.text,
-                fontWeight: 600, wordBreak: 'break-word', lineHeight: 1.4,
-              }}>
-                {c.mensagem}
-              </div>
-              <div style={{
-                fontSize: FONT.xs, color: C.muted, marginTop: 3,
-                display: 'flex', gap: SPACE.md, flexWrap: 'wrap', alignItems: 'center',
-              }}>
-                <a
-                  href={c.url} target="_blank" rel="noopener noreferrer"
-                  title="Abrir commit no GitHub"
-                  style={{ fontFamily: 'monospace', color: C.blue, textDecoration: 'none' }}
-                >
-                  {c.sha}
-                </a>
-                <span>{c.autor}</span>
-                <span>{relTime(c.data)}</span>
-              </div>
-            </div>
 
-            {/* Download do código neste commit */}
-            {owner && repo && c.shaFull && (
-              <button
-                type="button"
-                title={`Baixar código-fonte no commit ${c.sha}`}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  flexShrink: 0, alignSelf: 'center', cursor: 'pointer',
-                  fontSize: FONT.xs, fontWeight: 700, color: C.muted,
-                  background: C.surface2, border: `1px solid ${C.border}`,
-                  borderRadius: RADIUS.sm, padding: '4px 8px',
-                  transition: 'all .15s', whiteSpace: 'nowrap',
-                }}
-                onClick={() => githubService.baixarZip(owner, repo, c.shaFull)
-                  .catch(e => toastShow?.(e.message || 'Falha ao baixar este commit.', 'erro'))}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = C.accent
-                  e.currentTarget.style.color = C.text
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = C.border
-                  e.currentTarget.style.color = C.muted
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                  width="11" height="11">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Baixar
-              </button>
-            )}
+  const termo = busca.trim().toLowerCase()
+  const filtrados = termo ? lista.filter(c => [c.mensagem,c.descricao,c.autor,c.autorLogin,c.sha].some(v => String(v || '').toLowerCase().includes(termo))) : lista
+
+  async function alternar(c) {
+    if (aberto === c.shaFull) { setAberto(null); return }
+    setAberto(c.shaFull)
+    if (!detalhes[c.shaFull]) {
+      setLoadingDetail(c.shaFull)
+      try { const d = await githubService.commitDetail(owner, repo, c.shaFull); setDetalhes(prev => ({...prev,[c.shaFull]:d})) }
+      catch(e){ toastShow?.(e.message || 'Não foi possível carregar os detalhes do commit.','erro') }
+      finally { setLoadingDetail(null) }
+    }
+  }
+
+  async function carregarMais() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const d = await githubService.commits(owner, repo, page + 1)
+      const novos = d.commits || []
+      setLista(prev => [...prev, ...novos]); setPage(p => p + 1); setHasMore(Boolean(d.hasMore ?? novos.length >= 20))
+    } catch(e){ toastShow?.(e.message || 'Falha ao carregar mais commits.','erro') }
+    finally { setLoadingMore(false) }
+  }
+
+  async function baixar(c, e) {
+    e.stopPropagation()
+    setDownload(prev => ({...prev,[c.shaFull]:{state:'connecting',progress:0}}))
+    try {
+      const result = await githubService.baixarZip(owner, repo, c.shaFull, { onStatus:(state,info={}) => {
+        const mapped = state === 'completed' ? 'completed' : state === 'failed' ? 'error' : state
+        setDownload(prev => ({...prev,[c.shaFull]:{state:mapped,progress:info.progress || 0,filename:info.filename || prev[c.shaFull]?.filename}}))
+      }})
+      setDownload(prev => ({...prev,[c.shaFull]:{state:result.mode?.startsWith('android')?'completed':'started',progress:100,filename:result.filename}}))
+    } catch(e){ setDownload(prev=>({...prev,[c.shaFull]:{state:'error',progress:0}})); toastShow?.(e.message || 'Falha ao baixar este commit.','erro') }
+  }
+
+  return <div className="gh-commits-page">
+    <div className="gh-commits-head">
+      <div><small>HISTÓRICO GIT</small><h3>Commits</h3><p>{lista.length} carregados · abra um commit para ver arquivos e alterações.</p></div>
+      <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar mensagem, autor ou SHA…" aria-label="Buscar commits" />
+    </div>
+    <div className="gh-commit-list">
+      {filtrados.map(c => {
+        const d=detalhes[c.shaFull]; const isOpen=aberto===c.shaFull; const dl=download[c.shaFull]||{}; const busy=['connecting','queued','progress','downloading'].includes(dl.state)
+        return <article key={c.shaFull || c.sha} className={`gh-commit-card ${isOpen?'open':''}`}>
+          <button type="button" className="gh-commit-summary" onClick={()=>alternar(c)}>
+            <span className="gh-commit-avatar">{c.avatar?<img src={c.avatar} alt=""/>:(c.autor||'?').slice(0,1).toUpperCase()}</span>
+            <span className="gh-commit-main"><b>{c.mensagem}</b>{c.descricao&&<small>{c.descricao.split('\n')[0]}</small>}<span className="gh-commit-meta"><code>{c.sha}</code><em>{c.autor}</em><em>{relTime(c.data)}</em>{c.verificado&&<i>✓ verificado</i>}</span></span>
+            <span className="gh-commit-chevron">{isOpen?'⌃':'⌄'}</span>
+          </button>
+          <div className="gh-commit-actions">
+            <button type="button" onClick={e=>{e.stopPropagation();navigator.clipboard?.writeText(c.shaFull);toastShow?.('SHA copiado.')}}>Copiar SHA</button>
+            <a href={c.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>GitHub ↗</a>
+            <button type="button" disabled={busy} onClick={e=>baixar(c,e)}>{busy?`${dl.progress||0}%`:dl.state==='completed'||dl.state==='started'?'Baixado ✓':dl.state==='error'?'Tentar novamente':'Baixar ZIP'}</button>
           </div>
-        ))}
-      </div>
-    </>
-  )
+          {busy&&<div className="gh-commit-download-progress"><span style={{width:`${dl.progress||3}%`}}/></div>}
+          {isOpen&&<div className="gh-commit-detail">
+            {loadingDetail===c.shaFull?<div className="gh-commit-loading">Carregando alterações…</div>:d?<>
+              <div className="gh-commit-stats"><div><small>ARQUIVOS</small><b>{d.arquivos?.length||0}</b></div><div className="plus"><small>ADIÇÕES</small><b>+{d.stats?.additions||0}</b></div><div className="minus"><small>REMOÇÕES</small><b>-{d.stats?.deletions||0}</b></div><div><small>TOTAL</small><b>{d.stats?.total||0}</b></div></div>
+              {d.mensagem?.includes('\n')&&<pre className="gh-commit-message">{d.mensagem}</pre>}
+              <div className="gh-commit-files">{(d.arquivos||[]).slice(0,30).map(f=><a key={f.nome} href={f.url||undefined} target={f.url?'_blank':undefined} rel="noopener noreferrer"><span className={`status ${f.status}`}>{f.status==='added'?'A':f.status==='removed'?'D':f.status==='renamed'?'R':'M'}</span><b>{f.nome}</b><small><i>+{f.additions}</i><em>-{f.deletions}</em></small></a>)}</div>
+              {(d.arquivos||[]).length>30&&<div className="gh-commit-loading">+ {(d.arquivos||[]).length-30} arquivo(s) adicionais · abra no GitHub para ver todos.</div>}
+            </>:<div className="gh-commit-loading">Detalhes indisponíveis.</div>}
+          </div>}
+        </article>
+      })}
+      {!filtrados.length&&<div className="gh-commit-empty">Nenhum commit corresponde à busca.</div>}
+    </div>
+    {!termo&&hasMore&&<button type="button" className="gh-commit-more" disabled={loadingMore} onClick={carregarMais}>{loadingMore?'Carregando…':'Carregar mais commits'}</button>}
+  </div>
 }
 
 /* ── ABA: Releases ───────────────────────────────────────── */
@@ -940,11 +948,13 @@ function ArtifactDownloadCard({ artifact: a, owner, repo, toastShow }) {
   const isApk = ehArtefatoApk(a)
   const isZip = /zip/i.test(a.nome || '') && !isApk
   const type = isApk ? 'APK' : isZip ? 'ZIP' : 'ARQUIVO'
-  const busy = ['connecting', 'preparing', 'downloading'].includes(downloadState)
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const busy = ['connecting', 'preparing', 'queued', 'progress', 'downloading'].includes(downloadState)
 
   async function iniciarDownload() {
     if (a.expirado || busy) return
     setDownloadInfo(null)
+    setDownloadProgress(0)
     setDownloadState('connecting')
     const preparingTimer = setTimeout(() => setDownloadState(prev => prev === 'connecting' ? 'preparing' : prev), 450)
     try {
@@ -952,13 +962,17 @@ function ArtifactDownloadCard({ artifact: a, owner, repo, toastShow }) {
         preferApk: isApk,
         onStatus: (status, info) => {
           if (status === 'connecting') setDownloadState('connecting')
+          if (status === 'queued') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadState('queued') }
+          if (status === 'progress') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadProgress(info?.progress || 0); setDownloadState('progress') }
           if (status === 'downloading') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadState('downloading') }
+          if (status === 'completed') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadProgress(100); setDownloadState('completed') }
           if (status === 'started') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadState('started') }
         },
       })
       setDownloadInfo(result)
-      setDownloadState('started')
-      setTimeout(() => setDownloadState(prev => prev === 'started' ? 'idle' : prev), 5000)
+      setDownloadState(result.mode?.startsWith('android') ? 'completed' : 'started')
+      if (result.mode?.startsWith('android')) setDownloadProgress(100)
+      setTimeout(() => setDownloadState(prev => ['started','completed'].includes(prev) ? 'idle' : prev), 6500)
     } catch (e) {
       clearTimeout(preparingTimer)
       setDownloadState('error')
@@ -968,8 +982,11 @@ function ArtifactDownloadCard({ artifact: a, owner, repo, toastShow }) {
 
   const statusText = downloadState === 'connecting' ? 'Conectando…'
     : downloadState === 'preparing' ? `Preparando ${isApk ? 'APK' : 'arquivo'}…`
-    : downloadState === 'downloading' ? 'Abrindo download…'
-    : downloadState === 'started' ? (downloadInfo?.mode === 'android-browser' ? 'Download aberto no Android ✓' : 'Download iniciado ✓')
+    : downloadState === 'queued' ? 'Na fila do Android…'
+    : downloadState === 'progress' ? `Baixando… ${downloadProgress}%`
+    : downloadState === 'downloading' ? 'Iniciando download…'
+    : downloadState === 'completed' ? 'Download concluído ✓'
+    : downloadState === 'started' ? 'Download iniciado ✓'
     : downloadState === 'error' ? 'Falhou — toque para tentar de novo'
     : `Baixar ${isApk ? 'APK' : isZip ? 'ZIP' : 'arquivo'}`
 
@@ -1003,11 +1020,12 @@ function ArtifactDownloadCard({ artifact: a, owner, repo, toastShow }) {
         {a.expirado ? (
           <span className="gh-artifact-unavailable">Download indisponível</span>
         ) : (
-          <span className={`gh-artifact-download-state ${busy ? 'busy' : ''} ${downloadState === 'started' ? 'success' : ''} ${downloadState === 'error' ? 'error' : ''}`}>
-            <span className="gh-artifact-download-icon" aria-hidden="true">{busy ? '↻' : downloadState === 'started' ? '✓' : '↓'}</span>
-            <span><b>{statusText}</b>{downloadInfo?.filename && downloadState === 'started' && <small>{downloadInfo.filename}</small>}</span>
+          <span className={`gh-artifact-download-state ${busy ? 'busy' : ''} ${['started','completed'].includes(downloadState) ? 'success' : ''} ${downloadState === 'error' ? 'error' : ''}`}>
+            <span className="gh-artifact-download-icon" aria-hidden="true">{busy ? '↻' : ['started','completed'].includes(downloadState) ? '✓' : '↓'}</span>
+            <span><b>{statusText}</b>{downloadInfo?.filename && ['started','completed'].includes(downloadState) && <small>{downloadInfo.filename}</small>}</span>
           </span>
         )}
+        {busy && <div className="gh-artifact-progress" aria-label={`Progresso ${downloadProgress}%`}><span style={{width:`${Math.max(downloadProgress,3)}%`}} /></div>}
       </div>
     </article>
   )
@@ -2106,6 +2124,7 @@ function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
   const cardRef = useRef(null)
   const [latestApk, setLatestApk] = useState(undefined)
   const [apkDownloadState, setApkDownloadState] = useState('idle')
+  const [apkProgress, setApkProgress] = useState(0)
 
   useEffect(() => {
     const [owner, nome] = String(repo.nomeCompleto || '').split('/')
@@ -2136,26 +2155,33 @@ function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
     if (!latestApk || ['connecting', 'downloading'].includes(apkDownloadState)) return
     const [owner, nome] = String(repo.nomeCompleto || '').split('/')
     try {
+      setApkProgress(0)
       setApkDownloadState('connecting')
-      const download = latestApk.source === 'release'
+      const download = await (latestApk.source === 'release'
         ? githubService.baixarReleaseApk(latestApk.id, owner, nome, latestApk.nome, {
-            onStatus: status => {
+            onStatus: (status, info) => {
               if (status === 'connecting') setApkDownloadState('connecting')
+              if (status === 'queued') setApkDownloadState('downloading')
+              if (status === 'progress') { setApkProgress(info?.progress || 0); setApkDownloadState('downloading') }
               if (status === 'downloading') setApkDownloadState('downloading')
+              if (status === 'completed') { setApkProgress(100); setApkDownloadState('completed') }
               if (status === 'started') setApkDownloadState('started')
             },
           })
         : githubService.baixarArtifact(latestApk.id, owner, nome, latestApk.nome, {
             preferApk: true,
-            onStatus: status => {
+            onStatus: (status, info) => {
               if (status === 'connecting') setApkDownloadState('connecting')
+              if (status === 'queued') setApkDownloadState('downloading')
+              if (status === 'progress') { setApkProgress(info?.progress || 0); setApkDownloadState('downloading') }
               if (status === 'downloading') setApkDownloadState('downloading')
+              if (status === 'completed') { setApkProgress(100); setApkDownloadState('completed') }
               if (status === 'started') setApkDownloadState('started')
             },
-          })
-      await download
-      setApkDownloadState('started')
-      setTimeout(() => setApkDownloadState(prev => prev === 'started' ? 'idle' : prev), 4500)
+          }))
+      setApkDownloadState(download.mode?.startsWith('android') ? 'completed' : 'started')
+      if (download.mode?.startsWith('android')) setApkProgress(100)
+      setTimeout(() => setApkDownloadState(prev => ['started','completed'].includes(prev) ? 'idle' : prev), 6000)
     } catch (err) {
       setApkDownloadState('error')
       toastShow?.(err.message || 'Falha ao baixar APK.', 'erro')
@@ -2163,7 +2189,8 @@ function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
   }
 
   const apkLabel = apkDownloadState === 'connecting' ? 'Conectando…'
-    : apkDownloadState === 'downloading' ? 'Baixando…'
+    : apkDownloadState === 'downloading' ? `Baixando ${apkProgress}%`
+    : apkDownloadState === 'completed' ? 'Baixado ✓'
     : apkDownloadState === 'started' ? 'Iniciado ✓'
     : apkDownloadState === 'error' ? 'Tentar APK'
     : 'Baixar APK'
@@ -2188,8 +2215,8 @@ function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
         <span aria-hidden="true" style={{ color:C.muted, fontSize:18, lineHeight:1 }}>›</span>
       </div>
 
-      <p style={{ margin:0, color:C.muted, fontSize:FONT.md, lineHeight:1.5, minHeight:38 }}>
-        {resumo.length > 145 ? resumo.slice(0,145) + '…' : resumo}
+      <p className="gh-repo-description" style={{ margin:0, color:C.muted, fontSize:FONT.md, lineHeight:1.5 }}>
+        {resumo}
       </p>
 
       {insight && (insight.produto || insight.tipo || insight.versao) && (
@@ -2223,12 +2250,12 @@ function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
         {latestApk && (
           <button
             type="button"
-            className={`gh-repo-apk-btn ${['connecting','downloading'].includes(apkDownloadState) ? 'busy' : ''} ${apkDownloadState === 'started' ? 'success' : ''} ${apkDownloadState === 'error' ? 'error' : ''}`}
+            className={`gh-repo-apk-btn ${['connecting','downloading'].includes(apkDownloadState) ? 'busy' : ''} ${['started','completed'].includes(apkDownloadState) ? 'success' : ''} ${apkDownloadState === 'error' ? 'error' : ''}`}
             onClick={baixarApkRapido}
             aria-disabled={apkDownloadState === 'connecting' || apkDownloadState === 'downloading'}
             title={`${latestApk.source === 'release' ? 'Release' : 'GitHub Actions'} · ${latestApk.apkFileName || latestApk.nome || 'APK mais recente'}`}
           >
-            <span aria-hidden="true">{apkDownloadState === 'started' ? '✓' : apkDownloadState === 'connecting' || apkDownloadState === 'downloading' ? '↻' : '↓'}</span>
+            <span aria-hidden="true">{['started','completed'].includes(apkDownloadState) ? '✓' : apkDownloadState === 'connecting' || apkDownloadState === 'downloading' ? '↻' : '↓'}</span>
             {apkLabel}
           </button>
         )}
@@ -2433,6 +2460,10 @@ export default function AdminGitHub() {
         .gh-review-compact,.gh-publish-minimal,.gh-result-minimal{min-height:0!important;display:grid;gap:10px;padding:2px 0}.gh-preflight-summary{grid-template-columns:30px minmax(0,1fr)!important;padding:10px 11px!important}.gh-preflight-summary small{font-size:9px!important}.gh-review-summary-line,.gh-result-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.gh-review-summary-line>span,.gh-result-summary>span{min-width:0;padding:8px 9px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2)}.gh-review-summary-line small,.gh-result-summary small{display:block;font-size:6.5px;letter-spacing:.08em;font-weight:900;color:var(--adm-muted)}.gh-review-summary-line b,.gh-result-summary b{display:block;margin-top:2px;font-size:9.5px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-compact-warning{padding:7px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--adm-amber) 30%,var(--adm-border));background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));font-size:8.5px;color:var(--adm-amber)}.gh-disclosure-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:9px;padding:9px 10px;font-size:9.5px;font-weight:850;cursor:pointer}.gh-disclosure-button b{font-size:12px;color:var(--adm-muted)}.gh-disclosure-panel{display:grid;gap:8px;padding:9px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2)}.gh-review-detail-actions,.gh-events-actions{display:flex;justify-content:flex-end}.gh-publish-minimal .gh-publish-monitor{padding:12px;gap:9px}.gh-publish-minimal .gh-publish-monitor-current{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px 9px}.gh-publish-minimal .gh-publish-monitor-current code{font-size:9px}.gh-publish-minimal .gh-publish-monitor-current em{font-size:7.5px}.gh-publish-error-help{display:grid;gap:4px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--adm-red) 34%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-red) 5%,var(--adm-surface))}.gh-publish-error-help b{font-size:9px;color:var(--adm-red)}.gh-publish-error-help span{font-size:8.5px;color:var(--adm-text);line-height:1.4}.gh-publish-error-help small{font-size:8px;color:var(--adm-muted);line-height:1.4}.gh-events-panel{padding:7px}.gh-events-panel .gh-live-log{max-height:210px}.gh-events-panel .gh-log-line{grid-template-columns:48px 14px minmax(0,1fr);padding:6px 7px}.gh-events-panel .gh-log-line b{font-size:8px}.gh-events-panel .gh-log-line small{font-size:7px}.gh-result-hero{display:flex;align-items:center;gap:10px;padding:5px 1px}.gh-result-hero .gh-wizard-success-icon{margin:0!important;flex:0 0 auto;width:38px;height:38px}.gh-result-hero h3{margin:0;font-size:15px;color:var(--adm-text)}.gh-result-hero p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-result-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.gh-result-details{padding:9px}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-result-minimal .gh-postcheck{margin-top:2px}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr)) auto!important;width:100%;gap:7px!important}.gh-repo-head-action{width:100%!important;min-width:0!important}.gh-artifacts-hero{grid-template-columns:auto minmax(0,1fr)}.gh-artifacts-stats{grid-column:1/-1;width:100%}.gh-artifacts-grid{grid-template-columns:1fr}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-command-card{min-height:0;padding:10px 11px;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:8px;border-radius:13px}.gh-command-card-icon{width:36px;height:36px;font-size:16px;border-radius:11px}.gh-command-card-copy b{font-size:12.5px}.gh-command-card-copy small{font-size:9.5px;line-height:1.3}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
+
+        .gh-repo-description{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;min-height:0!important}
+        .gh-commits-page{display:grid;gap:12px}.gh-commits-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,340px);align-items:end;gap:14px;padding:14px;border:1px solid var(--adm-border);border-radius:14px;background:linear-gradient(135deg,var(--adm-surface),var(--adm-surface2))}.gh-commits-head small{font-size:7px;font-weight:900;letter-spacing:.1em;color:var(--adm-accent)}.gh-commits-head h3{margin:3px 0 3px;font-size:17px}.gh-commits-head p{margin:0;color:var(--adm-muted);font-size:9px}.gh-commits-head input{width:100%;min-height:37px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface);color:var(--adm-text);padding:0 11px;font:500 10px var(--adm-font);outline:none}.gh-commit-list{display:grid;gap:8px}.gh-commit-card{border:1px solid var(--adm-border);border-radius:13px;background:var(--adm-surface);overflow:hidden}.gh-commit-card.open{border-color:color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border))}.gh-commit-summary{width:100%;border:0;background:transparent;color:inherit;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:start;padding:12px;text-align:left;cursor:pointer}.gh-commit-summary:hover{background:var(--adm-surface2)}.gh-commit-avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;overflow:hidden;background:var(--adm-surface2);border:1px solid var(--adm-border);font-size:11px;font-weight:900}.gh-commit-avatar img{width:100%;height:100%;object-fit:cover}.gh-commit-main{min-width:0;display:grid;gap:3px}.gh-commit-main>b{font-size:11.5px;line-height:1.35;overflow-wrap:anywhere}.gh-commit-main>small{font-size:8.5px;color:var(--adm-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-commit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}.gh-commit-meta code{font:750 8px var(--adm-mono);color:var(--adm-accent);background:color-mix(in srgb,var(--adm-accent) 7%,var(--adm-surface2));padding:2px 5px;border-radius:5px}.gh-commit-meta em{font-style:normal;font-size:8px;color:var(--adm-muted)}.gh-commit-meta i{font-style:normal;font-size:7.5px;font-weight:800;color:var(--adm-success)}.gh-commit-chevron{color:var(--adm-muted);font-size:14px}.gh-commit-actions{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 10px 56px}.gh-commit-actions button,.gh-commit-actions a{border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-muted);border-radius:7px;padding:5px 8px;text-decoration:none;font:750 8.5px var(--adm-font);cursor:pointer}.gh-commit-actions button:last-child{color:var(--adm-accent);border-color:color-mix(in srgb,var(--adm-accent) 24%,var(--adm-border))}.gh-commit-actions button:disabled{opacity:.65;cursor:wait}.gh-commit-download-progress{height:3px;background:var(--adm-surface2);overflow:hidden}.gh-commit-download-progress span{height:100%;display:block;background:var(--adm-accent);transition:width .3s ease}.gh-commit-detail{border-top:1px solid var(--adm-border);padding:11px 12px 12px;background:var(--adm-surface2);display:grid;gap:10px}.gh-commit-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.gh-commit-stats>div{padding:7px 8px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface)}.gh-commit-stats small{display:block;font-size:6.5px;color:var(--adm-muted);font-weight:850;letter-spacing:.05em}.gh-commit-stats b{display:block;margin-top:2px;font-size:10px}.gh-commit-stats .plus b,.gh-commit-files i{color:var(--adm-success)}.gh-commit-stats .minus b,.gh-commit-files em{color:var(--adm-red)}.gh-commit-message{margin:0;padding:9px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface);white-space:pre-wrap;overflow-wrap:anywhere;font:9px/1.5 var(--adm-mono);color:var(--adm-muted)}.gh-commit-files{display:grid;gap:4px}.gh-commit-files>a{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:7px;align-items:center;padding:6px 7px;border:1px solid var(--adm-border);border-radius:7px;background:var(--adm-surface);text-decoration:none;color:inherit}.gh-commit-files .status{width:20px;height:20px;display:grid;place-items:center;border-radius:5px;background:var(--adm-surface2);font:900 7px var(--adm-mono);color:var(--adm-muted)}.gh-commit-files .status.added{color:var(--adm-success)}.gh-commit-files .status.removed{color:var(--adm-red)}.gh-commit-files b{font:600 8.5px var(--adm-mono);overflow-wrap:anywhere}.gh-commit-files small{display:flex;gap:5px;font:750 7.5px var(--adm-mono)}.gh-commit-files i,.gh-commit-files em{font-style:normal}.gh-commit-loading,.gh-commit-empty{font-size:9px;color:var(--adm-muted);padding:8px}.gh-commit-more{justify-self:center;border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:8px;padding:7px 12px;font:750 9px var(--adm-font);cursor:pointer}.gh-artifact-footer{position:relative}.gh-artifact-progress{position:absolute;left:11px;right:11px;bottom:5px;height:3px;border-radius:99px;overflow:hidden;background:var(--adm-border)}.gh-artifact-progress span{display:block;height:100%;background:var(--adm-accent);transition:width .28s ease}
+        @media(max-width:700px){.gh-commits-head{grid-template-columns:1fr}.gh-commit-actions{padding-left:12px}.gh-commit-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-footer{gap:7px}.gh-repo-apk-btn{margin-left:auto;padding:6px 8px;font-size:9px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px}.gh-command-card{min-width:0;min-height:96px;padding:7px 4px 7px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;text-align:center}.gh-command-card-icon{width:34px;height:34px;flex:0 0 34px;font-size:15px;border-radius:50%}.gh-command-card-copy{width:100%;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}.gh-command-card-copy b{width:100%;font-size:10.5px;line-height:1.12;overflow-wrap:anywhere}.gh-command-card-copy small{width:100%;font-size:7.9px;line-height:1.2;-webkit-line-clamp:2;overflow-wrap:anywhere}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-package-picker{grid-template-columns:34px minmax(0,1fr) auto;padding:9px;gap:7px}.gh-package-picker-icon{width:32px;height:32px;font-size:15px}.gh-package-picker-copy b{font-size:10.5px}.gh-package-picker-copy small{font-size:8px}.gh-package-picker-action{font-size:8px;padding:6px}.gh-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-option-grid .gh-option-card:last-child{grid-column:1/-1}.gh-final-review-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-dashboard-stage{grid-template-columns:24px minmax(0,1fr);padding:8px;gap:6px}.gh-dashboard-stage-icon{width:24px;height:24px}.gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:620px){.gh-files-hero{grid-template-columns:1fr}.gh-files-hero-actions{display:grid;grid-template-columns:1fr 1fr}.gh-files-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-files-toolbar{align-items:flex-start}.gh-files-selectionbar{align-items:flex-start;flex-direction:column}.gh-files-selectionbar>div{width:100%;justify-content:flex-start}.gh-file-card{grid-template-columns:22px minmax(0,1fr) auto}.gh-file-meta{grid-column:2/3;justify-items:start;display:flex;gap:5px}.gh-file-row-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-file-row-actions>*{width:100%;justify-content:center}.gh-preflight-banner{grid-template-columns:28px minmax(0,1fr)}.gh-preflight-banner>button{grid-column:1/-1;width:100%}.gh-preflight-grid{grid-template-columns:1fr}.gh-version-journey b{font-size:13px}.gh-log-line{grid-template-columns:44px 16px minmax(0,1fr)}.gh-log-line>em{display:none}.gh-postcheck>span{grid-template-columns:20px 90px minmax(0,1fr)}.gh-live-head{display:grid;grid-template-columns:1fr auto}.gh-publish-monitor{padding:12px}.gh-publish-monitor-top strong{font-size:24px}.gh-publish-monitor-current{grid-template-columns:auto minmax(0,1fr)}.gh-publish-monitor-current em{grid-column:1/-1;text-align:right}.gh-publish-op{max-width:86px}.gh-file-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:620px){.gh-review-summary-line{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-review-summary-line>span{padding:7px 6px}.gh-review-summary-line b{font-size:8.5px}.gh-result-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-publish-minimal .gh-publish-monitor-current{grid-template-columns:minmax(0,1fr) auto}.gh-publish-minimal .gh-publish-monitor-current em{grid-column:auto;text-align:right}.gh-postcheck>span{grid-template-columns:20px 78px minmax(0,1fr)}}

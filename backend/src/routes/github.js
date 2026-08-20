@@ -1172,19 +1172,55 @@ router.get('/repos/:owner/:repo/readme', autenticar, async (req, res) => {
 /* GET /api/github/repos/:owner/:repo/commits */
 router.get('/repos/:owner/:repo/commits', autenticar, async (req, res) => {
   const { owner, repo } = req.params
-  const { per_page = 20, page = 1 } = req.query
+  const per_page = Math.min(50, Math.max(1, Number(req.query.per_page || 20)))
+  const page = Math.max(1, Number(req.query.page || 1))
   if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
   try {
     const commits = await githubFetch(`/repos/${owner}/${repo}/commits?per_page=${per_page}&page=${page}`)
-    const lista = commits.map(c => ({
-      sha: c.sha.slice(0, 7), mensagem: c.commit.message.split('\n')[0],
-      autor: c.commit.author.name, data: c.commit.author.date,
-      url: c.html_url, avatar: c.author?.avatar_url || null,
-    }))
-    res.json({ commits: lista })
+    const lista = commits.map(c => {
+      const fullMessage = String(c.commit?.message || '')
+      const [titulo, ...rest] = fullMessage.split('\n')
+      return {
+        sha: c.sha.slice(0, 7), shaFull: c.sha,
+        mensagem: titulo || '(commit sem mensagem)', descricao: rest.join('\n').trim(),
+        autor: c.commit?.author?.name || c.author?.login || 'Autor desconhecido',
+        autorLogin: c.author?.login || null, email: c.commit?.author?.email || null,
+        data: c.commit?.author?.date || null, url: c.html_url,
+        avatar: c.author?.avatar_url || null,
+        verificado: Boolean(c.commit?.verification?.verified),
+        motivoVerificacao: c.commit?.verification?.reason || null,
+        committer: c.commit?.committer?.name || null,
+        parents: Array.isArray(c.parents) ? c.parents.map(p => p.sha).filter(Boolean) : [],
+      }
+    })
+    res.json({ commits: lista, page, perPage: per_page, hasMore: lista.length === per_page })
   } catch (err) {
     res.status(err.status || 500).json({ erro: err.message, commits: [] })
   }
+})
+
+/* GET /api/github/repos/:owner/:repo/commits/:sha — detalhes sob demanda.
+   Evita multiplicar chamadas à API na listagem e só busca diff quando o usuário abre o commit. */
+router.get('/repos/:owner/:repo/commits/:sha', autenticar, async (req, res) => {
+  const { owner, repo, sha } = req.params
+  if (!validarNome(owner) || !validarNome(repo) || !/^[a-f0-9]{7,40}$/i.test(String(sha || ''))) return res.status(400).json({ erro: 'Commit inválido.' })
+  try {
+    const c = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`)
+    res.json({
+      sha: c.sha, url: c.html_url,
+      mensagem: c.commit?.message || '',
+      autor: c.commit?.author?.name || c.author?.login || 'Autor desconhecido',
+      autorLogin: c.author?.login || null, avatar: c.author?.avatar_url || null,
+      data: c.commit?.author?.date || null,
+      verificado: Boolean(c.commit?.verification?.verified), motivoVerificacao: c.commit?.verification?.reason || null,
+      stats: c.stats || { total:0, additions:0, deletions:0 },
+      arquivos: (c.files || []).map(f => ({
+        nome: f.filename, status: f.status, additions: f.additions || 0, deletions: f.deletions || 0,
+        changes: f.changes || 0, previousFilename: f.previous_filename || null, url: f.blob_url || null,
+      })),
+      parents: (c.parents || []).map(p => ({ sha: p.sha, url: p.html_url || null })),
+    })
+  } catch (err) { res.status(err.status || 500).json({ erro: err.message }) }
 })
 
 /* GET /api/github/repos/:owner/:repo/releases */
@@ -1385,6 +1421,20 @@ function signReleaseAssetDownloadTicket(payload) {
 function verifyReleaseAssetDownloadTicket(token) {
   const data = jwt.verify(token, bootstrapValue('JWT_SECRET'), { audience: 'github-release-apk-download' })
   if (data?.typ !== 'github-release-apk-download') throw new Error('Ticket de download inválido.')
+  return data
+}
+
+function signRepoZipDownloadTicket(payload) {
+  return jwt.sign(
+    { typ: 'github-repo-zip-download', ...payload },
+    bootstrapValue('JWT_SECRET'),
+    { expiresIn: '5m', audience: 'github-repo-zip-download' },
+  )
+}
+
+function verifyRepoZipDownloadTicket(token) {
+  const data = jwt.verify(token, bootstrapValue('JWT_SECRET'), { audience: 'github-repo-zip-download' })
+  if (data?.typ !== 'github-repo-zip-download') throw new Error('Ticket de download inválido.')
   return data
 }
 
@@ -2241,6 +2291,8 @@ router.get('/artifacts/:artifactId/download-public', async (req, res) => {
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     res.setHeader('Cache-Control', 'private, no-store')
+    const length = resp.headers.get('content-length')
+    if (length) res.setHeader('Content-Length', length)
     const { Readable } = await import('stream')
     Readable.fromWeb(resp.body).pipe(res)
   } catch (err) {
@@ -2360,62 +2412,81 @@ router.get('/artifacts/:artifactId/download', autenticar, async (req, res) => {
    GET /api/github/repos/:owner/:repo/download-zip
    Query: branch (opcional — usa default_branch se omitido)
 ═══════════════════════════════════════════════════════════ */
-router.get('/repos/:owner/:repo/download-zip', autenticar, async (req, res) => {
-  const { owner, repo }     = req.params
-  const { branch: qBranch } = req.query
-
-  if (!validarNome(owner) || !validarNome(repo))
-    return res.status(400).json({ erro: 'Nome de repositório inválido.' })
-
-  const { value: token } = await getCredential('github', 'GITHUB_TOKEN')
-  if (!token) return res.status(503).json({ erro: 'GITHUB_TOKEN não configurado.' })
-
-  try {
-    let branch = qBranch
-    if (!branch) {
-      try {
-        const repoData = await githubFetch(`/repos/${owner}/${repo}`)
-        branch = repoData.default_branch || 'main'
-      } catch { branch = 'main' }
-    }
-
-    const zipResp = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/zipball/${branch}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(90_000),
-      }
-    )
-
-    if (!zipResp.ok) {
-      const body = await zipResp.text().catch(() => '')
-      const msg  = zipResp.status === 404
-        ? `Repositório "${owner}/${repo}" não encontrado ou sem acesso.`
-        : zipResp.status === 403
-          ? 'Acesso negado. Verifique os escopos do GITHUB_TOKEN.'
-          : `GitHub retornou ${zipResp.status}: ${body.slice(0, 200)}`
-      return res.status(zipResp.status).json({ erro: msg })
-    }
-
-    const fileName = `${repo}-${branch}.zip`
-    res.setHeader('Content-Type', 'application/zip')
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
-
-    const cl = zipResp.headers.get('content-length')
-    if (cl) res.setHeader('Content-Length', cl)
-
-    const { Readable } = await import('stream')
-    Readable.fromWeb(zipResp.body).pipe(res)
-
-  } catch (err) {
-    if (!res.headersSent)
-      res.status(500).json({ erro: err.message })
+async function resolveRepoZipMeta(owner, repo, requestedRef = '') {
+  let ref = String(requestedRef || '').trim()
+  let repoData = null
+  if (!ref) {
+    repoData = await githubFetch(`/repos/${owner}/${repo}`)
+    ref = repoData.default_branch || 'main'
   }
+  let pkg = { name:'', version:'' }
+  try { pkg = await readRepoPackageInfo(owner, repo, ref) } catch { /* versão é opcional */ }
+  let version = String(pkg.version || '').trim()
+  if (!version) {
+    try {
+      const insight = await montarRepoInsight(owner, repo, repoData?.default_branch || ref)
+      version = String(insight?.versao || '').trim()
+    } catch { /* fallback abaixo */ }
+  }
+  const project = safeDownloadBase(repo).toLowerCase()
+  const filename = `${project}${version ? `-${safeDownloadBase(version)}` : '-source'}.zip`
+  return { ref, version, filename }
+}
+
+/* POST /api/github/repos/:owner/:repo/download-ticket
+   Gera URL temporária que pode ser entregue ao DownloadManager nativo sem cookies. */
+router.post('/repos/:owner/:repo/download-ticket', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro:'Nome de repositório inválido.' })
+  try {
+    const meta = await resolveRepoZipMeta(owner, repo, req.body?.ref || req.body?.branch || '')
+    const ticket = signRepoZipDownloadTicket({ owner, repo, ref:meta.ref, filename:meta.filename, uid:String(req.usuario?._id || '') })
+    res.json({ ok:true, ticket, filename:meta.filename, version:meta.version || '', ref:meta.ref, expiresInSeconds:300 })
+  } catch (err) { res.status(err.status || 500).json({ erro:err.message }) }
+})
+
+/* GET /api/github/repos/:owner/:repo/download-public?ticket=... */
+router.get('/repos/:owner/:repo/download-public', async (req, res) => {
+  const { owner, repo } = req.params
+  try {
+    const ticket = verifyRepoZipDownloadTicket(String(req.query.ticket || ''))
+    if (ticket.owner !== owner || ticket.repo !== repo) return res.status(403).json({ erro:'Ticket não corresponde ao repositório solicitado.' })
+    const { value: token } = await getCredential('github', 'GITHUB_TOKEN')
+    if (!token) return res.status(503).json({ erro:'GITHUB_TOKEN não configurado.' })
+    const zipResp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/zipball/${encodeURIComponent(ticket.ref || 'main')}`, {
+      headers:{ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', 'User-Agent':'AL-Sistemas' },
+      redirect:'follow', signal:AbortSignal.timeout(90_000),
+    })
+    if (!zipResp.ok) return res.status(zipResp.status).json({ erro:`GitHub retornou ${zipResp.status} ao preparar o ZIP.` })
+    const filename = `${safeDownloadBase(String(ticket.filename || `${repo}-source`).replace(/\.zip$/i,''))}.zip`
+    res.setHeader('Content-Type','application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.setHeader('Cache-Control','private, no-store')
+    const cl=zipResp.headers.get('content-length'); if(cl) res.setHeader('Content-Length',cl)
+    const { Readable } = await import('stream'); Readable.fromWeb(zipResp.body).pipe(res)
+  } catch (err) {
+    const jwtError=['JsonWebTokenError','NotBeforeError','TokenExpiredError'].includes(err?.name)
+    if(jwtError) return res.status(err?.name==='TokenExpiredError'?410:403).json({erro:err?.name==='TokenExpiredError'?'Este link de download expirou. Tente novamente.':'Link de download inválido.'})
+    if(!res.headersSent) res.status(err.status||500).json({erro:err.message})
+  }
+})
+
+/* Rota autenticada legada preservada para clientes antigos. Agora também usa nome projeto-versão.zip. */
+router.get('/repos/:owner/:repo/download-zip', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro:'Nome de repositório inválido.' })
+  const { value: token } = await getCredential('github','GITHUB_TOKEN')
+  if (!token) return res.status(503).json({ erro:'GITHUB_TOKEN não configurado.' })
+  try {
+    const meta = await resolveRepoZipMeta(owner, repo, req.query.branch || '')
+    const zipResp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/zipball/${encodeURIComponent(meta.ref)}`, {
+      headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}, redirect:'follow', signal:AbortSignal.timeout(90_000),
+    })
+    if(!zipResp.ok) return res.status(zipResp.status).json({erro:`GitHub retornou ${zipResp.status}.`})
+    res.setHeader('Content-Type','application/zip'); res.setHeader('Content-Disposition',`attachment; filename="${meta.filename}"`)
+    const cl=zipResp.headers.get('content-length'); if(cl) res.setHeader('Content-Length',cl)
+    const {Readable}=await import('stream'); Readable.fromWeb(zipResp.body).pipe(res)
+  } catch(err){ if(!res.headersSent) res.status(err.status||500).json({erro:err.message}) }
 })
 
 /* ═══════════════════════════════════════════════════════════

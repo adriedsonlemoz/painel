@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useSystemHealth } from '../../hooks/useSystemHealth'
 import { useSystemLogs } from '../../hooks/useSystemLogs'
 import { useUsersStats } from '../../hooks/useUsersStats'
-import { useProjetos } from '../../modules/projetos/useProjetos'
+import { useGitHubRepos } from '../../modules/github/useGitHubRepos.js'
 import { useNoticias } from '../../hooks/useNoticias'
 import { useEventos } from '../../hooks/useEventos'
 import { useBranding } from '../../context/BrandingContext'
@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const health = useSystemHealth()
   const logs = useSystemLogs({ limitErros: 5, limitAudit: 6 })
   const users = useUsersStats()
-  const projetos = useProjetos()
+  const githubProjects = useGitHubRepos({ sort: 'updated', per_page: 100 })
   const noticias = useNoticias({ limit: 5, status: 'publicada', ordem: '-data_publicacao' })
   const eventos = useEventos()
 
@@ -48,8 +48,8 @@ export default function AdminDashboard() {
   const systemOk = Boolean(health.api?.ok && health.mongodb?.ok)
   const news = noticias.noticias || []
   const future = (eventos.futuros || []).slice(0, 3)
-  const projects = projetos.projetos || projetos.items || []
-  const activeProjects = projects.filter(p => p?.ativo !== false).length
+  const projects = githubProjects.repos || []
+  const activeProjects = projects.filter(p => !p?.arquivado).length
   const unread = num(logs.contagemErros?.nao_lidos)
   const drafts = num(noticias.totalRasccunhos ?? noticias.rascunhos?.length)
   const alerts = [
@@ -77,13 +77,13 @@ export default function AdminDashboard() {
     </div></section>
 
     <section className="cd-panel" style={{ '--rail': 'var(--adm-accent)' }}><div className="cd-pad">
-      <div className="cd-section-head"><div><div className="cd-label">PROJETOS · EXECUÇÃO</div><div className="cd-title">Ambiente de projetos</div></div><Link className="cd-link" to="/admin/projetos">Gerenciar →</Link></div>
+      <div className="cd-section-head"><div><div className="cd-label">GITHUB · PROJETOS</div><div className="cd-title">Repositórios da conta</div></div><Link className="cd-link" to="/admin/github">Gerenciar →</Link></div>
       <div className="cd-project-summary">
-        <div className="cd-project-metric"><span>Cadastrados</span><b>{projetos.loading ? '—' : projects.length}</b></div>
-        <div className="cd-project-metric"><span>Ativos</span><b>{projetos.loading ? '—' : activeProjects}</b></div>
+        <div className="cd-project-metric"><span>Repositórios</span><b>{githubProjects.loading ? '—' : (githubProjects.total || projects.length)}</b></div>
+        <div className="cd-project-metric"><span>Ativos</span><b>{githubProjects.loading ? '—' : activeProjects}</b></div>
         <Link className="cd-project-jump" to="/admin/github">GitHub e APKs →</Link>
       </div>
-      {projetos.loading ? <div className="cd-empty">Lendo projetos…</div> : projects.length ? projects.slice(0, 4).map((p, i) => <div className="cd-project-row" key={p._id || p.id || i}><span className="cd-index">{String(i + 1).padStart(2, '0')}</span><div className="cd-row-main"><b>{p.nome || p.name || 'Projeto'}</b><span>{p.tipo || p.framework || p.caminho || p.path || 'Projeto gerenciado pelo painel'}</span></div><span className={`cd-state ${p.ativo === false ? 'warn' : ''}`}>{p.ativo === false ? 'PARADO' : 'ATIVO'}</span></div>) : <div className="cd-empty">Nenhum projeto local detectado. Quando houver projetos no Termux ou VPS, eles aparecerão aqui.</div>}
+      {githubProjects.loading ? <div className="cd-empty">Consultando GitHub…</div> : githubProjects.erro ? <div className="cd-empty">GitHub indisponível: {githubProjects.erro}</div> : projects.length ? projects.slice(0, 5).map((p, i) => <Link to="/admin/github" className="cd-project-row" style={{textDecoration:'none',color:'inherit'}} key={p.id || i}><span className="cd-index">{String(i + 1).padStart(2, '0')}</span><div className="cd-row-main"><b>{p.nome || 'Repositório'}</b><span>{p.descricao || `${p.linguagem || 'Código'} · ${p.nomeCompleto}`}</span></div><span className={`cd-state ${p.arquivado ? 'warn' : ''}`}>{p.arquivado ? 'ARQUIVADO' : (p.privado ? 'PRIVADO' : 'PÚBLICO')}</span></Link>) : <div className="cd-empty">Nenhum repositório disponível na conta GitHub configurada.</div>}
     </div></section>
 
     <div className="cd-grid">

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.140 — GitHub, commits e downloads nativos
+
+- Redesenha o histórico de commits com busca, paginação, detalhes sob demanda, arquivos alterados, adições/remoções, SHA copiável e acesso ao GitHub.
+- Corrige o download do código-fonte para usar `nome-do-projeto-versão.zip` quando a versão puder ser detectada no repositório.
+- Adiciona gerenciador de downloads nativo no APK usando o `DownloadManager` do Android, com progresso, conclusão, erro e salvamento em `Downloads/AL-Sistemas`.
+- APKs, artefatos e ZIPs passam a usar tickets temporários de download sem expor o token do GitHub.
+- A tela inicial administrativa passa a listar repositórios da conta GitHub configurada, em vez dos projetos locais do servidor.
+- Cards do módulo GitHub exibem a descrição completa e crescem conforme o conteúdo.
+- Mantém compatibilidade com o fluxo web e rotas legadas, sem remover funcionalidades anteriores.
+
+
 ## 1.0.139 — Ícone, Android e Home
 - Ícone aprovado “AL Sistemas” integrado aos assets PWA e ao build Android.
 - Workflow do APK passa a aplicar o ícone aprovado diretamente no app gerado.

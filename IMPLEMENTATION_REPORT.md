@@ -1,3 +1,13 @@
+
+## 1.0.140 — GitHub e downloads Android
+
+- O dashboard administrativo agora usa os repositórios retornados pela conta GitHub configurada.
+- O módulo de commits ganhou busca, paginação, detalhe sob demanda, resumo de alterações e download do snapshot.
+- ZIPs de código-fonte usam nome versionado (`projeto-versão.zip`) quando a versão é detectável.
+- O APK recebe um plugin Capacitor local que integra o `DownloadManager` do Android e salva em `Downloads/AL-Sistemas`, com consulta de progresso e conclusão pela interface.
+- Downloads públicos temporários são protegidos por tickets JWT curtos, sem expor `GITHUB_TOKEN`.
+- Descrições dos cards de repositório deixam de ser truncadas e passam a definir a altura natural do card.
+
 # Relatório de implementação — AL Sistemas
 
 ## Principais alterações
