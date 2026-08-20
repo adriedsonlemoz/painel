@@ -1,5 +1,28 @@
 import { api, setSessionToken, clearSessionToken, authMode, probeCookieSession, persistSessionToken, restorePersistentSession, clearPersistentSession } from './http.js'
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+function definitiveAuthFailure(error) {
+  return Number(error?.status || 0) === 401 || Number(error?.status || 0) === 403
+}
+
+async function fetchSessionResilient() {
+  // Render free pode precisar de alguns segundos para acordar. Uma falha de
+  // rede/503 durante esse período não significa que o JWT/cookie expirou.
+  const attempts = [12000, 22000, 22000]
+  let lastError = null
+  for (let i = 0; i < attempts.length; i += 1) {
+    try {
+      return await api('/auth/me', { timeoutMs: attempts[i] })
+    } catch (error) {
+      if (definitiveAuthFailure(error)) throw error
+      lastError = error
+      if (i < attempts.length - 1) await sleep(900 + (i * 700))
+    }
+  }
+  throw lastError || new Error('Não foi possível confirmar a sessão agora.')
+}
+
 export const authService = {
   async login(email, senha, manterConectado = false) {
     const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, senha, manter_conectado: manterConectado === true }) })
@@ -17,9 +40,14 @@ export const authService = {
         await clearPersistentSession()
         data.auth = { ...(data.auth || {}), transport:'cookie-cross-origin', bearerFallback:false }
       } else {
-        data.auth = { ...(data.auth || {}), transport:manterConectado ? 'bearer-persistent-native' : 'bearer-fallback', bearerFallback:true, persistent:manterConectado === true }
-        if (manterConectado) await persistSessionToken(data.access_token)
-        else await clearPersistentSession()
+        let persistent = false
+        if (manterConectado) {
+          persistent = await persistSessionToken(data.access_token)
+          setSessionToken(data.access_token, persistent ? 'bearer-persistent' : 'bearer-fallback')
+        } else {
+          await clearPersistentSession()
+        }
+        data.auth = { ...(data.auth || {}), transport:persistent ? 'bearer-persistent' : 'bearer-fallback', bearerFallback:true, persistent }
       }
     } else { clearSessionToken(); await clearPersistentSession() }
     return { data: { user: data.usuario, auth: data.auth || { transport: authMode() } }, error: null }
@@ -33,12 +61,18 @@ export const authService = {
   async getSession({ restore = false } = {}) {
     if (restore) await restorePersistentSession()
     try {
-      const data = await api('/auth/me')
+      const data = await fetchSessionResilient()
       return { data: { session: { user: data.usuario }, auth: data.auth || { transport: authMode() } }, error: null }
-    } catch {
-      clearSessionToken()
-      await clearPersistentSession()
-      return { data: { session: null, auth: { transport: 'none' } }, error: null }
+    } catch (error) {
+      // Só apaga uma sessão persistente quando o backend confirmou que ela é
+      // inválida/revogada. Timeout, cold start, Atlas reconectando ou CORS
+      // temporário preservam o token para a próxima tentativa.
+      if (definitiveAuthFailure(error)) {
+        clearSessionToken()
+        await clearPersistentSession()
+        return { data: { session: null, auth: { transport: 'none' } }, error: null }
+      }
+      return { data: { session: null, auth: { transport: authMode(), unavailable: true }, error }, error }
     }
   },
   onAuthChange(callback) {

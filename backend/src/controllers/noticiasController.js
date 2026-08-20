@@ -45,7 +45,7 @@ async function slugUnico(titulo, ignorarId=null) {
   while(await Noticia.exists({slug,...(ignorarId?{_id:{$ne:ignorarId}}:{})})) slug=`${base}-${i++}`
   return slug
 }
-function snapshotRevisao(n){return {titulo:n.titulo,resumo:n.resumo,conteudo:n.conteudo,categoria_id:n.categoria_id,fonte_id:n.fonte_id,tags:n.tags,status:n.status,destaque:n.destaque,urgente:n.urgente,seo_titulo:n.seo_titulo,seo_descricao:n.seo_descricao,canonical_url:n.canonical_url,og_imagem_url:n.og_imagem_url,imagem_url:n.imagem_url,imagem_public_id:n.imagem_public_id,imagem_alt:n.imagem_alt,imagem_legenda:n.imagem_legenda,imagem_credito:n.imagem_credito,slug:n.slug}}
+function snapshotRevisao(n){return {titulo:n.titulo,resumo:n.resumo,conteudo:n.conteudo,categoria_id:n.categoria_id,fonte_id:n.fonte_id,tags:n.tags,status:n.status,destaque:n.destaque,urgente:n.urgente,urgente_ate:n.urgente_ate,seo_titulo:n.seo_titulo,seo_descricao:n.seo_descricao,canonical_url:n.canonical_url,og_imagem_url:n.og_imagem_url,imagem_url:n.imagem_url,imagem_public_id:n.imagem_public_id,imagem_alt:n.imagem_alt,imagem_legenda:n.imagem_legenda,imagem_credito:n.imagem_credito,slug:n.slug}}
 async function registrarRevisao(n,req,motivo='edicao'){
   if(!n?._id)return
   await NoticiaRevisao.create({noticia_id:n._id,usuario_id:req.usuario?._id||req.usuario?.id||null,usuario_nome:req.usuario?.nome||'',usuario_email:req.usuario?.email||'',motivo,snapshot:snapshotRevisao(n)}).catch(()=>{})
@@ -175,10 +175,28 @@ async function validarReferenciasConteudo(campos) {
   return null
 }
 
+const PLANTAO_PADRAO_MS = 6 * 60 * 60 * 1000
+const PLANTAO_MAX_MS = 24 * 60 * 60 * 1000
+
+function validarPrazoPlantao(campos) {
+  if (!campos.urgente) {
+    campos.urgente_ate = null
+    return null
+  }
+  const agora = Date.now()
+  if (!campos.urgente_ate) campos.urgente_ate = new Date(agora + PLANTAO_PADRAO_MS)
+  const fim = new Date(campos.urgente_ate).getTime()
+  if (!Number.isFinite(fim) || fim <= agora) return 'O encerramento do plantão precisa estar no futuro.'
+  if (fim > agora + PLANTAO_MAX_MS) return 'O plantão pode permanecer ativo por no máximo 24 horas.'
+  return null
+}
+
 // ─── POST /api/noticias ──────────────────────────────────────────────────────
 export async function criar(req, res, next) {
   try {
     const campos = extrairCampos(req.body)
+    const plantaoInvalido = validarPrazoPlantao(campos)
+    if (plantaoInvalido) return res.status(422).json({ erro: plantaoInvalido })
     const referenciaInvalida = await validarReferenciasConteudo(campos)
     if (referenciaInvalida) return res.status(422).json({ erro: referenciaInvalida })
     const statusFinal  = campos.status || 'rascunho'
@@ -211,6 +229,8 @@ export async function atualizar(req, res, next) {
     if (!noticiaAtual) return res.status(404).json({ erro: 'Notícia não encontrada' })
 
     const campos = extrairCampos(req.body)
+    const plantaoInvalido = validarPrazoPlantao(campos)
+    if (plantaoInvalido) return res.status(422).json({ erro: plantaoInvalido })
     const referenciaInvalida = await validarReferenciasConteudo(campos)
     if (referenciaInvalida) return res.status(422).json({ erro: referenciaInvalida })
     await registrarRevisao(noticiaAtual,req,'edicao')

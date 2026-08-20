@@ -1,3 +1,17 @@
+# 1.0.150 — Build Vercel, mobile, Plantão e sessão persistente
+
+- Corrige a falha de build da 1.0.149 em `AdminProjetoPlataforma.jsx`: o `await fetchValue(item)` é resolvido antes do callback de `setRevealed`, compatível com Vite/esbuild.
+- Cabeçalho do portal público passa a respeitar a largura disponível no Android; nomes longos ficam em uma linha com truncamento e não provocam rolagem horizontal.
+- O aviso de contingência sai do topo do portal e é exibido discretamente no rodapé, com a data da última cópia pública disponível e link para `/status/`.
+- Plantão/urgente passa a ter duração definida: **6 horas por padrão** e **24 horas no máximo**. O prazo é validado no editor e backend, plantões legados sem prazo expiram em 6 horas e o portal remove a faixa automaticamente quando o tempo termina.
+- O backend também encerra periodicamente plantões vencidos e atualiza o snapshot público; o fallback R2/cache aplica a mesma regra de expiração.
+- Corrige a sessão administrativa no cenário **Vercel → Render**: com **Manter conectado**, o Bearer de fallback pode ser persistido no IndexedDB do navegador; senha e credenciais de integrações não são armazenadas.
+- Timeout, 503, cold start ou reconexão temporária deixam de apagar a sessão. O frontend só remove a sessão persistente após 401/403 confirmados e mostra uma tela de reconexão em vez de mandar diretamente para o login.
+- Fecha uma corrida de inicialização no Render: após o Mongo conectar, rotas protegidas aguardam a restauração do JWT/chave persistente e respondem `AUTH_BOOTSTRAP_NOT_READY` (503) durante essa janela, evitando falso 401 com uma chave temporária.
+- A área de Atualizações passa pela mesma proteção de bootstrap; o upload via XHR também limpa corretamente a sessão persistente em um 401 real.
+- Nenhuma imagem ou ícone foi criado ou alterado nesta versão.
+- Validação final sem dependências externas: **162/162** arquivos frontend passaram na checagem contextual que também valida `await` após transpilar; **136/136** arquivos JS do backend passaram em `node --check`; **803/803** imports relativos foram resolvidos; `check:effects`, `check:themes` e self-test do atualizador (**8/8**) passaram. O ambiente não conseguiu acessar o registry do npm, portanto `vite build`, ESLint e Jest completos não foram executados localmente.
+
 # 1.0.149 — Segunda auditoria completa de credenciais e correção Cloudflare/R2
 
 - Corrige a causa do botão **Mostrar/Visualizar** do Cloudflare não exibir a credencial cadastrada: o controle antigo apenas alternava `password/text` no campo vazio usado para substituição. A Central Cloudflare agora solicita o valor salvo ao backend somente no clique.

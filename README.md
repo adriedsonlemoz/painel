@@ -5,6 +5,12 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## 📱 Estabilidade mobile e sessão — 1.0.150
+
+O cabeçalho público foi ajustado para nomes longos de portal no Android, sem estouro horizontal. O aviso de conteúdo de contingência aparece somente no rodapé, com a data da última cópia disponível. Plantões têm prazo de 6 horas por padrão e limite máximo de 24 horas, incluindo snapshots antigos e páginas que permanecem abertas.
+
+No painel administrativo, **Manter conectado** agora cobre também navegadores no cenário Vercel → Render quando o cookie cross-site é bloqueado. O fallback Bearer fica persistido somente quando solicitado, sem armazenar senha. Durante o cold start da Render, falhas temporárias preservam a sessão e a API aguarda a restauração do JWT persistente antes de validar rotas protegidas.
+
 ## 🌐 URLs de produção
 
 | Serviço   | URL                                         |
@@ -246,9 +252,9 @@ Em **Admin → Desenvolvimento → Atualizações**, um pacote completo pode seg
 Em Render/Vercel não existe instalação física sobre a instância em execução. O GitHub é a origem do código; R2 preserva o pacote e MongoDB preserva o estado da publicação.
 
 
-### Compatibilidade de ambientes e sessão cloud (1.0.90)
+### Compatibilidade de ambientes e sessão cloud (atualizado na 1.0.150)
 
-O mesmo pacote continua funcionando em **Termux/VPS** e em **Vercel + Render**. No modo local/same-origin, a sessão administrativa permanece exclusivamente no cookie HttpOnly. Quando o frontend Vercel chama um backend Render em outro domínio, o AL mantém o cookie e recebe também um Bearer temporário de contingência. O frontend testa o cookie: se ele funcionar, descarta o Bearer; se for bloqueado, mantém o fallback somente no `sessionStorage` da aba.
+O mesmo pacote continua funcionando em **Termux/VPS** e em **Vercel + Render**. No modo local/same-origin, a sessão administrativa permanece exclusivamente no cookie HttpOnly. Quando o frontend Vercel chama um backend Render em outro domínio, o AL mantém o cookie e recebe também um Bearer de contingência. O frontend testa o cookie: se ele funcionar, descarta o Bearer; se for bloqueado, o fallback fica no `sessionStorage` durante a sessão normal e, somente quando **Manter conectado** estiver marcado, pode ser preservado no IndexedDB para sobreviver ao fechamento/reabertura do navegador. A senha nunca é persistida. Durante cold start da Render, 503/rede/timeout preservam a sessão; apenas 401/403 confirmados a invalidam.
 
 Use **Admin → Infraestrutura → Ambientes** para comparar a versão do frontend com a versão real do backend, verificar SHAs de deploy, CORS, MongoDB, transporte da sessão e disponibilidade das integrações. Na Vercel, `VITE_API_URL` deve apontar para a URL pública do Render terminando em `/api`; alterações nessa variável exigem um novo deployment do frontend.
 

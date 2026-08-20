@@ -14,6 +14,44 @@ export const apiBase = BASE_URL.replace(/\/api$/, '')
 
 const SESSION_TOKEN_KEY = 'alsistemas_session_token'
 const SESSION_MODE_KEY  = 'alsistemas_auth_mode'
+const SESSION_DB_NAME   = 'alsistemas-auth'
+const SESSION_DB_STORE  = 'session'
+const SESSION_DB_KEY    = 'persistent-token'
+
+function webSessionDb() {
+  if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve(null)
+  return new Promise(resolve => {
+    try {
+      const request = window.indexedDB.open(SESSION_DB_NAME, 1)
+      request.onupgradeneeded = () => {
+        const db = request.result
+        if (!db.objectStoreNames.contains(SESSION_DB_STORE)) db.createObjectStore(SESSION_DB_STORE)
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => resolve(null)
+      request.onblocked = () => resolve(null)
+    } catch { resolve(null) }
+  })
+}
+
+async function webPersistentSession(action, value = '') {
+  const db = await webSessionDb()
+  if (!db) return action === 'get' ? '' : false
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const tx = db.transaction(SESSION_DB_STORE, 'readwrite')
+      const store = tx.objectStore(SESSION_DB_STORE)
+      let request
+      if (action === 'set') request = store.put(String(value || ''), SESSION_DB_KEY)
+      else if (action === 'remove') request = store.delete(SESSION_DB_KEY)
+      else request = store.get(SESSION_DB_KEY)
+      request.onsuccess = () => resolve(action === 'get' ? String(request.result || '') : true)
+      request.onerror = () => reject(request.error)
+    })
+    return result
+  } catch { return action === 'get' ? '' : false }
+  finally { try { db.close() } catch {} }
+}
 
 export function getSessionToken() {
   try { return sessionStorage.getItem(SESSION_TOKEN_KEY) || '' } catch { return '' }
@@ -33,27 +71,39 @@ export function clearSessionToken() {
 }
 
 export async function persistSessionToken(token = '') {
-  if (!Capacitor.isNativePlatform()) return false
-  try {
-    if (token) await NativeSecureSession.set({ value: token })
-    else await NativeSecureSession.remove()
-    return true
-  } catch { return false }
+  if (Capacitor.isNativePlatform()) {
+    try {
+      if (token) await NativeSecureSession.set({ value: token })
+      else await NativeSecureSession.remove()
+      return true
+    } catch { return false }
+  }
+  // No navegador, "Manter conectado" usa IndexedDB apenas para o token de
+  // sessão cross-origin. Senha e credenciais de integrações nunca são salvas.
+  return token
+    ? webPersistentSession('set', token)
+    : webPersistentSession('remove')
 }
 
 export async function restorePersistentSession() {
-  if (!Capacitor.isNativePlatform()) return ''
-  try {
-    const data = await NativeSecureSession.get()
-    const token = String(data?.value || '')
-    if (token) setSessionToken(token, 'bearer-persistent-native')
-    return token
-  } catch { return '' }
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const data = await NativeSecureSession.get()
+      const token = String(data?.value || '')
+      if (token) setSessionToken(token, 'bearer-persistent-native')
+      return token
+    } catch { return '' }
+  }
+  const token = String(await webPersistentSession('get') || '')
+  if (token) setSessionToken(token, 'bearer-persistent-web')
+  return token
 }
 
 export async function clearPersistentSession() {
-  if (!Capacitor.isNativePlatform()) return false
-  try { await NativeSecureSession.remove(); return true } catch { return false }
+  if (Capacitor.isNativePlatform()) {
+    try { await NativeSecureSession.remove(); return true } catch { return false }
+  }
+  return webPersistentSession('remove')
 }
 
 export function authMode() {
@@ -124,7 +174,7 @@ export async function api(path, options = {}) {
     // imediatamente em vez de deixar a consulta pendurada por 10 s. GETs
     // podem aguardar alguns instantes e tentar novamente de forma transparente.
     const method = String(options.method || 'GET').toUpperCase()
-    if (res.status === 503 && data?.codigo === 'DB_NOT_READY' && method === 'GET' && _dbRetry < 4) {
+    if (res.status === 503 && ['DB_NOT_READY', 'AUTH_BOOTSTRAP_NOT_READY'].includes(data?.codigo) && method === 'GET' && _dbRetry < 6) {
       const espera = Math.min(1500, Number(data.retry_after_ms || 700))
       await new Promise(resolve => setTimeout(resolve, espera))
       return api(path, { ...options, _dbRetry: _dbRetry + 1 })

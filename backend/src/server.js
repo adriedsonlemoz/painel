@@ -102,6 +102,10 @@ ensureBootstrapSecrets()
 
 const app  = express()
 const PORT = process.env.PORT || 3001
+// Em plataformas com cold start, o JWT/chave de credenciais persistentes são
+// restaurados do Mongo logo após a conexão. Até essa etapa terminar, nenhuma
+// rota normal deve validar/emitir sessão usando a chave temporária do processo.
+let persistentBootstrapReady = process.env.NODE_ENV === 'test'
 
 // Render/Vercel/Railway ficam atrás de proxy reverso. Sem trust proxy o
 // express-rate-limit interpreta X-Forwarded-For como configuração inválida.
@@ -222,16 +226,25 @@ app.get('/api/maintenance/status', async (_req, res) => {
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next()
   const livres = [
-    '/api/health', '/api/setup', '/api/docs', '/api/admin/updates', '/api/maintenance/status',
+    '/api/health', '/api/setup', '/api/docs', '/api/maintenance/status',
   ]
   if (livres.some(prefix => req.path.startsWith(prefix))) return next()
-  if (mongoose.connection.readyState === 1) return next()
-  return res.status(503).json({
-    erro: 'Banco de dados ainda está conectando. Tente novamente em instantes.',
-    codigo: 'DB_NOT_READY',
-    mongo_state: mongoose.connection.readyState,
-    retry_after_ms: 1000,
-  })
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      erro: 'Banco de dados ainda está conectando. Tente novamente em instantes.',
+      codigo: 'DB_NOT_READY',
+      mongo_state: mongoose.connection.readyState,
+      retry_after_ms: 1000,
+    })
+  }
+  if (!persistentBootstrapReady) {
+    return res.status(503).json({
+      erro: 'Sessões ainda estão sendo restauradas após a inicialização do servidor.',
+      codigo: 'AUTH_BOOTSTRAP_NOT_READY',
+      retry_after_ms: 600,
+    })
+  }
+  return next()
 })
 
 // Liveness extremamente barato: confirma que o processo HTTP está vivo sem
@@ -324,12 +337,27 @@ async function iniciar() {
     if (mongoose.connection.readyState !== 1) return
     const agora = new Date()
     try {
-      const resultado = await Noticia.updateMany(
-        { status: 'agendado', agendado_para: { $lte: agora } },
-        { $set: { status: 'publicado', publicado_em: agora }, $unset: { agendado_para: 1 } },
-      )
-      if (resultado.modifiedCount) {
-        logger.info({ total: resultado.modifiedCount }, 'Notícias agendadas publicadas')
+      const limiteLegado = new Date(agora.getTime() - (6 * 60 * 60 * 1000))
+      const [resultado, plantoes] = await Promise.all([
+        Noticia.updateMany(
+          { status: 'agendado', agendado_para: { $lte: agora } },
+          { $set: { status: 'publicado', publicado_em: agora }, $unset: { agendado_para: 1 } },
+        ),
+        Noticia.updateMany(
+          {
+            urgente: true,
+            $or: [
+              { urgente_ate: { $lte: agora } },
+              { urgente_ate: null, criado_em: { $lte: limiteLegado } },
+              { urgente_ate: { $exists: false }, criado_em: { $lte: limiteLegado } },
+            ],
+          },
+          { $set: { urgente: false, urgente_ate: null } },
+        ),
+      ])
+      if (resultado.modifiedCount) logger.info({ total: resultado.modifiedCount }, 'Notícias agendadas publicadas')
+      if (plantoes.modifiedCount) logger.info({ total: plantoes.modifiedCount }, 'Plantões expirados encerrados automaticamente')
+      if (resultado.modifiedCount || plantoes.modifiedCount) {
         schedulePublicSnapshotRefresh('scheduled-news-published')
       }
     } catch (err) {
@@ -359,13 +387,35 @@ async function iniciar() {
     }
   }
 
+  const sincronizarBootstrapPersistente = async (tentativa = 0) => {
+    if (encerrando || mongoose.connection.readyState !== 1) return false
+    try {
+      await ensurePersistentBootstrap({ force: tentativa > 0 })
+      persistentBootstrapReady = true
+      return true
+    } catch (err) {
+      persistentBootstrapReady = false
+      const espera = Math.min(10000, 1200 + tentativa * 1200)
+      logger.warn({ err: err.message, retry_ms: espera }, 'Falha ao sincronizar bootstrap persistente')
+      if (!encerrando) setTimeout(() => void sincronizarBootstrapPersistente(tentativa + 1), espera).unref?.()
+      return false
+    }
+  }
+
   const garantirMongo = async (tentativa = 0) => {
-    if (encerrando || mongoose.connection.readyState === 1) return
+    if (encerrando) return
+    if (mongoose.connection.readyState === 1) {
+      // A conexão também pode ter sido aberta pelo setup enquanto o servidor
+      // aguardava configuração. Nesse caso ainda precisamos restaurar o
+      // bootstrap persistente antes de liberar autenticação/rotas normais.
+      if (!persistentBootstrapReady) await sincronizarBootstrapPersistente(tentativa)
+      return
+    }
     try {
       await conectarMongo()
       // Mongo é a âncora da instalação em Render/Vercel: restaura JWT/chave
       // de credenciais e reconhece automaticamente uma instalação existente.
-      await ensurePersistentBootstrap().catch(err => logger.warn({err:err.message}, 'Falha ao sincronizar bootstrap persistente'))
+      await sincronizarBootstrapPersistente()
       await hydratePlatformOrigins({remote:true}).catch(err => logger.warn({err:err.message}, 'Falha ao hidratar origens das plataformas'))
       await importarErrosAtualizadorSpool({limit:200}).catch(err => logger.warn({err:err.message}, 'Falha ao importar erros de workers'))
       startPublicSnapshotScheduler()
@@ -405,6 +455,7 @@ async function iniciar() {
   })
   mongoose.connection.on('connected', () => {
     if (mongoRetryTimer) { clearTimeout(mongoRetryTimer); mongoRetryTimer = null }
+    if (!persistentBootstrapReady) void sincronizarBootstrapPersistente()
   })
 
   // Serviços opcionais não atrasam nem condicionam o portal público.

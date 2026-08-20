@@ -114,8 +114,10 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
       usuario,
       // Em frontend/backend cross-origin (ex.: Vercel → Render), alguns
       // navegadores bloqueiam cookies de terceiro mesmo com SameSite=None.
-      // O Bearer é entregue somente nesse cenário, tem validade menor e fica
-      // apenas no sessionStorage; Termux/VPS continuam usando só cookie HttpOnly.
+      // O Bearer é entregue somente nesse cenário. Sem "Manter conectado" ele
+      // fica apenas na sessão do navegador; com a opção marcada o frontend pode
+      // preservá-lo no armazenamento persistente próprio da sessão. Termux/VPS
+      // continuam usando só cookie HttpOnly.
       ...(crossOrigin ? { access_token: cloudToken } : {}),
       auth:{
         transport:crossOrigin?'cookie+bearer-fallback':'cookie',

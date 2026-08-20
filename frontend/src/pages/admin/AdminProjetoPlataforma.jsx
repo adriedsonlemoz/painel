@@ -509,7 +509,10 @@ function EnvPanel({ env, onClose, onSave, onDelete, busy }) {
     const rk = item.id || item.key
     if (revealed[rk]) { setRevealed(old => ({ ...old, [rk]: '' })); return }
     setRevealBusy(rk)
-    try { setRevealed(old => ({ ...old, [rk]: await fetchValue(item) })) }
+    try {
+      const value = await fetchValue(item)
+      setRevealed(old => ({ ...old, [rk]: value }))
+    }
     catch (e) { toast.error(e.message) }
     finally { setRevealBusy('') }
   }

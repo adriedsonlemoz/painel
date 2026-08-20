@@ -21,7 +21,7 @@ const router=Router()
 router.use(autenticar)
 const edit=verificarPermissao('noticias.editar')
 const escapeRx=s=>String(s||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
-const snap=n=>({titulo:n.titulo,resumo:n.resumo,conteudo:n.conteudo,categoria_id:n.categoria_id,fonte_id:n.fonte_id,tags:n.tags,status:n.status,destaque:n.destaque,urgente:n.urgente,seo_titulo:n.seo_titulo,seo_descricao:n.seo_descricao,canonical_url:n.canonical_url,imagem_url:n.imagem_url,imagem_public_id:n.imagem_public_id,imagem_alt:n.imagem_alt,imagem_legenda:n.imagem_legenda,imagem_credito:n.imagem_credito,slug:n.slug})
+const snap=n=>({titulo:n.titulo,resumo:n.resumo,conteudo:n.conteudo,categoria_id:n.categoria_id,fonte_id:n.fonte_id,tags:n.tags,status:n.status,destaque:n.destaque,urgente:n.urgente,urgente_ate:n.urgente_ate,seo_titulo:n.seo_titulo,seo_descricao:n.seo_descricao,canonical_url:n.canonical_url,imagem_url:n.imagem_url,imagem_public_id:n.imagem_public_id,imagem_alt:n.imagem_alt,imagem_legenda:n.imagem_legenda,imagem_credito:n.imagem_credito,slug:n.slug})
 
 router.get('/dashboard', async (_req,res,next)=>{try{
  const now=new Date(), start=new Date(now); start.setHours(0,0,0,0); const end=new Date(start);end.setDate(end.getDate()+1)
@@ -43,7 +43,7 @@ router.get('/qualidade',async(_req,res,next)=>{try{
   Noticia.find({imagem_url:{$in:[null,'']},status:{$ne:'arquivado'}}).select('titulo slug status').limit(50).lean(),
   Noticia.find({fonte_id:null,status:{$ne:'arquivado'}}).select('titulo slug status').limit(50).lean(),
   Noticia.find({imagem_url:{$nin:[null,'']},$or:[{imagem_alt:''},{imagem_alt:null}]}).select('titulo slug status imagem_url').limit(50).lean(),
-  Noticia.find({urgente:true,urgente_ate:{$lt:now}}).select('titulo slug urgente_ate').limit(50).lean(),
+  Noticia.find({urgente:true,$or:[{urgente_ate:{$lt:now}},{urgente_ate:null,criado_em:{$lt:new Date(now.getTime()-6*60*60*1000)}}]}).select('titulo slug urgente_ate').limit(50).lean(),
   Noticia.find({$or:[{seo_titulo:null},{seo_titulo:''},{seo_descricao:null},{seo_descricao:''}],status:'publicado'}).select('titulo slug').limit(50).lean(),
   RssFonte.find({ultimo_erro:{$nin:[null,'']}}).select('nome ultimo_erro falhas_consecutivas url').limit(50).lean(),
   Noticia.find({importado:true}).select('titulo slug url_original imagem_url').sort({criado_em:-1}).limit(250).lean(),
@@ -152,7 +152,7 @@ router.post('/noticias/:id/revisoes',edit,async(req,res,next)=>{try{
 router.post('/noticias/:id/restaurar/:revisaoId',edit,async(req,res,next)=>{try{
  const [n,r]=await Promise.all([Noticia.findById(req.params.id),NoticiaRevisao.findOne({_id:req.params.revisaoId,noticia_id:req.params.id})]);if(!n||!r)return res.status(404).json({erro:'Notícia ou revisão não encontrada'})
  await NoticiaRevisao.create({noticia_id:n._id,usuario_id:req.usuario?._id||req.usuario?.id,usuario_nome:req.usuario?.nome||'',usuario_email:req.usuario?.email||'',motivo:'restauracao',snapshot:snap(n)})
- const allowed=['titulo','resumo','conteudo','categoria_id','fonte_id','tags','status','destaque','urgente','seo_titulo','seo_descricao','canonical_url','imagem_url','imagem_public_id','imagem_alt','imagem_legenda','imagem_credito']
+ const allowed=['titulo','resumo','conteudo','categoria_id','fonte_id','tags','status','destaque','urgente','urgente_ate','seo_titulo','seo_descricao','canonical_url','imagem_url','imagem_public_id','imagem_alt','imagem_legenda','imagem_credito']
  const update={};allowed.forEach(k=>{if(Object.prototype.hasOwnProperty.call(r.snapshot||{},k))update[k]=r.snapshot[k]})
  const out=await Noticia.findByIdAndUpdate(n._id,{$set:update},{new:true,runValidators:true});res.json(out)
 }catch(e){next(e)}})

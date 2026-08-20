@@ -74,4 +74,6 @@ A listagem não considera mais “revelável” um valor apenas porque o provedo
 - 815 imports relativos verificados: nenhum destino ausente;
 - nenhuma chamada ativa `alert()`, `confirm()`, `prompt()`, `window.alert()`, `window.confirm()` ou `window.prompt()` encontrada no frontend;
 - tentativa de `npm install` do frontend expirou sem criar `node_modules`, portanto build Vite, ESLint e Jest completos não são marcados como executados.
+## Nota de autenticação — 1.0.150
+A persistência adicionada ao login web não altera a política de segredos desta auditoria. Quando o cookie HttpOnly cross-origin é bloqueado e o administrador escolhe **Manter conectado**, somente o token de sessão Bearer é armazenado no IndexedDB. Chaves de API, senhas de integrações e valores revelados continuam fora de `localStorage`, `sessionStorage` e IndexedDB.
 

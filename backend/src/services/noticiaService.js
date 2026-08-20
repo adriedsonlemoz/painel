@@ -87,12 +87,16 @@ export async function buildFiltro(query, autenticado) {
   }
 
   if (urgente === 'true' || urgente === true) {
+    const now = new Date()
+    const legacyCutoff = new Date(now.getTime() - (6 * 60 * 60 * 1000))
     filtro.urgente = true
     filtro.$and = [...(filtro.$and || []), {
       $or: [
-        { urgente_ate: null },
-        { urgente_ate: { $exists: false } },
-        { urgente_ate: { $gt: new Date() } },
+        { urgente_ate: { $gt: now } },
+        // Compatibilidade com plantões antigos sem data final: nunca ficam
+        // eternos. Eles expiram 6 h após a criação até serem reeditados.
+        { urgente_ate: null, criado_em: { $gt: legacyCutoff } },
+        { urgente_ate: { $exists: false }, criado_em: { $gt: legacyCutoff } },
       ],
     }]
   }

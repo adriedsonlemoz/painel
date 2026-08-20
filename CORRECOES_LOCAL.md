@@ -20,4 +20,10 @@ O frontend será aberto somente quando o backend estiver disponível.
 - A Central Cloudflare revela o valor efetivamente configurado somente sob demanda; o campo “novo valor” não representa mais a credencial salva.
 - Fallbacks `CF_*` locais continuam reconhecidos por campo.
 - O Setup continua livre para a instalação inicial, mas a manutenção de credenciais exige sessão administrativa após a instalação.
+## 1.0.150 — portal, Plantão e sessão cloud
+- Nome longo do portal não aumenta mais a largura da página no celular.
+- O aviso de contingência fica no rodapé e deixa de ocupar o topo do site.
+- Plantões têm 6 h por padrão e no máximo 24 h; registros antigos sem prazo deixam de ficar permanentes.
+- Em Vercel → Render, “Manter conectado” preserva o Bearer fallback no navegador e cold starts não invalidam a sessão por timeout/503.
+- O backend só aceita rotas protegidas depois de restaurar o JWT persistente do Mongo.
 

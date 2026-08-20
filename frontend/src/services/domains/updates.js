@@ -1,4 +1,4 @@
-import { api, BASE_URL, authFetch, getSessionToken } from './http.js'
+import { api, BASE_URL, authFetch, getSessionToken, clearSessionToken, clearPersistentSession } from './http.js'
 export const updatesService = {
   status(){ return api('/admin/updates', { timeoutMs: 20000 }) },
   selfTest(){ return api('/admin/updates/self-test',{method:'POST',timeoutMs:30000}) },
@@ -17,9 +17,9 @@ export const updatesService = {
       xhr.upload.onprogress=e=>{if(e.lengthComputable&&typeof onProgress==='function')onProgress(Math.max(0,Math.min(100,Math.round((e.loaded/e.total)*100))))}
       xhr.onerror=()=>reject(new Error(`Não foi possível conectar ao backend em ${BASE_URL}.`))
       xhr.onabort=()=>reject(new Error('Envio cancelado.'))
-      xhr.onload=()=>{
+      xhr.onload=async()=>{
         let data={}; try{data=JSON.parse(xhr.responseText||'{}')}catch{}
-        if(xhr.status===401){try{sessionStorage.removeItem('alsistemas_session_token')}catch{};return reject(new Error('Sessão expirada. Faça login novamente.'))}
+        if(xhr.status===401){clearSessionToken();await clearPersistentSession();return reject(new Error('Sessão expirada. Faça login novamente.'))}
         if(xhr.status<200||xhr.status>=300)return reject(new Error(data.erro||`Erro ${xhr.status}`))
         if(typeof onProgress==='function')onProgress(100)
         resolve(data)

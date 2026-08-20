@@ -37,6 +37,21 @@ GitHub ──push──► Render  → Backend Node.js  (api.seudominio.com)
 
 ---
 
+## Sessão Vercel → Render (1.0.150+)
+
+Em navegadores que bloqueiam cookies cross-site, o AL Sistemas usa um Bearer de fallback. Com **Manter conectado**, esse token pode ser preservado no navegador; a senha não é salva. O backend mantém o JWT estável no bootstrap persistente do MongoDB e, após um cold start, responde 503 temporário até essa chave ser restaurada em vez de emitir um 401 falso.
+
+Variáveis opcionais:
+
+```env
+JWT_CLOUD_EXPIRES_IN=12h
+JWT_CLOUD_PERSIST_EXPIRES_IN=7d
+```
+
+Não use uma `JWT_SECRET` efêmera diferente a cada deploy. O AL Sistemas migra/restaura a chave persistente pelo bootstrap do Mongo quando a instalação já existe.
+
+---
+
 ## 3. Backend no Render
 
 ### 3.1 Criar o serviço
@@ -123,27 +138,19 @@ Em **Settings → Environment Variables**:
 
 ```env
 VITE_API_URL=https://alsistemas-backend.onrender.com/api
-
-### Sessão administrativa Vercel → Render (1.0.90)
-
-O backend continua emitindo cookie HttpOnly. Como `*.vercel.app` e `*.onrender.com` são sites diferentes e alguns navegadores podem bloquear cookies de terceiros, o AL também entrega um token Bearer temporário **somente no login cross-origin**. O frontend testa imediatamente se o cookie foi aceito: quando funciona, descarta o Bearer e continua só no HttpOnly; quando é bloqueado, mantém o fallback em `sessionStorage`. Termux/VPS same-origin não recebe esse token.
-
-Depois do deploy, abra **Admin → Infraestrutura → Ambientes**. A tela deve mostrar:
-- origem Vercel autorizada no CORS;
-- API do build apontando para o Render + `/api`;
-- versão do frontend igual à versão do backend;
-- transporte de sessão `bearer` no caso em que o fallback cloud estiver em uso, ou `cookie` quando o navegador aceitou o cookie.
-
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
-VITE_APP_VERSION=1.0.131
+VITE_APP_VERSION=1.0.150
 VITE_APP_ENV=production
 VITE_MODULE_PORTAL=true
 VITE_MODULE_GITHUB=true
 ```
 
-> ⚠️ Variáveis `VITE_*` são embutidas no bundle durante o build.
-> Qualquer alteração requer um **redeploy** (Deployments → Redeploy).
+> ⚠️ Variáveis `VITE_*` são embutidas no bundle durante o build. Qualquer alteração requer um **redeploy**.
+
+**Sessão Vercel → Render:** o cookie HttpOnly continua preferencial. Se o navegador bloquear o cookie cross-site, o login fornece um Bearer de fallback. Sem **Manter conectado**, ele fica apenas na sessão do navegador; com a opção marcada, pode ser preservado no IndexedDB. A senha não é salva. Após cold start, o backend retorna 503 temporário enquanto restaura a chave JWT persistente, evitando invalidar uma sessão válida.
+
+Depois do deploy, abra **Admin → Infraestrutura → Ambientes** e confirme a origem autorizada, a URL da API, as versões e o transporte de sessão (`cookie` ou `bearer`).
 
 ### 4.3 Roteamento SPA
 

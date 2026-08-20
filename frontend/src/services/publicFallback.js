@@ -174,7 +174,12 @@ function matchesDate(noticia, dataInicio, dataFim) {
 function matchesUrgent(noticia, urgente) {
   if (!urgente) return true
   if (!noticia.urgente) return false
-  if (!noticia.urgente_ate) return true
+  // Snapshots antigos podiam conter plantão sem data final. Para não manter
+  // urgência eterna quando o backend estiver dormindo, aplica 6 h de validade.
+  if (!noticia.urgente_ate) {
+    const inicio = toTime(noticia.criado_em || noticia.publicado_em)
+    return Boolean(inicio && inicio + (6 * 60 * 60 * 1000) > Date.now())
+  }
   return toTime(noticia.urgente_ate) > Date.now()
 }
 

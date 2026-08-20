@@ -1,5 +1,13 @@
 # Revisão geral de segurança — AL Sistemas
 
+## Sessão e cold start — 1.0.150
+
+- O cookie HttpOnly continua sendo o transporte preferencial. O Bearer persistente só é usado como fallback quando frontend e backend estão em origens distintas e o navegador não aceita o cookie cross-site.
+- “Manter conectado” no navegador persiste somente esse token de sessão em IndexedDB; **senha e segredos de integrações não são persistidos**.
+- Sessões persistentes só são apagadas em falhas de autenticação confirmadas (401/403), não em timeout, erro de rede ou 503 de inicialização.
+- No cold start, rotas protegidas não validam tokens antes da restauração do JWT persistente do MongoDB; durante a janela de bootstrap respondem 503 `AUTH_BOOTSTRAP_NOT_READY`.
+- O upload do atualizador usa as mesmas rotinas centrais para invalidar sessão, evitando deixar um token persistente órfão após 401 legítimo.
+
 ## Endurecimento de credenciais — 1.0.149
 
 - Revelação de segredos é individual, autenticada, permissionada e enviada somente em resposta `no-store`; o status inicial permanece mascarado.

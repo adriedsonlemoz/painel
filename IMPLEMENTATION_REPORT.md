@@ -1,3 +1,19 @@
+# Relatório de implementação — 1.0.150
+
+## Build, portal mobile, contingência, Plantão e autenticação
+
+- Corrigido o erro que interrompeu o deploy Vercel da 1.0.149: `await` não fica mais dentro do callback síncrono de um setter React.
+- Navbar pública reorganizada com `min-width: 0`, área flexível e truncamento do nome/subtítulo, evitando estouro no Android.
+- `PublicFallbackBanner` foi removido do topo do layout e incorporado ao rodapé em estilo discreto e não técnico.
+- Plantão ganhou prazo editorial consistente no formulário, API, consulta pública, snapshot de contingência e página aberta: 6 h padrão / 24 h máximo.
+- O scheduler encerra plantões vencidos e limpa registros legados sem `urgente_ate` depois de 6 h.
+- Sessão web persistente foi implementada para o Bearer de fallback cross-origin usando IndexedDB; senha nunca é persistida.
+- A restauração de sessão diferencia erro definitivo (401/403) de indisponibilidade transitória. Cold start/rede/503 preservam o token e entram em reconexão automática.
+- O backend bloqueia temporariamente rotas normais com 503 até `ensurePersistentBootstrap()` restaurar o JWT persistente após o Mongo conectar, eliminando a janela de falso 401 no restart do Render.
+- O bypass de disponibilidade da rota de Atualizações foi removido para que ela não autentique com bootstrap temporário.
+- Nenhum asset de imagem/ícone foi alterado.
+- Validação final: 162 arquivos frontend sem erro na checagem contextual de sintaxe/`await`, 136 arquivos backend em `node --check`, 803 imports relativos resolvidos, checks de efeitos/temas aprovados e self-test do atualizador 8/8. Como o registry npm não respondeu neste ambiente, o `vite build`, ESLint e Jest completos ficam para o CI/deploy.
+
 # Relatório de implementação — 1.0.149
 
 ## Auditoria completa de credenciais e correção Cloudflare/R2

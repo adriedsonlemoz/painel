@@ -380,7 +380,18 @@ function selecionarCapa(noticias = [], cfg = {}) {
    CAPA JORNALÍSTICA + PLANTÃO
 ═══════════════════════════════════════════════════════════ */
 function Plantao({ noticia }) {
-  if (!noticia) return null
+  const [, setClock] = useState(0)
+  const fimExplicito = noticia?.urgente_ate ? new Date(noticia.urgente_ate).getTime() : 0
+  const inicioLegado = new Date(noticia?.criado_em || noticia?.publicado_em || 0).getTime()
+  const fim = fimExplicito || (Number.isFinite(inicioLegado) && inicioLegado > 0 ? inicioLegado + (6 * 60 * 60 * 1000) : 0)
+  useEffect(() => {
+    if (!fim) return undefined
+    const restante = fim - Date.now()
+    if (restante <= 0) return undefined
+    const timer = window.setTimeout(() => setClock(v => v + 1), Math.min(restante + 100, 2147483000))
+    return () => window.clearTimeout(timer)
+  }, [fim])
+  if (!noticia || !fim || fim <= Date.now()) return null
   const id = noticia._id || noticia.id
   return (
     <div className="bg-red-600 text-white">

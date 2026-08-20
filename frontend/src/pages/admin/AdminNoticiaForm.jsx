@@ -16,6 +16,16 @@ function slugify(t) {
 
 function idOf(item) { return String(item?._id || item?.id || '') }
 function normalizar(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim() }
+const PLANTAO_PADRAO_HORAS = 6
+const PLANTAO_MAX_HORAS = 24
+function datetimeLocalValue(date) {
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return ''
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 16)
+}
+function plantaoFimPadrao() { return datetimeLocalValue(new Date(Date.now() + PLANTAO_PADRAO_HORAS * 60 * 60 * 1000)) }
+function plantaoMaximo() { return datetimeLocalValue(new Date(Date.now() + PLANTAO_MAX_HORAS * 60 * 60 * 1000)) }
 function storageDaImagem(n) {
   if (n?.imagem_storage) return n.imagem_storage
   const id = String(n?.imagem_public_id || '')
@@ -191,7 +201,7 @@ export default function AdminNoticiaForm() {
       responsavel_id: idOf(noticia.responsavel_id), revisor_id: idOf(noticia.revisor_id),
       canonical_url: noticia.canonical_url || '', og_imagem_url: noticia.og_imagem_url || '', seo_noindex: Boolean(noticia.seo_noindex),
       destaque: Boolean(noticia.destaque), urgente: Boolean(noticia.urgente),
-      urgente_ate: noticia.urgente_ate ? new Date(noticia.urgente_ate).toISOString().slice(0, 16) : '',
+      urgente_ate: noticia.urgente_ate ? datetimeLocalValue(noticia.urgente_ate) : '',
       agendado_para: noticia.agendado_para ? new Date(noticia.agendado_para).toISOString().slice(0, 16) : '',
       status: noticia.status || 'rascunho',
     })
@@ -271,6 +281,16 @@ export default function AdminNoticiaForm() {
     if (erros[campo]) setErros(e => ({ ...e, [campo]: '' }))
   }
 
+  function togglePlantao() {
+    setForm(old => ({
+      ...old,
+      urgente: !old.urgente,
+      urgente_ate: !old.urgente ? (old.urgente_ate || plantaoFimPadrao()) : '',
+    }))
+    setIsDirty(true)
+    if (erros.urgente_ate) setErros(e => ({ ...e, urgente_ate: '' }))
+  }
+
   const categoriaAtual = categorias.find(c => idOf(c) === String(form.categoria_id))
   const fonteAtual = fontes.find(f => idOf(f) === String(form.fonte_id))
 
@@ -330,6 +350,12 @@ export default function AdminNoticiaForm() {
     if (form.seo_descricao.length > 180) e.seo_descricao = 'Máximo de 180 caracteres.'
     if (form.imagem_url && !form.imagem_alt.trim()) e.imagem_alt = 'Informe um texto alternativo para a imagem.'
     if (form.status === 'agendado' && !form.agendado_para) e.agendado_para = 'Informe a data e hora da publicação.'
+    if (form.urgente) {
+      const fim = new Date(form.urgente_ate || 0).getTime()
+      const agora = Date.now()
+      if (!form.urgente_ate || !Number.isFinite(fim) || fim <= agora) e.urgente_ate = 'Defina quando o plantão deve terminar.'
+      else if (fim > agora + PLANTAO_MAX_HORAS * 60 * 60 * 1000) e.urgente_ate = 'O plantão pode durar no máximo 24 horas.'
+    }
     setErros(e)
     return Object.keys(e).length === 0
   }
@@ -599,9 +625,9 @@ export default function AdminNoticiaForm() {
                   )}
                   <div className="news-toggle-compact">
                     <div className="adm-toggle-row"><div><div className="adm-toggle-label">Destaque</div><div className="adm-toggle-desc">Exibir na área de destaques.</div></div><button type="button" role="switch" aria-checked={form.destaque} className={`adm-toggle${form.destaque ? ' on' : ''}`} onClick={() => set('destaque', !form.destaque)}/></div>
-                    <div className="adm-toggle-row"><div><div className="adm-toggle-label">Plantão / urgente</div><div className="adm-toggle-desc">Faixa de urgência no portal.</div></div><button type="button" role="switch" aria-checked={form.urgente} className={`adm-toggle${form.urgente ? ' on' : ''}`} onClick={() => set('urgente', !form.urgente)}/></div>
+                    <div className="adm-toggle-row"><div><div className="adm-toggle-label">Plantão / urgente</div><div className="adm-toggle-desc">Faixa temporária no portal · 6 h por padrão, máximo 24 h.</div></div><button type="button" role="switch" aria-checked={form.urgente} className={`adm-toggle${form.urgente ? ' on' : ''}`} onClick={togglePlantao}/></div>
                   </div>
-                  {form.urgente && <div className="adm-field" style={{ marginTop: 8, marginBottom: 0 }}><label className="adm-label" htmlFor="urgente_ate">Encerrar plantão em</label><input id="urgente_ate" type="datetime-local" className="adm-input" value={form.urgente_ate} onChange={e => set('urgente_ate', e.target.value)}/></div>}
+                  {form.urgente && <div className="adm-field" style={{ marginTop: 8, marginBottom: 0 }}><label className="adm-label" htmlFor="urgente_ate">Encerrar plantão em</label><input id="urgente_ate" type="datetime-local" min={datetimeLocalValue(new Date())} max={plantaoMaximo()} className={`adm-input${erros.urgente_ate ? ' adm-input-error' : ''}`} value={form.urgente_ate} onChange={e => set('urgente_ate', e.target.value)}/>{erros.urgente_ate && <span className="news-error">{erros.urgente_ate}</span>}</div>}
                 </div>
               </div>
             </div>

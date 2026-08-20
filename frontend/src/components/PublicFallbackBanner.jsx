@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CloudOff, ExternalLink } from 'lucide-react'
+import { Clock3, ExternalLink } from 'lucide-react'
 import { getPublicFallbackState, primePublicSnapshot } from '../services/publicFallback.js'
 
 function formatSnapshotDate(value) {
@@ -27,15 +27,19 @@ export default function PublicFallbackBanner() {
   if (!state) return null
 
   return (
-    <div role="status" style={{ background:'#fff7ed', borderBottom:'1px solid #fed7aa', color:'#9a3412' }}>
-      <div className="wrap" style={{ paddingTop:9, paddingBottom:9, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap', fontSize:12, lineHeight:1.4 }}>
-        <CloudOff size={16} aria-hidden="true" />
-        <strong>Modo contingência:</strong>
-        <span>backend indisponível; exibindo a última cópia pública salva em {formatSnapshotDate(state.generatedAt)}.</span>
-        <a href="/status/" style={{ marginLeft:'auto', display:'inline-flex', gap:5, alignItems:'center', fontWeight:800, color:'inherit', textDecoration:'underline' }}>
-          Ver status <ExternalLink size={12} aria-hidden="true" />
-        </a>
-      </div>
+    <div
+      role="status"
+      className="mt-2 flex w-full max-w-xl flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[10px] leading-relaxed text-white/55 sm:text-[11px]"
+      aria-live="polite"
+    >
+      <Clock3 size={13} className="flex-shrink-0 text-white/45" aria-hidden="true" />
+      <span>
+        <strong className="font-semibold text-white/70">Última atualização disponível:</strong>{' '}
+        {formatSnapshotDate(state.generatedAt)} · algumas informações podem levar alguns minutos para aparecer.
+      </span>
+      <a href="/status/" className="inline-flex items-center gap-1 font-semibold text-white/65 underline underline-offset-2 hover:text-white">
+        Ver status <ExternalLink size={10} aria-hidden="true" />
+      </a>
     </div>
   )
 }

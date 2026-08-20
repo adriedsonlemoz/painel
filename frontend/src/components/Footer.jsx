@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { configuracoesService } from '../services/api'
 import NewsletterForm from './NewsletterForm'
+import PublicFallbackBanner from './PublicFallbackBanner'
 
 export default function Footer() {
   const [cfg, setCfg] = useState({})
@@ -81,6 +82,8 @@ export default function Footer() {
             <span className="mx-2">·</span>
             <a href="/status/" className="hover:text-white/70 underline underline-offset-2">Status dos serviços</a>
           </p>
+
+          <PublicFallbackBanner />
         </div>
       </div>
     </footer>

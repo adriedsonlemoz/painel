@@ -138,13 +138,13 @@ export default function Navbar() {
   return (
     <header className="bg-white sticky top-0 z-50 shadow-sm">
       <div className="wrap">
-        <div className="flex items-center justify-between h-16">
-          <Link to="/" className="flex items-center gap-2.5 group flex-shrink-0"
+        <div className="flex min-w-0 items-center justify-between gap-2 h-16">
+          <Link to="/" className="flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5 group md:flex-initial"
             aria-label={`${portalName} — Página inicial`}>
-            <LogoIcon size={40} />
-            <div className="leading-tight" aria-hidden="true">
-              <span className="block font-display font-bold text-lg text-gray-900 leading-none">{portalName}</span>
-              <span className="block font-grotesk text-xs font-semibold text-brand-500 leading-none mt-0.5">Notícias de Iguatama</span>
+            <span className="flex-shrink-0 scale-[.9] sm:scale-100 origin-left"><LogoIcon size={40} /></span>
+            <div className="min-w-0 leading-tight" aria-hidden="true">
+              <span className="block max-w-full truncate font-display font-bold text-[15px] sm:text-lg text-gray-900 leading-none" title={portalName}>{portalName}</span>
+              <span className="block max-w-full truncate font-grotesk text-[11px] sm:text-xs font-semibold text-brand-500 leading-none mt-0.5">Notícias de Iguatama</span>
             </div>
           </Link>
 
@@ -370,7 +370,7 @@ export default function Navbar() {
             )}
           </nav>
 
-          <div className="md:hidden flex items-center gap-1">
+          <div className="md:hidden flex flex-shrink-0 items-center gap-0.5 sm:gap-1">
             <button onClick={() => setSearchOpen(o => !o)} aria-label="Abrir busca" aria-expanded={searchOpen}
               className="p-2 rounded-xl hover:bg-gray-100 transition-colors text-gray-600">
               <Search size={20} aria-hidden="true" />
