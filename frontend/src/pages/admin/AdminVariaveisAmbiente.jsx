@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { infraestruturaService } from '../../services/api'
 import AdminIcon from '../../components/admin/ui/AdminIcon'
 
+import { confirmAction } from '../../utils/confirmAction'
 const targets = ['production', 'preview', 'development']
 
 export default function AdminVariaveisAmbiente() {
@@ -80,7 +81,7 @@ export default function AdminVariaveisAmbiente() {
     finally { setBusy(false) }
   }
   async function remove(item) {
-    if (!window.confirm(`Excluir ${item.key} de ${current?.nome || 'este recurso'}?`)) return
+    if (!await confirmAction(`Excluir ${item.key} de ${current?.nome || 'este recurso'}?`,{title:'Excluir variável',confirmLabel:'Excluir'})) return
     setBusy(true)
     try {
       const r = provider === 'vercel'

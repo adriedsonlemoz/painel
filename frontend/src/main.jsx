@@ -11,6 +11,7 @@ import { isChunkLoadError, recoverFromChunkError } from './utils/lazyWithRetry'
 import { errosService } from './services/api'
 import App from './App.jsx'
 import GlobalUpdateBanner, { notifyUpdateAvailable } from './components/admin/ui/GlobalUpdateBanner.jsx'
+import GlobalConfirmDialog from './components/GlobalConfirmDialog.jsx'
 import './index.css'
 
 // ─── Deduplicação de erros ───────────────────────────────────
@@ -146,6 +147,7 @@ ReactDOM.createRoot(rootElement).render(
           <AuthProvider>
             <RouterProvider router={router} />
             <GlobalUpdateBanner />
+          <GlobalConfirmDialog />
             <Toaster
           position="top-right"
           containerStyle={{ top: 92, right: 12, left: 12 }}

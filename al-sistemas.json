@@ -1,6 +1,6 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.146",
+  "version": "1.0.147",
   "packageFormat": 2,
   "changelog": [
     "Cloudflare R2 recebe Explorer avançado e responsivo para Android, impedindo que nomes longos de conta, cards, toolbars e ações ultrapassem a tela.",

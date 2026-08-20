@@ -1,3 +1,12 @@
+# 1.0.147 — Correção Vercel e confirmações personalizadas
+
+- Corrigido redeploy da Vercel após alteração de variável: a criação do deployment agora envia o `name` obrigatório, descoberto automaticamente a partir do deployment quando necessário.
+- Mantido o fluxo da Render conforme a API oficial: variável por `PUT /env-vars/{key}` e deploy separado por `POST /deploys`.
+- Removidos os `window.confirm()`/`confirm()` nativos restantes das telas administrativas.
+- Adicionado diálogo global de confirmação usando o Design System do AL Sistemas, responsivo e compatível com tema/mobile.
+- Ações destrutivas ou sensíveis agora exibem títulos e rótulos contextualizados (Excluir, Revogar, Purgar, Rollback, Salvar e publicar etc.).
+- Versão sincronizada em 1.0.147.
+
 # 1.0.146 — R2 Storage completo, compartilhamento e responsividade
 
 - Corrige o estouro de layout no módulo Cloudflare/R2 em celular: nomes longos de conta/e-mail, cards, estatísticas, toolbars e ações agora respeitam a largura disponível, com truncamento/quebra responsiva.

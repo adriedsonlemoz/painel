@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { infraestruturaService } from '../../services/api'
 import AdminIcon from '../../components/admin/ui/AdminIcon'
 
+import { confirmAction } from '../../utils/confirmAction'
 const ago = value => {
   if (!value) return '—'
   const raw = typeof value === 'number' ? value : new Date(value).getTime()
@@ -188,8 +189,8 @@ export default function AdminProjetoPlataforma() {
   async function renderAction(type, payload = '', clearCache = false) {
     const rd = data?.provedores?.render
     if (!rd) return
-    if (type === 'rollback' && !window.confirm('Fazer rollback do serviço Render para este deploy?')) return
-    if (type === 'cancel' && !window.confirm('Cancelar este deploy em andamento?')) return
+    if (type === 'rollback' && !await confirmAction('Fazer rollback do serviço Render para este deploy?',{title:'Rollback Render',confirmLabel:'Fazer rollback',variant:'warning'})) return
+    if (type === 'cancel' && !await confirmAction('Cancelar este deploy em andamento?',{title:'Cancelar deploy',confirmLabel:'Cancelar deploy'})) return
     setBusy(true)
     try {
       const r = type === 'restart' ? await infraestruturaService.renderRestart(rd.id)
@@ -207,7 +208,7 @@ export default function AdminProjetoPlataforma() {
     if (!vc) return
     const depId = deploymentId || vc.deploys?.[0]?.id
     if (!depId) return toast.error('Nenhum deployment Vercel disponível.')
-    if (type === 'cancel' && !window.confirm('Cancelar este deployment da Vercel?')) return
+    if (type === 'cancel' && !await confirmAction('Cancelar este deployment da Vercel?',{title:'Cancelar deployment',confirmLabel:'Cancelar deployment'})) return
     setBusy(true)
     try {
       const r = type === 'cancel'
@@ -251,7 +252,7 @@ export default function AdminProjetoPlataforma() {
 
   async function removeEnv(item) {
     if (!env || !item?.key) return
-    if (!window.confirm(`Remover a variável “${item.key}” da ${env.kind === 'vercel' ? 'Vercel' : 'Render'}?`)) return
+    if (!await confirmAction(`Remover a variável “${item.key}” da ${env.kind === 'vercel' ? 'Vercel' : 'Render'}?`,{title:'Remover variável',confirmLabel:'Remover'})) return
     const target = env.kind === 'render' ? data?.provedores?.render : data?.provedores?.vercel
     if (!target) return
     setBusy(true)

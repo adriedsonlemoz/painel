@@ -4,6 +4,7 @@ import JSZip from 'jszip'
 import { updatesService } from '../../services/api'
 import { T as C, RADIUS, SPACE } from '../../themes/tokens'
 
+import { confirmAction } from '../../utils/confirmAction'
 const card={background:'var(--adm-surface)',border:'1px solid var(--adm-border)',borderRadius:RADIUS.lg,padding:20}
 const btn={border:0,borderRadius:RADIUS.md,padding:'10px 14px',fontWeight:700,cursor:'pointer'}
 const fmt=d=>d?new Date(d).toLocaleString('pt-BR'):'—'
@@ -239,7 +240,7 @@ export default function AdminAtualizacoes(){
     }catch(e){toast.error(e.message)}
   }
   async function interruptCloudRelease(releaseId){
-    if(!window.confirm('Encerrar somente o acompanhamento desta publicação? O ZIP continuará guardado no R2 e poderá ser publicado novamente.'))return
+    if(!await confirmAction('Encerrar somente o acompanhamento desta publicação? O ZIP continuará guardado no R2 e poderá ser publicado novamente.',{title:'Encerrar acompanhamento',confirmLabel:'Encerrar',variant:'warning'}))return
     try{
       const r=await updatesService.interruptCloudRelease(releaseId,'Acompanhamento encerrado pelo usuário. O pacote permanece no R2.')
       setJob(j=>({...j,cloudRelease:r.release,status:'attention',phase:'attention',phaseLabel:'Acompanhamento encerrado',error:r.release?.error||''}))
@@ -319,7 +320,7 @@ export default function AdminAtualizacoes(){
   }
   async function recoverActive(){
     if(!data?.activeOperation?.jobId)return
-    const ok=window.confirm('Interromper a operação ativa e iniciar a recuperação automática pelo snapshot? Use somente quando a atualização estiver travada.')
+    const ok=await confirmAction('Interromper a operação ativa e iniciar a recuperação automática pelo snapshot? Use somente quando a atualização estiver travada.',{title:'Recuperação automática',confirmLabel:'Iniciar recuperação',variant:'warning'})
     if(!ok)return
     try{
       const r=await updatesService.recoverActive()

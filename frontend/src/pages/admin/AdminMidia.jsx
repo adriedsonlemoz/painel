@@ -5,6 +5,7 @@ import { authFetch } from '../../services/domains/http.js'
 import { storageService } from '../../services/api'
 import toast from 'react-hot-toast'
 
+import { confirmAction } from '../../utils/confirmAction'
 const base=()=>`${import.meta.env.VITE_API_URL||'/api'}/conteudo`
 async function request(path,options={}){const r=await authFetch(`${base()}${path}`,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.erro||'Falha na operação');return x}
 
@@ -17,7 +18,7 @@ export default function AdminMidia(){
   const assets=useMemo(()=>d.assets.filter(a=>(tipo==='todos'||a.tipo===tipo)&&(!q||`${a.titulo} ${a.alt} ${a.credito}`.toLowerCase().includes(q.toLowerCase()))),[d,q,tipo])
   async function enviar(file){if(!file)return;setUploading(true);try{const up=await storageService.uploadConteudo(file,'biblioteca');const created=await request('/midia',{method:'POST',body:JSON.stringify({...up,titulo:file.name,original_name:file.name})});toast.success('Mídia adicionada à biblioteca');await carregar();return created}catch(e){toast.error(e.message)}finally{setUploading(false);if(input.current)input.current.value=''}}
   async function verificarOrfaos(){setChecking(true);try{setOrfaos(await request('/midia/orfaos'))}catch(e){toast.error(e.message)}finally{setChecking(false)}}
-  async function limparOrfaos(){if(!orfaos?.orfaos?.length)return;if(!window.confirm(`Apagar ${orfaos.orfaos.length} arquivo(s) órfão(s) do R2?`))return;try{const x=await request('/midia/orfaos',{method:'DELETE',body:JSON.stringify({public_ids:orfaos.orfaos.map(o=>o.public_id)})});toast.success(`${x.removidos} arquivo(s) removido(s)`);await verificarOrfaos()}catch(e){toast.error(e.message)}}
+  async function limparOrfaos(){if(!orfaos?.orfaos?.length)return;if(!await confirmAction(`Apagar ${orfaos.orfaos.length} arquivo(s) órfão(s) do R2?`,{title:'Limpar arquivos órfãos',confirmLabel:'Apagar'}))return;try{const x=await request('/midia/orfaos',{method:'DELETE',body:JSON.stringify({public_ids:orfaos.orfaos.map(o=>o.public_id)})});toast.success(`${x.removidos} arquivo(s) removido(s)`);await verificarOrfaos()}catch(e){toast.error(e.message)}}
   async function copiar(url){try{await navigator.clipboard.writeText(url);toast.success('URL copiada')}catch{toast.error('Não foi possível copiar')}}
   return <div>
     <div className="adm-page-header"><div><div className="adm-page-title">Biblioteca de mídia</div><div className="adm-page-sub">Mídias do Conteúdo e limpeza segura de arquivos R2 sem uso.</div></div><div className="adm-page-actions"><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e=>enviar(e.target.files?.[0])}/><button className="adm-btn adm-btn-secondary" onClick={verificarOrfaos} disabled={checking}>{checking?<Loader2 size={14} className="adm-spin"/>:<RefreshCw size={14}/>} Verificar órfãos</button><button className="adm-btn adm-btn-primary" onClick={()=>input.current?.click()} disabled={uploading}>{uploading?<Loader2 size={14} className="adm-spin"/>:<Upload size={14}/>} Enviar mídia</button></div></div>

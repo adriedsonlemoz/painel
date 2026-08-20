@@ -22,6 +22,7 @@ import {
   DSPageHeader,
   DSBtn, DSBadge, DSEmptyState, DSModal,
 } from '../../components/admin/ui/DS'
+import { confirmAction } from '../../utils/confirmAction'
 import AdminIcon         from '../../components/admin/ui/AdminIcon'
 import ProjetoSyncModal  from './ProjetoSyncModal.jsx'
 import toast from 'react-hot-toast'
@@ -1961,7 +1962,7 @@ function AbaR2() {
   function fecharModal()        { setShowUpload(false); setProjetoCommit(null) }
 
   async function deletar(projeto) {
-    if (!confirm(`Remover "${projeto.nome}" do R2? Remove todos os ${projeto.totalArquivos} arquivos. Irreversível.`)) return
+    if (!await confirmAction(`Remover "${projeto.nome}" do R2? Remove todos os ${projeto.totalArquivos} arquivos. Irreversível.`,{title:'Remover projeto do R2',confirmLabel:'Remover'})) return
     try {
       await projetosService.deletarR2(projeto.nome)
       toast.success(`Projeto "${projeto.nome}" removido do R2`)
