@@ -1,8 +1,11 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.143",
+  "version": "1.0.144",
   "packageFormat": 2,
   "changelog": [
+    "Cloudflare R2 passa a detectar automaticamente a URL pública do bucket padrão, preferindo domínio personalizado ativo e usando r2.dev habilitado como fallback.",
+    "Corrige a rota de índices do MongoDB que falhava com db.collection(...).getIndexes is not a function, usando listIndexes().toArray().",
+    "Central de Erros ganha botão Copiar em cada registro para copiar diagnóstico individual completo sem exportar todos os erros.",
     "Adiciona página /status independente do backend, executada na Vercel, para verificar AL Sistemas API, GuiaDoA e o status oficial do Render.",
     "Cria snapshot público automático no Cloudflare R2 para manter notícias, categorias, configurações e outros dados públicos disponíveis quando o Render estiver fora do ar.",
     "Restringe o snapshot R2 a campos públicos do portal, excluindo responsáveis, revisores, comentários internos e metadados privados de mídia.",

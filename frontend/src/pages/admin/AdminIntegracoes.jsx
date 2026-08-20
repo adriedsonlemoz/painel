@@ -376,7 +376,8 @@ function CloudflareConnector({current,form,setForm,diagnostic}){
    <h4 style={{margin:'18px 0 8px'}}>Preferências R2</h4>
    <p style={{margin:'0 0 12px',fontSize:12,color:'var(--adm-muted)',lineHeight:1.5}}>O bucket não precisa mais ser digitado aqui. Depois de conectar, abra <b>Cloudflare → R2 Storage</b> e escolha um bucket existente com <b>Usar no AL</b>.</p>
    <Field label="Bucket padrão (opcional / compatibilidade)" value={form.metadata.r2Bucket||''} onChange={v=>setMeta('r2Bucket',v)} placeholder={current?.metadata?.r2Bucket||'pode deixar vazio'}/>
-   <Field label="URL pública do bucket (opcional)" value={form.metadata.r2PublicUrl||''} onChange={v=>setMeta('r2PublicUrl',v)} placeholder="https://arquivos.seudominio.com"/>
+   <Field label="URL pública do bucket (automática / fallback manual)" value={form.metadata.r2PublicUrl||''} onChange={v=>setMeta('r2PublicUrl',v)} placeholder="Detectada ao usar um bucket no AL"/>
+   <div style={{fontSize:11,color:'var(--adm-muted)',marginTop:-7,lineHeight:1.5}}>Ao tocar em <b>Usar no AL</b> na Central Cloudflare, o painel procura automaticamente domínio personalizado ativo e <code>r2.dev</code>. Preencha manualmente somente se a API não tiver permissão para consultar os domínios.</div>
   </>}
 
   {diagnostic&&<div style={{marginTop:14,padding:12,borderRadius:10,border:`1px solid ${diagnostic.ok===false?'color-mix(in srgb,var(--adm-red) 28%,var(--adm-border))':'color-mix(in srgb,var(--adm-success) 28%,var(--adm-border))'}`,background:diagnostic.ok===false?'color-mix(in srgb,var(--adm-red) 7%,var(--adm-surface))':'color-mix(in srgb,var(--adm-success) 7%,var(--adm-surface))'}}>

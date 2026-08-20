@@ -332,3 +332,7 @@ STATUS_SERVICES_JSON=[{"id":"al-sistemas-api","name":"AL Sistemas API","url":"ht
 3. Último snapshot salvo pelo navegador/Service Worker.
 
 O painel administrativo continua exigindo o backend e nunca usa dados antigos para operações de escrita.
+## URL pública R2 automática (1.0.144+)
+
+Com um API Token Cloudflare que possua acesso de leitura ao R2, abra **Cloudflare / R2 → R2 Storage** e clique em **Usar no AL** no bucket desejado. O AL Sistemas consulta automaticamente `domains/custom` e `domains/managed`, salva a melhor URL pública disponível e a exibe para copiar. Isso reduz a necessidade de preencher `CF_R2_PUBLIC_URL` manualmente; na Vercel, mantenha a variável quando o fallback serverless precisar acessar diretamente o R2.
+

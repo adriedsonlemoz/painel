@@ -143,6 +143,59 @@ function resultList(data) {
   return []
 }
 
+function normalizePublicDomain(domain) {
+  const clean=String(domain||'').trim().replace(/^https?:\/\//i,'').replace(/\/+$/,'')
+  return clean ? `https://${clean}` : ''
+}
+
+async function discoverR2PublicAccess(bucket) {
+  const encoded=encodeURIComponent(bucket)
+  const [managedResult,customResult]=await Promise.allSettled([
+    cfFetch(`/accounts/${accountId()}/r2/buckets/${encoded}/domains/managed`),
+    cfFetch(`/accounts/${accountId()}/r2/buckets/${encoded}/domains/custom`),
+  ])
+
+  const managedRaw=managedResult.status==='fulfilled' ? managedResult.value?.result : null
+  const managed=managedRaw ? {
+    domain:managedRaw.domain||null,
+    enabled:Boolean(managedRaw.enabled),
+    url:managedRaw.enabled ? normalizePublicDomain(managedRaw.domain) : '',
+  } : null
+
+  const customRaw=customResult.status==='fulfilled'
+    ? (customResult.value?.result?.domains || customResult.value?.result || [])
+    : []
+  const customDomains=(Array.isArray(customRaw)?customRaw:[]).map(item=>({
+    domain:item?.domain||null,
+    enabled:Boolean(item?.enabled),
+    ownership:item?.status?.ownership||null,
+    ssl:item?.status?.ssl||null,
+    url:item?.enabled ? normalizePublicDomain(item?.domain) : '',
+  }))
+
+  // Domínio personalizado só é escolhido quando propriedade e SSL já estão
+  // ativos. Um domínio ainda em propagação não deve substituir um r2.dev que
+  // já funciona, pois essa URL alimenta o fallback público do portal.
+  const customActive=customDomains.find(d=>d.enabled && d.ownership==='active' && d.ssl==='active')
+  const selected=customActive?.url
+    ? {url:customActive.url,source:'custom',domain:customActive.domain}
+    : managed?.url
+      ? {url:managed.url,source:'r2.dev',domain:managed.domain}
+      : {url:'',source:null,domain:null}
+
+  return {
+    bucket,
+    publicUrl:selected.url||null,
+    source:selected.source,
+    managed,
+    customDomains,
+    errors:{
+      managed:managedResult.status==='rejected' ? String(managedResult.reason?.message||managedResult.reason) : null,
+      custom:customResult.status==='rejected' ? String(customResult.reason?.message||customResult.reason) : null,
+    },
+  }
+}
+
 // ── GET /status ─────────────────────────────────────────────────
 router.get('/status', async (_req, res, next) => {
   try {
@@ -173,6 +226,7 @@ router.get('/status', async (_req, res, next) => {
         buckets:s3.buckets||[],
         erro:s3.ok?null:s3.reason||null,
         endpoint:cfg.r2Endpoint,
+        publicUrl:cfg.r2PublicUrl||null,
         accessKeyMasked:cfg.r2AccessKeyId?`••••••••${cfg.r2AccessKeyId.slice(-4)}`:null,
         secretMasked:cfg.r2SecretAccessKey?'••••••••••••':null,
       },
@@ -658,9 +712,44 @@ router.post('/r2/default-bucket', async(req,res,next)=>{
     const list=await cfFetch(`/accounts/${accountId()}/r2/buckets?per_page=100`)
     const buckets=resultList(list)
     if(!buckets.some(b=>b.name===bucket))return res.status(404).json({erro:'Bucket não encontrado ou não acessível pelo token.'})
-    await setCredential('cloudflare',JSON.stringify(secrets),{...(current.metadata||{}),r2Bucket:bucket,r2Endpoint:`https://${accountId()}.r2.cloudflarestorage.com`})
+
+    // A seleção do bucket também tenta descobrir automaticamente seu endereço
+    // público (custom domain ou r2.dev), eliminando a configuração manual usada
+    // pela contingência do portal sempre que o token possuir permissão de R2.
+    const publicAccess=await discoverR2PublicAccess(bucket)
+    const previousBucket=String(current.metadata?.r2Bucket||'').trim()
+    const keepPrevious=previousBucket===bucket ? String(current.metadata?.r2PublicUrl||'').trim() : ''
+    const r2PublicUrl=publicAccess.publicUrl||keepPrevious
+    await setCredential('cloudflare',JSON.stringify(secrets),{
+      ...(current.metadata||{}),
+      r2Bucket:bucket,
+      r2Endpoint:`https://${accountId()}.r2.cloudflarestorage.com`,
+      r2PublicUrl,
+      r2PublicUrlSource:publicAccess.publicUrl?publicAccess.source:(r2PublicUrl?'manual':null),
+      r2PublicUrlDetectedAt:new Date().toISOString(),
+    })
     await hydrateCloudflareEnv()
-    res.json({ok:true,bucket,mensagem:`${bucket} definido como bucket padrão do AL Sistemas.`})
+    res.json({
+      ok:true,
+      bucket,
+      publicAccess,
+      publicUrl:r2PublicUrl||null,
+      mensagem:r2PublicUrl
+        ? `${bucket} definido como bucket padrão. URL pública detectada automaticamente.`
+        : `${bucket} definido como bucket padrão. Nenhuma URL pública ativa foi detectada.`,
+    })
+  }catch(err){next(err)}
+})
+
+// ── GET /r2/buckets/:bucket/public-url ─────────────────────────
+// Consulta somente a Cloudflare: não depende das credenciais S3 e não expõe
+// segredo algum ao frontend. Retorna domínio custom ativo ou r2.dev habilitado.
+router.get('/r2/buckets/:bucket/public-url', async(req,res,next)=>{
+  try{
+    const bucket=String(req.params.bucket||'').trim()
+    if(!bucket)return res.status(400).json({erro:'Bucket obrigatório.'})
+    const access=await discoverR2PublicAccess(bucket)
+    res.json({ok:true,...access})
   }catch(err){next(err)}
 })
 

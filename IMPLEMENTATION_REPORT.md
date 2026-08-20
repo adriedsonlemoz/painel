@@ -1,4 +1,20 @@
-# Relatório de implementação — 1.0.143
+# Relatório de implementação — 1.0.144
+
+## Cloudflare R2 — URL pública automática
+
+A Central Cloudflare consulta os endpoints oficiais de domínios do R2 para o bucket escolhido em **Usar no AL**. O painel prefere domínio personalizado habilitado/ativo e usa o domínio `r2.dev` habilitado como alternativa. A URL encontrada é persistida em `r2PublicUrl`, exibida na aba R2 com ações **Verificar**, **Copiar** e **Abrir**, e pode ser usada como `CF_R2_PUBLIC_URL` na Vercel.
+
+## MongoDB — índices
+
+A rota `GET /api/admin/infraestrutura/mongodb/colecoes/:nome/indices` deixou de chamar `Collection.getIndexes()`, indisponível na Collection nativa usada pelo Mongoose 8. A leitura agora usa `listIndexes().toArray()` e mantém o formato esperado pela interface.
+
+## Central de Erros — cópia individual
+
+Cada erro possui botão **Copiar** ao lado das ações da linha. A cópia inclui mensagem, tipo, status, ocorrências, data, rota/URL, fingerprint, dados adicionais e stack. Exportar todos e apagar registros continuam disponíveis.
+
+---
+
+# Histórico da implementação — 1.0.143
 
 ## Status independente na Vercel
 

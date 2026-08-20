@@ -1,3 +1,12 @@
+# 1.0.144 — URL pública R2 automática e correções da Central de Erros
+
+- Cloudflare/R2: a Central agora consulta automaticamente o domínio público do bucket pela API oficial, preferindo domínio personalizado ativo e usando `r2.dev` habilitado como fallback.
+- Cloudflare/R2: ao escolher **Usar no AL**, a URL pública detectada passa a ser persistida em `r2PublicUrl`, pronta para o snapshot/contingência do portal.
+- Cloudflare/R2: o bucket padrão mostra a URL pública com ações de copiar/abrir; a configuração manual continua disponível apenas como fallback.
+- MongoDB: corrigida a listagem de índices que usava `getIndexes()`; com Mongoose 8/MongoDB Driver atual a rota passa a usar `listIndexes().toArray()`.
+- Erros: cada registro ganhou botão **Copiar**, gerando um diagnóstico individual com mensagem, rota, dados adicionais, fingerprint e stack.
+- Versão: frontend, backend e manifesto sincronizados em **1.0.144**.
+
 # 1.0.143 — Status independente e contingência pública
 
 - Adiciona `/status/` como página independente do backend principal, hospedada junto do frontend na Vercel.

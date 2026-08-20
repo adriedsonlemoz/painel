@@ -356,14 +356,16 @@ router.get('/mongodb/colecoes/:nome/indices', async (req, res, next) => {
   try {
     const { nome } = req.params
     const db = mongoose.connection.db
-    const indices = await db.collection(nome).getIndexes()
-    // Transforma para formato amigável
-    const lista = Object.entries(indices).map(([name, spec]) => ({
-      name,
-      key: spec.key,
-      unique: spec.unique || false,
-      sparse: spec.sparse || false,
-      background: spec.background || false,
+    // MongoDB Node Driver 6 (usado pelo Mongoose 8) não expõe getIndexes()
+    // na Collection nativa. listIndexes().toArray() é a API oficial e retorna
+    // os documentos completos dos índices, inclusive nome, chave e opções.
+    const indices = await db.collection(nome).listIndexes().toArray()
+    const lista = indices.map(spec => ({
+      name: spec.name,
+      key: spec.key || {},
+      unique: Boolean(spec.unique),
+      sparse: Boolean(spec.sparse),
+      background: Boolean(spec.background),
     }))
     res.json({ indices: lista })
   } catch (err) { next(err) }

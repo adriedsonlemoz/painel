@@ -326,3 +326,9 @@ A tela SEO usa rotas administrativas dedicadas, confirmação de persistência n
 ## Status e contingência do portal
 
 A partir da **1.0.143**, o frontend Vercel inclui `/status/`, que verifica os serviços sem depender do backend Render. O portal público também possui fallback automático de leitura: **API principal → snapshot público no Cloudflare R2 → cache do navegador**. O snapshot é atualizado automaticamente pelo backend e contém apenas conteúdo público. Consulte `DEPLOY.md` para configurar `CF_R2_PUBLIC_URL` ou `NEWS_FALLBACK_URL` na Vercel.
+### R2 — URL pública automática (1.0.144+)
+
+Em **Admin → Cloudflare / R2 → R2 Storage**, ao selecionar **Usar no AL**, o backend consulta os endpoints oficiais de domínios do R2. O painel prefere um domínio personalizado habilitado e ativo; se não houver, usa o domínio `r2.dev` quando ele estiver habilitado. A URL detectada é salva na configuração central e reutilizada pelo snapshot público de contingência.
+
+A Central de Erros também permite copiar cada erro individualmente, incluindo mensagem, rota, dados técnicos e stack, sem precisar exportar o arquivo completo.
+

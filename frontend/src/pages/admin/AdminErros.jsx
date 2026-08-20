@@ -4,7 +4,25 @@ import ConfirmModal from '../../components/ConfirmModal'
 import { errosService } from '../../services/api'
 import { formatarDataRelativa } from '../../utils/formatters'
 
-function ErrorRow({ erro, aberto, onToggle, onDelete }) {
+function montarErroParaCopia(erro) {
+  const linhas = [
+    `Erro: ${erro.mensagem || 'Sem mensagem registrada.'}`,
+    `Tipo: ${erro.tipo || 'sistema'}`,
+    erro.status ? `Status: ${erro.status}` : null,
+    erro.ocorrencias != null ? `Ocorrências: ${erro.ocorrencias}` : null,
+    (erro.ultima_ocorrencia || erro.criado_em) ? `Data: ${new Date(erro.ultima_ocorrencia || erro.criado_em).toLocaleString('pt-BR')}` : null,
+    erro.rota ? `Rota: ${erro.rota}` : null,
+    erro.url && erro.url !== erro.rota ? `URL: ${erro.url}` : null,
+    erro.fingerprint ? `Fingerprint: ${erro.fingerprint}` : null,
+    erro.dados ? `Dados adicionais:
+${typeof erro.dados === 'string' ? erro.dados : JSON.stringify(erro.dados, null, 2)}` : null,
+    erro.stack ? `Stack:
+${erro.stack}` : null,
+  ]
+  return linhas.filter(Boolean).join('\n\n')
+}
+
+function ErrorRow({ erro, aberto, onToggle, onDelete, onCopy }) {
   const id = erro._id || erro.id
   const titulo = erro.mensagem || 'Erro sem descrição'
   const data = erro.ultima_ocorrencia || erro.criado_em
@@ -24,6 +42,7 @@ function ErrorRow({ erro, aberto, onToggle, onDelete }) {
         </span>
         <span className="error-chevron" aria-hidden="true">⌄</span>
       </button>
+      <button className="error-copy" type="button" onClick={() => onCopy(erro)} title="Copiar erro completo" aria-label="Copiar erro completo">Copiar</button>
       <button className="error-delete" type="button" onClick={() => onDelete(erro)} title="Apagar erro" aria-label="Apagar erro">⌫</button>
     </div>
 
@@ -114,6 +133,29 @@ export default function AdminErros() {
     })
   }
 
+  async function copiarErro(erro) {
+    const texto = montarErroParaCopia(erro)
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto)
+      } else {
+        const area = document.createElement('textarea')
+        area.value = texto
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(area)
+        if (!ok) throw new Error('Clipboard indisponível')
+      }
+      toast.success('Erro copiado completo.')
+    } catch {
+      toast.error('Não foi possível copiar o erro.')
+    }
+  }
+
   async function exportarTodos() {
     setExportando(true)
     try {
@@ -164,7 +206,7 @@ export default function AdminErros() {
     </div> : <div className="errors-list">
       {erros.map(erro => {
         const id = erro._id || erro.id
-        return <ErrorRow key={id} erro={erro} aberto={abertoId === id} onToggle={alternar} onDelete={apagarErro} />
+        return <ErrorRow key={id} erro={erro} aberto={abertoId === id} onToggle={alternar} onCopy={copiarErro} onDelete={apagarErro} />
       })}
     </div>}
 
@@ -179,7 +221,7 @@ export default function AdminErros() {
       .errors-list{display:grid;gap:8px}
       .error-item{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}
       .error-item.is-open{border-color:color-mix(in srgb,var(--adm-text) 18%,var(--adm-border));box-shadow:0 8px 24px rgba(0,0,0,.05)}
-      .error-item-head{display:grid;grid-template-columns:minmax(0,1fr) 46px;align-items:stretch}
+      .error-item-head{display:grid;grid-template-columns:minmax(0,1fr) 68px 46px;align-items:stretch}
       .error-item-toggle{min-width:0;border:0;background:transparent;color:inherit;padding:14px 6px 14px 14px;display:grid;grid-template-columns:10px minmax(0,1fr) 20px;gap:10px;align-items:center;text-align:left;cursor:pointer}
       .error-dot{width:8px;height:8px;border-radius:50%;background:#d73535;box-shadow:0 0 0 4px rgba(215,53,53,.09)}
       .error-dot.read{background:var(--adm-muted);box-shadow:none;opacity:.42}
@@ -189,6 +231,8 @@ export default function AdminErros() {
       .error-item-meta span:first-child{max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .error-chevron{color:var(--adm-muted);font-size:18px;line-height:1;transform:rotate(0);transition:transform .15s ease;text-align:center}
       .is-open .error-chevron{transform:rotate(180deg)}
+      .error-copy{border:0;border-left:1px solid var(--adm-border);background:transparent;color:var(--adm-text);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;padding:0 8px}
+      .error-copy:hover{color:var(--adm-accent);background:color-mix(in srgb,var(--adm-accent) 7%,transparent)}
       .error-delete{border:0;border-left:1px solid var(--adm-border);background:transparent;color:var(--adm-muted);font-size:18px;cursor:pointer}
       .error-delete:hover{color:var(--adm-danger,#c62828);background:rgba(220,38,38,.05)}
       .error-details{border-top:1px solid var(--adm-border);padding:14px;display:grid;gap:14px;background:color-mix(in srgb,var(--adm-surface) 93%,var(--adm-bg))}
@@ -202,7 +246,7 @@ export default function AdminErros() {
       .errors-empty small{font-size:12px}
       .errors-empty-icon{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:rgba(34,197,94,.1);color:#24a35a;font-size:19px;font-weight:900;margin-bottom:4px}
       @media(max-width:560px){
-        .errors-page-head{align-items:center}.errors-head-actions{gap:6px}.errors-export-all,.errors-clear-all{padding:8px 9px;font-size:11.5px}.error-item-toggle{padding:13px 5px 13px 12px;gap:9px}.error-item-head{grid-template-columns:minmax(0,1fr) 42px}.error-item-main strong{font-size:13.5px}.error-details{padding:12px}
+        .errors-page-head{align-items:center}.errors-head-actions{gap:6px}.errors-export-all,.errors-clear-all{padding:8px 9px;font-size:11.5px}.error-item-toggle{padding:13px 5px 13px 12px;gap:9px}.error-item-head{grid-template-columns:minmax(0,1fr) 58px 40px}.error-copy{font-size:10.5px;padding:0 5px}.error-item-main strong{font-size:13.5px}.error-details{padding:12px}
       }
     `}</style>
   </>

@@ -82,6 +82,11 @@ export const cloudflareService = {
     })
   },
 
+  /** Descobre domínio público (custom domain ou r2.dev) do bucket */
+  async publicUrlR2(bucket) {
+    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/public-url`)
+  },
+
   /** Lista todas as zonas da conta */
   async listarZonas(page = 1, limit = 20, q = '') {
     const p = new URLSearchParams({ page: String(page), limit: String(limit) })
