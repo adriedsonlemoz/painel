@@ -1,4 +1,5 @@
 import { api } from './http.js'
+import { isPublicFallbackEligible, snapshotCollection } from '../publicFallback.js'
 
 let cache = null
 let pending = null
@@ -17,12 +18,34 @@ async function listar(force = false) {
   if (!force && pending) return pending
   if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG_PROMISE__) {
     pending = Promise.resolve(window.__AL_PUBLIC_CONFIG_PROMISE__)
-      .then(data => { cache = data || {}; return cache })
+      .then(async data => {
+        if (data && typeof data === 'object' && Object.keys(data).length) {
+          cache = data
+          return cache
+        }
+        // Na Vercel, o bootstrap HTML usa /api/configuracoes same-origin e pode
+        // não encontrar uma Function com esse nome. Antes de recorrer ao snapshot,
+        // consulta a API real definida em VITE_API_URL.
+        try {
+          const live = await api('/configuracoes')
+          cache = live || {}
+          return cache
+        } catch (error) {
+          if (!isPublicFallbackEligible(error)) throw error
+          const fallback = await snapshotCollection('configuracoes', {}).catch(() => { throw error })
+          cache = fallback || {}
+          return cache
+        }
+      })
       .finally(() => { pending = null })
     return pending
   }
   pending = api('/configuracoes')
     .then(data => { cache = data || {}; return cache })
+    .catch(error => {
+      if (!isPublicFallbackEligible(error)) throw error
+      return snapshotCollection('configuracoes', {}).catch(() => { throw error })
+    })
     .finally(() => { pending = null })
   return pending
 }

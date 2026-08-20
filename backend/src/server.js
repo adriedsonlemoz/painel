@@ -96,6 +96,7 @@ import { STATE_DIR } from './services/systemUpdateService.js'
 import { recoverInterruptedUpdates } from './update/recoveryManager.js'
 import { registrarErro } from './services/errorLogService.js'
 import { importarErrosAtualizadorSpool } from './services/updateErrorSpool.js'
+import { startPublicSnapshotScheduler, stopPublicSnapshotScheduler, schedulePublicSnapshotRefresh } from './services/publicSnapshotService.js'
 
 ensureBootstrapSecrets()
 
@@ -327,7 +328,10 @@ async function iniciar() {
         { status: 'agendado', agendado_para: { $lte: agora } },
         { $set: { status: 'publicado', publicado_em: agora }, $unset: { agendado_para: 1 } },
       )
-      if (resultado.modifiedCount) logger.info({ total: resultado.modifiedCount }, 'Notícias agendadas publicadas')
+      if (resultado.modifiedCount) {
+        logger.info({ total: resultado.modifiedCount }, 'Notícias agendadas publicadas')
+        schedulePublicSnapshotRefresh('scheduled-news-published')
+      }
     } catch (err) {
       logger.warn({ err: err.message }, 'Falha ao promover notícias agendadas')
     }
@@ -364,6 +368,7 @@ async function iniciar() {
       await ensurePersistentBootstrap().catch(err => logger.warn({err:err.message}, 'Falha ao sincronizar bootstrap persistente'))
       await hydratePlatformOrigins({remote:true}).catch(err => logger.warn({err:err.message}, 'Falha ao hidratar origens das plataformas'))
       await importarErrosAtualizadorSpool({limit:200}).catch(err => logger.warn({err:err.message}, 'Falha ao importar erros de workers'))
+      startPublicSnapshotScheduler()
       if (!rssIniciado) {
         iniciarRssJob(process.env.RSS_CRON || '0 * * * *')
         rssIniciado = true
@@ -412,6 +417,7 @@ async function iniciar() {
     if (noticiasTimer) clearInterval(noticiasTimer)
     if (eventosTimer) clearInterval(eventosTimer)
     clearInterval(recoveryTimer)
+    stopPublicSnapshotScheduler()
     logger.info({ sinal }, 'Desligando servidor...')
     pararRssJob()
     server.close(async () => {

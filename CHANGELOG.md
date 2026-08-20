@@ -1,3 +1,17 @@
+# 1.0.143 — Status independente e contingência pública
+
+- Adiciona `/status/` como página independente do backend principal, hospedada junto do frontend na Vercel.
+- Adiciona `/api/status` como Vercel Function para testar AL Sistemas API, GuiaDoA e serviços configuráveis, com HTTP e latência.
+- Consulta automaticamente o status oficial do Render e exibe incidentes não resolvidos na página de status.
+- Backend passa a gerar automaticamente no Cloudflare R2 um snapshot dos dados públicos do portal.
+- Snapshot inclui notícias publicadas, categorias, configurações públicas, módulos, tópicos, notícias externas, eventos futuros e ônibus ativos.
+- Snapshot usa whitelist de campos públicos e exclui responsáveis, revisores, comentários internos e metadados privados de mídia.
+- Portal público passa a usar fallback em três camadas: API principal → R2 via Vercel → cache local do navegador.
+- Exibe banner de modo contingência com horário da última cópia e atalho para `/status/`.
+- Atualiza o snapshot no boot, a cada 5 minutos por padrão e após alterações relevantes de conteúdo.
+- Mantém rotas administrativas fora do fallback para não esconder falhas de escrita/autenticação.
+- Corrige warnings de índices duplicados no Mongoose para `BuscaTermo.termo` e `MidiaAsset.public_id`, preservando os índices únicos.
+
 # 1.0.142 — Workflows e sessão persistente segura
 
 - Logs de GitHub Actions agora abrem em modal dedicado, com padrão de mais recentes primeiro.

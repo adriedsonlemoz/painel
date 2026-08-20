@@ -321,3 +321,8 @@ A tela **Erros e logs** passa a priorizar produção online. AL Sistemas, GitHub
 ## AL Sistemas 1.0.96 — SEO persistente e triagem externa
 
 A tela SEO usa rotas administrativas dedicadas, confirmação de persistência no MongoDB e assistência por Gemini/OpenRouter. A Central de Erros permite triagem e notas locais para GitHub, Vercel, Render e MongoDB sem modificar o erro na plataforma de origem.
+
+
+## Status e contingência do portal
+
+A partir da **1.0.143**, o frontend Vercel inclui `/status/`, que verifica os serviços sem depender do backend Render. O portal público também possui fallback automático de leitura: **API principal → snapshot público no Cloudflare R2 → cache do navegador**. O snapshot é atualizado automaticamente pelo backend e contém apenas conteúdo público. Consulte `DEPLOY.md` para configurar `CF_R2_PUBLIC_URL` ou `NEWS_FALLBACK_URL` na Vercel.

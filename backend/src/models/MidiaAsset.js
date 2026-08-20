@@ -4,7 +4,7 @@ const midiaAssetSchema = new mongoose.Schema({
   titulo: { type: String, default: '', trim: true },
   tipo: { type: String, default: 'midia', trim: true },
   url: { type: String, required: true, trim: true },
-  public_id: { type: String, default: null, index: true },
+  public_id: { type: String, default: null },
   alt: { type: String, default: '' },
   credito: { type: String, default: '' },
   mime: { type: String, default: '' },

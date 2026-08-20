@@ -1,6 +1,6 @@
 {
   "name": "al-sistemas-backend",
-  "version": "1.0.142",
+  "version": "1.0.143",
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",

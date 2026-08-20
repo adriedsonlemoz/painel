@@ -6,6 +6,7 @@ import { autenticar } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { regraCategoria, validar } from '../middleware/validacoes.js'
 import { cacheGet, cacheSet, cacheDel } from '../utils/cache.js'
+import { schedulePublicSnapshotRefresh } from '../services/publicSnapshotService.js'
 
 const CACHE_KEY = 'categorias_lista_v2'
 const CACHE_TTL = 120
@@ -33,6 +34,7 @@ router.post('/', autenticar, verificarPermissao('categorias.gerenciar'), regraCa
     const { nome, slug, cor, descricao, icone='', ordem=0, destaque=false, ativa=true, categoria_pai_id=null, imagem_url=null, imagem_public_id=null, imagem_alt='', seo_titulo=null, seo_descricao=null } = req.body
     const categoria = await Categoria.create({ nome, slug, cor:cor||'#1B5E3B', descricao:descricao||'', icone, ordem, destaque, ativa, categoria_pai_id:categoria_pai_id||null, imagem_url, imagem_public_id, imagem_alt, seo_titulo, seo_descricao, protegida:slug==='geral' })
     await cacheDel(CACHE_KEY)
+    schedulePublicSnapshotRefresh('category-created')
     res.status(201).json(categoria)
   } catch (err) { next(err) }
 })
@@ -51,6 +53,7 @@ router.put('/:id', autenticar, verificarPermissao('categorias.gerenciar'), regra
     )
     if (!categoria) return res.status(404).json({ erro: 'Categoria não encontrada' })
     await cacheDel(CACHE_KEY)
+    schedulePublicSnapshotRefresh('category-updated')
     res.json(categoria)
   } catch (err) { next(err) }
 })
@@ -74,6 +77,7 @@ router.delete('/:id', autenticar, verificarPermissao('categorias.gerenciar'), as
     const categoria = await Categoria.findByIdAndDelete(req.params.id)
     if (!categoria) return res.status(404).json({ erro: 'Categoria não encontrada' })
     await cacheDel(CACHE_KEY)
+    schedulePublicSnapshotRefresh('category-deleted')
     res.json({ mensagem: 'Categoria excluída' })
   } catch (err) { next(err) }
 })

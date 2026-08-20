@@ -37,9 +37,13 @@ self.addEventListener('fetch', event => {
     // Sessão/admin nunca entram em cache. Isso evita reaproveitar 401/200 de
     // uma sessão antiga após deploy e também funciona quando a API está no
     // Render e o frontend na Vercel.
-    const sensitive = ['/api/auth/', '/api/admin/', '/api/github/', '/api/projetos/', '/api/analysis/', '/api/setup/', '/api/upload', '/api/erros']
+    const sensitive = ['/api/status', '/api/auth/', '/api/admin/', '/api/github/', '/api/projetos/', '/api/analysis/', '/api/setup/', '/api/upload', '/api/erros']
       .some(prefix => url.pathname.startsWith(prefix))
-    event.respondWith(sensitive ? fetch(request, { cache: 'no-store' }) : networkFirstAPI(request))
+    if (url.pathname === '/api/news-fallback') {
+      event.respondWith(networkFirstFallbackSnapshot(request))
+    } else {
+      event.respondWith(sensitive ? fetch(request, { cache: 'no-store' }) : networkFirstAPI(request))
+    }
     return
   }
 
@@ -82,6 +86,29 @@ async function networkFirstAPI(request) {
     const cached = await cache.match(request)
     if (cached) return cached
     return new Response(JSON.stringify({ erro: 'Sem conexão', offline: true }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}
+
+
+// O snapshot de contingência é deliberadamente diferente das demais APIs:
+// se Vercel/R2 responder 5xx, uma cópia 200 previamente salva continua útil.
+async function networkFirstFallbackSnapshot(request) {
+  const cache = await caches.open(API_CACHE_NAME)
+  try {
+    const response = await fetch(request, { cache: 'no-store' })
+    if (response.ok) {
+      await cache.put(request, response.clone())
+      return response
+    }
+    const cached = await cache.match(request)
+    return cached || response
+  } catch {
+    const cached = await cache.match(request)
+    if (cached) return cached
+    return new Response(JSON.stringify({ erro: 'Snapshot de contingência indisponível', offline: true }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },
     })

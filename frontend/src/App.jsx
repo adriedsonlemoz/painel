@@ -15,6 +15,7 @@ import SetupStartupDiagnostics from './components/SetupStartupDiagnostics'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import GlobalMeta from './components/GlobalMeta'
+import PublicFallbackBanner from './components/PublicFallbackBanner'
 import { setupService } from './services/api'
 
 // ── Autenticação (carregadas no bundle principal — pequenas, sempre necessárias)
@@ -138,6 +139,7 @@ function PublicLayout({ children }) {
     <>
       <GlobalMeta />
       <Navbar />
+      <PublicFallbackBanner />
       <main>{children}</main>
       <Footer />
     </>

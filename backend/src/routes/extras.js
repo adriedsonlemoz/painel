@@ -14,6 +14,7 @@ import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { auditLog } from '../middleware/auditLog.js'
 import { cacheGet, cacheSet, cacheDel } from '../utils/cache.js'
 import { enviarJson } from '../utils/aiClient.js'
+import { schedulePublicSnapshotRefresh } from '../services/publicSnapshotService.js'
 import {
   regraConfiguracao, regraConfiguracaoLote,
   regraNoticiaExterna, regraTopico, regraOnibus, validar,
@@ -82,6 +83,7 @@ router.put('/configuracoes/:chave', autenticar, verificarPermissao('configuracoe
       { chave: req.params.chave }, { valor }, { new: true, upsert: true }
     )
     await cacheDel(CACHE_KEY_CONFIG)
+    schedulePublicSnapshotRefresh('public-config-updated')
     res.json(config)
   } catch (err) { next(err) }
 })
@@ -95,6 +97,7 @@ router.put('/configuracoes-lote', autenticar, verificarPermissao('configuracoes.
       )
     )
     await cacheDel(CACHE_KEY_CONFIG)
+    schedulePublicSnapshotRefresh('public-config-batch-updated')
     res.json({ mensagem: 'Configurações atualizadas' })
   } catch (err) { next(err) }
 })
@@ -118,6 +121,7 @@ router.put('/seo-configuracoes', autenticar, seoPermissao, auditLog('seo'), regr
     await cacheDel(CACHE_KEY_CONFIG)
     const configs=await ConfiguracaoHome.find({chave:{$in:[...SEO_KEYS]}}).lean()
     const mapa=configs.reduce((acc,c)=>({...acc,[c.chave]:c.valor}),{})
+    schedulePublicSnapshotRefresh('seo-config-updated')
     res.json({ok:true,configuracoes:mapa})
   }catch(err){next(err)}
 })
@@ -155,6 +159,7 @@ router.put('/modulos/:id', autenticar, verificarPermissao('modulos.gerenciar'), 
     const modulo = await ModuloHome.findByIdAndUpdate(req.params.id, req.body, { new: true })
     if (!modulo) return res.status(404).json({ erro: 'Módulo não encontrado' })
     await cacheDel(CACHE_KEY_MODULOS)
+    schedulePublicSnapshotRefresh('public-module-updated')
     res.json(modulo)
   } catch (err) { next(err) }
 })
@@ -202,6 +207,7 @@ router.get('/noticias-externas/todas', autenticar, async (_req, res, next) => {
 router.post('/noticias-externas', autenticar, verificarPermissao('extras.gerenciar'), auditLog('noticias-externas'), regraNoticiaExterna, validar, async (req, res, next) => {
   try {
     const noticia = await NoticiaExterna.create(req.body)
+    schedulePublicSnapshotRefresh('external-news-created')
     res.status(201).json(noticia)
   } catch (err) { next(err) }
 })
@@ -210,6 +216,7 @@ router.put('/noticias-externas/:id', autenticar, verificarPermissao('extras.gere
   try {
     const noticia = await NoticiaExterna.findByIdAndUpdate(req.params.id, req.body, { new: true })
     if (!noticia) return res.status(404).json({ erro: 'Notícia externa não encontrada' })
+    schedulePublicSnapshotRefresh('external-news-updated')
     res.json(noticia)
   } catch (err) { next(err) }
 })
@@ -217,6 +224,7 @@ router.put('/noticias-externas/:id', autenticar, verificarPermissao('extras.gere
 router.delete('/noticias-externas/:id', autenticar, verificarPermissao('extras.gerenciar'), auditLog('noticias-externas'), async (req, res, next) => {
   try {
     await NoticiaExterna.findByIdAndDelete(req.params.id)
+    schedulePublicSnapshotRefresh('external-news-deleted')
     res.json({ mensagem: 'Notícia externa excluída' })
   } catch (err) { next(err) }
 })
@@ -240,6 +248,7 @@ router.get('/topicos/todos', autenticar, async (_req, res, next) => {
 router.post('/topicos', autenticar, verificarPermissao('extras.gerenciar'), auditLog('topicos'), regraTopico, validar, async (req, res, next) => {
   try {
     const topico = await Topico.create(req.body)
+    schedulePublicSnapshotRefresh('topic-created')
     res.status(201).json(topico)
   } catch (err) { next(err) }
 })
@@ -248,6 +257,7 @@ router.put('/topicos/:id', autenticar, verificarPermissao('extras.gerenciar'), a
   try {
     const topico = await Topico.findByIdAndUpdate(req.params.id, req.body, { new: true })
     if (!topico) return res.status(404).json({ erro: 'Tópico não encontrado' })
+    schedulePublicSnapshotRefresh('topic-updated')
     res.json(topico)
   } catch (err) { next(err) }
 })
@@ -255,6 +265,7 @@ router.put('/topicos/:id', autenticar, verificarPermissao('extras.gerenciar'), a
 router.delete('/topicos/:id', autenticar, verificarPermissao('extras.gerenciar'), auditLog('topicos'), async (req, res, next) => {
   try {
     await Topico.findByIdAndDelete(req.params.id)
+    schedulePublicSnapshotRefresh('topic-deleted')
     res.json({ mensagem: 'Tópico excluído' })
   } catch (err) { next(err) }
 })
@@ -326,6 +337,7 @@ function normalizarLinhaOnibus(body = {}) {
 router.post('/onibus', autenticar, verificarPermissao('extras.gerenciar'), auditLog('onibus'), regraOnibus, validar, async (req, res, next) => {
   try {
     const linha = await Onibus.create(normalizarLinhaOnibus(req.body))
+    schedulePublicSnapshotRefresh('bus-created')
     res.status(201).json(linha)
   } catch (err) { next(err) }
 })
@@ -338,6 +350,7 @@ router.put('/onibus/:id', autenticar, verificarPermissao('extras.gerenciar'), au
       { new: true, runValidators: true }
     )
     if (!linha) return res.status(404).json({ erro: 'Linha não encontrada' })
+    schedulePublicSnapshotRefresh('bus-updated')
     res.json(linha)
   } catch (err) { next(err) }
 })
@@ -345,6 +358,7 @@ router.put('/onibus/:id', autenticar, verificarPermissao('extras.gerenciar'), au
 router.delete('/onibus/:id', autenticar, verificarPermissao('extras.gerenciar'), auditLog('onibus'), async (req, res, next) => {
   try {
     await Onibus.findByIdAndDelete(req.params.id)
+    schedulePublicSnapshotRefresh('bus-deleted')
     res.json({ mensagem: 'Linha excluída' })
   } catch (err) { next(err) }
 })
@@ -470,6 +484,7 @@ router.post('/eventos', autenticar, verificarPermissao('extras.gerenciar'), audi
       return res.status(400).json({ erro: 'Título e data são obrigatórios.' })
     }
     const evento = await Evento.create(payload)
+    schedulePublicSnapshotRefresh('event-created')
     res.status(201).json(evento)
   } catch (err) { next(err) }
 })
@@ -490,6 +505,7 @@ router.put('/eventos/:id', autenticar, verificarPermissao('extras.gerenciar'), a
       { new: true, runValidators: true }
     )
     if (!evento) return res.status(404).json({ erro: 'Evento não encontrado.' })
+    schedulePublicSnapshotRefresh('event-updated')
     res.json(evento)
   } catch (err) { next(err) }
 })
@@ -501,6 +517,7 @@ router.delete('/eventos/:id', autenticar, verificarPermissao('extras.gerenciar')
     }
     const evento = await Evento.findByIdAndDelete(req.params.id)
     if (!evento) return res.status(404).json({ erro: 'Evento não encontrado.' })
+    schedulePublicSnapshotRefresh('event-deleted')
     res.json({ mensagem: 'Evento excluído.' })
   } catch (err) { next(err) }
 })

@@ -78,6 +78,8 @@ export default function Footer() {
 
           <p className="text-white/40 text-xs mt-4">
             © {new Date().getFullYear()} {cfg.nome_site || 'Portal de notícias'} · Todos os direitos reservados
+            <span className="mx-2">·</span>
+            <a href="/status/" className="hover:text-white/70 underline underline-offset-2">Status dos serviços</a>
           </p>
         </div>
       </div>

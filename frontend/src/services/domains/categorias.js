@@ -1,4 +1,5 @@
 import { api } from './http.js'
+import { isPublicFallbackEligible, snapshotCollection } from '../publicFallback.js'
 
 let cache = null
 let pending = null
@@ -8,6 +9,10 @@ async function listar(force = false) {
   if (!force && pending) return pending
   pending = api('/categorias')
     .then(data => { cache = Array.isArray(data) ? data : []; return cache })
+    .catch(error => {
+      if (!isPublicFallbackEligible(error)) throw error
+      return snapshotCollection('categorias', []).catch(() => { throw error })
+    })
     .finally(() => { pending = null })
   return pending
 }

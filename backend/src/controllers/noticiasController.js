@@ -27,6 +27,7 @@ import BuscaTermo          from '../models/BuscaTermo.js'
 import { cloudinary }    from '../config/index.js'
 import { gridfsMediaBucket } from '../middleware/upload.js'
 import { deleteR2ByPublicId } from '../services/r2MediaStorage.js'
+import { schedulePublicSnapshotRefresh } from '../services/publicSnapshotService.js'
 import { viewJaContabilizada } from '../utils/cache.js'
 import {
   popular,
@@ -197,6 +198,7 @@ export async function criar(req, res, next) {
 
     await registrarRevisao(noticia,req,'criacao')
     const populada = await popularUm(Noticia.findById(noticia._id))
+    schedulePublicSnapshotRefresh('news-created')
     res.status(201).json(populada)
   } catch (err) { next(err) }
 }
@@ -243,6 +245,7 @@ export async function atualizar(req, res, next) {
     }
 
     const populada = await popularUm(Noticia.findById(noticia._id))
+    schedulePublicSnapshotRefresh('news-updated')
     res.json(populada)
   } catch (err) { next(err) }
 }
@@ -271,6 +274,7 @@ export async function mudarStatus(req, res, next) {
     if (novoStatus !== 'agendado') update.agendado_para = null
 
     const atualizada = await Noticia.findByIdAndUpdate(req.params.id, update, { new: true })
+    schedulePublicSnapshotRefresh('news-status-changed')
     res.json({
       id:           atualizada._id,
       status:       atualizada.status,
@@ -311,6 +315,7 @@ export async function excluir(req, res, next) {
       )
     }
 
+    schedulePublicSnapshotRefresh('news-deleted')
     res.json({ mensagem: 'Notícia excluída' })
   } catch (err) { next(err) }
 }
@@ -329,6 +334,7 @@ export async function adicionarGaleria(req, res, next) {
       { new: true }
     )
     if (!noticia) return res.status(404).json({ erro: 'Notícia não encontrada' })
+    schedulePublicSnapshotRefresh('news-gallery-changed')
     res.json(noticia.galeria)
   } catch (err) { next(err) }
 }
@@ -345,6 +351,7 @@ export async function removerGaleria(req, res, next) {
       { new: true }
     )
     if (!noticia) return res.status(404).json({ erro: 'Notícia não encontrada' })
+    schedulePublicSnapshotRefresh('news-gallery-changed')
     res.json(noticia.galeria)
   } catch (err) { next(err) }
 }

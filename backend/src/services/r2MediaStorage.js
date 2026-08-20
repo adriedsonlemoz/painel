@@ -169,6 +169,43 @@ export async function uploadContentImage(file, kind = 'midia') {
   return uploadNewsImage(file, { root: 'conteudo', folder: safeKind, purpose: `content-${safeKind}` })
 }
 
+/**
+ * Persiste um JSON público de contingência no mesmo R2 já configurado para o portal.
+ * Somente o namespace alsistemas/fallback/ é aceito para evitar uso genérico
+ * acidental deste helper em áreas sensíveis.
+ */
+export async function putPublicFallbackJson(key, payload, { cacheControl = 'public, max-age=60, stale-while-revalidate=300' } = {}) {
+  const safeKey = clean(key)
+  if (!safeKey.startsWith('alsistemas/fallback/') || !safeKey.endsWith('.json')) {
+    const err = new Error('Chave inválida para snapshot público do R2.')
+    err.code = 'R2_FALLBACK_KEY_INVALID'
+    throw err
+  }
+
+  const cfg = await getR2MediaConfig()
+  const client = clientFrom(cfg)
+  const body = Buffer.from(JSON.stringify(payload), 'utf8')
+
+  await client.send(new PutObjectCommand({
+    Bucket: cfg.r2Bucket,
+    Key: safeKey,
+    Body: body,
+    ContentType: 'application/json; charset=utf-8',
+    CacheControl: cacheControl,
+    Metadata: {
+      purpose: 'public-portal-fallback',
+      generatedat: new Date().toISOString(),
+    },
+  }))
+
+  return {
+    bucket: cfg.r2Bucket,
+    key: safeKey,
+    public_url: configuredPublicUrl(cfg, safeKey),
+    size: body.length,
+  }
+}
+
 export async function getR2Object(bucket, key) {
   const cfg = await getR2MediaConfig()
   if (clean(bucket) !== cfg.r2Bucket) {

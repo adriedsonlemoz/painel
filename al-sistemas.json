@@ -1,8 +1,14 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.142",
+  "version": "1.0.143",
   "packageFormat": 2,
   "changelog": [
+    "Adiciona página /status independente do backend, executada na Vercel, para verificar AL Sistemas API, GuiaDoA e o status oficial do Render.",
+    "Cria snapshot público automático no Cloudflare R2 para manter notícias, categorias, configurações e outros dados públicos disponíveis quando o Render estiver fora do ar.",
+    "Restringe o snapshot R2 a campos públicos do portal, excluindo responsáveis, revisores, comentários internos e metadados privados de mídia.",
+    "Portal público passa a usar fallback em três camadas: API principal, snapshot R2 via Vercel e última cópia do navegador.",
+    "Adiciona aviso visual de modo contingência com data da última cópia e atalho para Status dos Serviços.",
+    "Corrige os índices duplicados do Mongoose em BuscaTermo.termo e MidiaAsset.public_id sem remover a unicidade dos índices.",
     "Integra o ícone aprovado AL Sistemas ao PWA e ao APK Android.",
     "Ajusta barra de status, barra de navegação e fundo inicial do Android para acompanhar a cor principal do painel.",
     "Adiciona ao Dashboard um resumo de projetos com total, projetos ativos e atalho direto para GitHub e APKs.",

@@ -276,3 +276,59 @@ Em Vercel + Render, use **Admin → Erros e logs** para acompanhar ocorrências 
 ### SEO e diagnóstico externo (1.0.96)
 
 SEO é persistido no MongoDB e confirmado após a escrita. Em produção cloud, ocorrências externas podem ser acompanhadas localmente pelo AL com estados e notas sem apagar ou alterar logs/deploys nas plataformas.
+
+
+## Página de status independente e fallback público (1.0.143+)
+
+A página de monitoramento fica no próprio frontend Vercel e não depende do backend Render:
+
+- `https://SEU-FRONTEND.vercel.app/status/` — interface de status.
+- `https://SEU-FRONTEND.vercel.app/api/status` — JSON bruto da checagem.
+- `https://SEU-FRONTEND.vercel.app/api/news-fallback` — snapshot público usado como contingência.
+
+### 1. Backend / Cloudflare R2
+
+O backend usa o R2 já configurado no painel e cria automaticamente:
+
+`alsistemas/fallback/public-snapshot-v1.json`
+
+Por padrão, a cópia é renovada a cada 5 minutos e após alterações editoriais importantes. Variáveis opcionais no backend:
+
+```env
+PUBLIC_SNAPSHOT_INTERVAL_MS=300000
+PUBLIC_SNAPSHOT_NEWS_LIMIT=250
+```
+
+O bucket precisa ter uma URL pública configurada em `CF_R2_PUBLIC_URL`.
+
+### 2. Vercel
+
+Em **Project → Settings → Environment Variables**, configure uma das opções:
+
+```env
+CF_R2_PUBLIC_URL=https://seu-dominio-publico-r2
+```
+
+ou a URL completa:
+
+```env
+NEWS_FALLBACK_URL=https://seu-dominio-publico-r2/alsistemas/fallback/public-snapshot-v1.json
+```
+
+Depois faça um novo deploy do frontend para a Function receber a variável. `NEWS_FALLBACK_URL` tem prioridade quando as duas forem definidas.
+
+### 3. Serviços monitorados
+
+Sem configuração adicional, `/status/` testa AL Sistemas API e GuiaDoA. Para personalizar:
+
+```env
+STATUS_SERVICES_JSON=[{"id":"al-sistemas-api","name":"AL Sistemas API","url":"https://al-sistemas-api.onrender.com/api/health/live","provider":"Render"},{"id":"guiadoa","name":"GuiaDoA","url":"https://guiadoa-agrq.onrender.com/","provider":"Render"}]
+```
+
+### 4. Ordem de contingência do portal
+
+1. API principal no Render.
+2. Snapshot R2 através de `/api/news-fallback` na Vercel.
+3. Último snapshot salvo pelo navegador/Service Worker.
+
+O painel administrativo continua exigindo o backend e nunca usa dados antigos para operações de escrita.
