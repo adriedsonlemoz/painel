@@ -71,10 +71,13 @@ export const infraestruturaService = {
   async renderServicos()         { return api('/admin/infraestrutura/plataformas/render/servicos') },
   async renderDeploys(svcId)     { return api(`/admin/infraestrutura/plataformas/render/servicos/${svcId}/deploys`) },
   async renderVariaveis(svcId)   { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env`) },
-  async renderSalvarVariavel(svcId, key, value) {
+  async renderSalvarVariavel(svcId, key, value, { deploy=false } = {}) {
     return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env/${encodeURIComponent(key)}`, {
-      method:'PUT', body:JSON.stringify({value}),
+      method:'PUT', body:JSON.stringify({value,deploy}),
     })
+  },
+  async renderRemoverVariavel(svcId, key) {
+    return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env/${encodeURIComponent(key)}`, { method:'DELETE' })
   },
   async renderDeploy(svcId, { clearCache=false, commitId='' } = {}) {
     return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/deploy`, {
@@ -118,6 +121,20 @@ export const infraestruturaService = {
   async vercelProjetos()         { return api('/admin/infraestrutura/plataformas/vercel/projetos') },
   async vercelDeploys(projId)    { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${projId}/deploys`) },
   async vercelVariaveis(projId)  { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env`) },
+  async vercelSalvarVariavel(projId, key, value, { envId='', target=['production'], sensitive=false, deploy=false } = {}) {
+    return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env/${encodeURIComponent(key)}`, {
+      method:'PUT', body:JSON.stringify({value,envId,target,sensitive,deploy}),
+    })
+  },
+  async vercelRemoverVariavel(projId, key, envId='') {
+    const q=envId?`?envId=${encodeURIComponent(envId)}`:''
+    return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env/${encodeURIComponent(key)}${q}`, { method:'DELETE' })
+  },
+  async aplicarVariavelProducao(provider, key, value, { deploy=false } = {}) {
+    return api(`/admin/infraestrutura/plataformas/producao/env/${encodeURIComponent(provider)}/${encodeURIComponent(key)}`, {
+      method:'PUT', body:JSON.stringify({value,deploy}),
+    })
+  },
   async vercelDeployLogs(deployId){ return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/logs`) },
   async vercelRedeploy(deployId, name = '') {
     return api(`/admin/infraestrutura/plataformas/vercel/deploys/${encodeURIComponent(deployId)}/redeploy`, {

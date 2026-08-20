@@ -336,3 +336,9 @@ O painel administrativo continua exigindo o backend e nunca usa dados antigos pa
 
 Com um API Token Cloudflare que possua acesso de leitura ao R2, abra **Cloudflare / R2 → R2 Storage** e clique em **Usar no AL** no bucket desejado. O AL Sistemas consulta automaticamente `domains/custom` e `domains/managed`, salva a melhor URL pública disponível e a exibe para copiar. Isso reduz a necessidade de preencher `CF_R2_PUBLIC_URL` manualmente; na Vercel, mantenha a variável quando o fallback serverless precisar acessar diretamente o R2.
 
+
+## Gerenciar variáveis pelo próprio AL Sistemas (1.0.145+)
+
+Depois de conectar Vercel e Render em **Integrações e APIs**, abra **Projetos e Deploys → Variáveis**. A central usa as APIs oficiais para criar, atualizar ou remover Environment Variables sem expor os tokens no frontend. Use **Salvar sem deploy** para apenas persistir a configuração ou **Salvar + deploy** para publicar imediatamente.
+
+Para o fallback do portal, **Cloudflare → R2** oferece **Aplicar na Vercel**, que define `CF_R2_PUBLIC_URL` no frontend principal e inicia um redeploy automaticamente.

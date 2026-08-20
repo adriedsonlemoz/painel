@@ -1,3 +1,14 @@
+# Relatório de implementação — 1.0.145
+
+## Variáveis Vercel + Render via API
+
+- Central independente em `/admin/plataformas/variaveis`.
+- CRUD completo de variáveis nos dois provedores.
+- Valores mascarados na saída do backend; credenciais de API não chegam ao navegador.
+- Vercel com targets production/preview/development e suporte a variável sensível.
+- Salvar + deploy para Vercel e Render.
+- R2 pode aplicar `CF_R2_PUBLIC_URL` diretamente no projeto Vercel principal e salvar no serviço Render principal.
+
 # Relatório de implementação — 1.0.144
 
 ## Cloudflare R2 — URL pública automática

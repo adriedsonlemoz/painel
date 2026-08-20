@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback } from 'react'
 import React from 'react'
 import toast from 'react-hot-toast'
 import { cloudflareService } from '../../../services/domains/cloudflare'
+import { infraestruturaService } from '../../../services/api'
 import { C, Ico, Spin, PageCard, SectionTitle, Btn } from './InfraBase'
 import { SPACE, RADIUS, FONT } from '../../../themes/tokens'
 import { DSModal } from '../ui/DS'
@@ -980,6 +981,22 @@ function AbaR2({ status, onRefreshStatus }) {
     catch{toast.error('Não foi possível copiar a URL.')}
   }
 
+  async function aplicarR2NaProducao(provider){
+    const url=effectivePublicUrl
+    if(!url)return toast.error('Nenhuma URL pública do R2 disponível.')
+    const nome=provider==='vercel'?'Vercel':'Render'
+    const withDeploy=provider==='vercel'
+    const pergunta=withDeploy
+      ? `Definir CF_R2_PUBLIC_URL no frontend principal da ${nome} e iniciar um novo deploy?`
+      : `Definir CF_R2_PUBLIC_URL no backend principal da ${nome}? A alteração será usada no próximo deploy.`
+    if(!window.confirm(pergunta))return
+    setBusy(true)
+    try{
+      const r=await infraestruturaService.aplicarVariavelProducao(provider,'CF_R2_PUBLIC_URL',url,{deploy:withDeploy})
+      toast.success(r.mensagem||`CF_R2_PUBLIC_URL enviada à ${nome}.`)
+    }catch(err){toast.error(err.message)}finally{setBusy(false)}
+  }
+
   const carregarOverview=useCallback(async()=>{
     setLoading(true)
     try{
@@ -1042,6 +1059,8 @@ function AbaR2({ status, onRefreshStatus }) {
       <div className="cf-r2-public-actions">
         <button onClick={()=>carregarPublicAccess(defaultBucket)} disabled={loadingPublic}>{loadingPublic?'…':'Verificar'}</button>
         <button onClick={copiarUrlPublica} disabled={!effectivePublicUrl}>Copiar</button>
+        <button onClick={()=>aplicarR2NaProducao('vercel')} disabled={!effectivePublicUrl||busy}>Aplicar na Vercel</button>
+        <button onClick={()=>aplicarR2NaProducao('render')} disabled={!effectivePublicUrl||busy}>Salvar na Render</button>
         {effectivePublicUrl&&<a href={effectivePublicUrl} target="_blank" rel="noreferrer">Abrir ↗</a>}
       </div>
     </div>}

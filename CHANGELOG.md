@@ -1,3 +1,14 @@
+# 1.0.145 — Variáveis de ambiente via API
+
+- Adiciona **Projetos e Deploys → Variáveis**, uma central única para gerenciar Environment Variables de projetos Vercel e serviços Render.
+- Vercel: cria, atualiza e exclui variáveis via API oficial, com escolha de `production`, `preview` e `development` e opção de variável sensível.
+- Render: completa o CRUD com exclusão de variáveis e mantém atualização por chave usando a API oficial.
+- Ambos os provedores oferecem **Salvar sem deploy** e **Salvar + deploy**; a interface deixa claro quando a alteração ainda precisa ser publicada.
+- Valores retornados pelos provedores são mascarados antes de chegar ao navegador; tokens de API continuam protegidos no cofre do backend.
+- R2: a URL pública do bucket padrão pode ser aplicada automaticamente como `CF_R2_PUBLIC_URL` no frontend Vercel principal, com redeploy, ou salva no backend Render principal.
+- Adiciona atalho **Variáveis** na Central de Projetos e mantém a edição também dentro de cada projeto individual.
+- Versão sincronizada em **1.0.145**.
+
 # 1.0.144 — URL pública R2 automática e correções da Central de Erros
 
 - Cloudflare/R2: a Central agora consulta automaticamente o domínio público do bucket pela API oficial, preferindo domínio personalizado ativo e usando `r2.dev` habilitado como fallback.

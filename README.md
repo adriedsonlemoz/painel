@@ -16,6 +16,12 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## 🧩 Variáveis de ambiente via API (1.0.145+)
+
+Em **Admin → Projetos e Deploys → Variáveis**, o AL Sistemas pode listar, criar, atualizar e excluir variáveis de projetos Vercel e serviços Render usando as credenciais já protegidas em **Integrações e APIs**. Valores completos não são devolvidos ao navegador; a interface trabalha com versões mascaradas. Alterações podem ser salvas sem publicação ou acompanhadas de um novo deploy.
+
+No módulo **Cloudflare → R2**, a URL pública detectada do bucket padrão pode ser aplicada automaticamente como `CF_R2_PUBLIC_URL` na Vercel principal e disparar um redeploy, eliminando a cópia manual dessa configuração.
+
 ## ✨ Funcionalidades
 
 - **Painel admin** com multi-tema (light, dark, ocean, rose)

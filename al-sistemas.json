@@ -1,8 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.144",
+  "version": "1.0.145",
   "packageFormat": 2,
   "changelog": [
+    "Central de Variáveis permite gerenciar variáveis de ambiente da Vercel e Render por API, com criação, edição, exclusão, valores mascarados e seleção do recurso.",
+    "Vercel ganha CRUD completo de Environment Variables, seleção de production/preview/development, opção Sensitive e Salvar + deploy.",
+    "Render ganha exclusão de variáveis e opção Salvar + deploy diretamente pela central, respeitando que alterações exigem novo deploy.",
+    "Cloudflare R2 ganha ação Aplicar na Vercel para definir CF_R2_PUBLIC_URL automaticamente no frontend principal e iniciar redeploy, além de salvar a mesma variável no Render.",
+    "Tokens da Vercel e Render permanecem no cofre do backend e nunca são enviados ao navegador; a interface exibe apenas valores mascarados.",
     "Cloudflare R2 passa a detectar automaticamente a URL pública do bucket padrão, preferindo domínio personalizado ativo e usando r2.dev habilitado como fallback.",
     "Corrige a rota de índices do MongoDB que falhava com db.collection(...).getIndexes is not a function, usando listIndexes().toArray().",
     "Central de Erros ganha botão Copiar em cada registro para copiar diagnóstico individual completo sem exportar todos os erros.",
