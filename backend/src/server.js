@@ -90,6 +90,7 @@ import securityRoutes    from './routes/security.js'
 import integracoesRoutes from './routes/integracoes.js'
 import updatesRoutes     from './routes/updates.js'
 import portalContentRoutes from './routes/portalContent.js'
+import publicR2ShareRoutes from './routes/publicR2Share.js'
 import contentAdminRoutes from './routes/contentAdmin.js'
 import { tratarErros }  from './middleware/erros.js'
 import { STATE_DIR } from './services/systemUpdateService.js'
@@ -275,6 +276,7 @@ app.use('/api/admin/security',   securityRoutes)
 app.use('/api/admin/integracoes', integracoesRoutes)
 app.use('/api/admin/updates',     updatesRoutes)
 app.use('/api/portal-content',    portalContentRoutes)
+app.use('/api/public/r2/share',   publicR2ShareRoutes)
 
 // ─── #9 — Health check detalhado ─────────────────────────────
 app.use('/api/health', healthRoutes)

@@ -342,3 +342,19 @@ Com um API Token Cloudflare que possua acesso de leitura ao R2, abra **Cloudflar
 Depois de conectar Vercel e Render em **Integrações e APIs**, abra **Projetos e Deploys → Variáveis**. A central usa as APIs oficiais para criar, atualizar ou remover Environment Variables sem expor os tokens no frontend. Use **Salvar sem deploy** para apenas persistir a configuração ou **Salvar + deploy** para publicar imediatamente.
 
 Para o fallback do portal, **Cloudflare → R2** oferece **Aplicar na Vercel**, que define `CF_R2_PUBLIC_URL` no frontend principal e inicia um redeploy automaticamente.
+
+## R2 Storage avançado (1.0.146+)
+
+O backend passa a depender também de `@aws-sdk/s3-request-presigner`; uma instalação normal de dependências durante o deploy é suficiente.
+
+Para usar todas as ações administrativas do R2, mantenha no cofre Cloudflare:
+
+- API Token de conta com permissão de escrita no R2 para buckets/configurações;
+- Account ID;
+- R2 Access Key ID + Secret Access Key com leitura/escrita dos objetos.
+
+Uploads diretos navegador → R2 precisam de CORS no bucket. Abra **Cloudflare / R2 → bucket → Configurações → WEB / CORS**, use **+ Origem deste painel** e salve. Isso autoriza a origem do frontend sem tornar o bucket público.
+
+Compartilhamentos privados usam `/api/public/r2/share/:token`. O token é temporário/revogável e somente seu hash é persistido no MongoDB. Domínio público do bucket é opcional para esse fluxo.
+
+Consulte `docs/R2_ADMIN_CAPABILITIES.md` para a matriz completa de recursos, permissões e limitações deliberadas.
