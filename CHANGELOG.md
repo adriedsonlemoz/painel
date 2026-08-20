@@ -1,3 +1,14 @@
+# 1.0.138
+
+- GitHub mostra **Baixar APK** diretamente no card do repositório; APKs publicados em **Releases** têm prioridade e o GitHub Actions é usado como fallback.
+- Consulta de APK nos cards é carregada sob demanda conforme o repositório entra na área visível, reduzindo chamadas desnecessárias à API.
+- Cards da Central do Repositório ficam mais baixos no celular sem alterar a grade de três colunas.
+- Artefatos passam a ser totalmente clicáveis e exibem **Conectando**, **Preparando**, **Abrindo download**, sucesso e erro.
+- APKs do GitHub Actions são extraídos do ZIP no backend e entregues diretamente como `.apk`, com nome amigável de projeto, versão e build.
+- Downloads Android usam ticket temporário assinado e `@capacitor/browser` para encaminhar o arquivo ao navegador/gerenciador de downloads do sistema.
+- Corrige a revogação imediata de URLs Blob nos downloads autenticados restantes, evitando cancelamentos em WebView.
+- Workflow Android passa a gerar nomes versionados, como `AL-Sistemas-1.0.138-debug.apk`, em vez de nomes baseados no SHA completo.
+
 # 1.0.136
 
 - MongoDB reorganizado em Visão geral, Explorar dados, Documentos e Ferramentas.

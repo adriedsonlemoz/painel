@@ -1,7 +1,7 @@
 {
   "name": "al-sistemas",
   "private": true,
-  "version": "1.0.137",
+  "version": "1.0.138",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,7 +20,8 @@
     "react-hot-toast": "^2.4.1",
     "lucide-react": "^0.294.0",
     "@capacitor/core": "6.2.1",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "@capacitor/browser": "6.0.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

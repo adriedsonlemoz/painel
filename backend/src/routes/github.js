@@ -24,6 +24,7 @@
  *   GET    /api/github/projetos-locais
  */
 import { Router }       from 'express'
+import jwt              from 'jsonwebtoken'
 import { autenticar }   from '../middleware/auth.js'
 import { auditLog }     from '../middleware/auditLog.js'
 import AuditLog         from '../models/AuditLog.js'
@@ -42,6 +43,7 @@ import { sugerirDescricaoRepositorio, analisarLogsWorkflow } from '../utils/aiCl
 import { redactAiText } from '../services/aiRedactor.js'
 import { selectRelevantLogContext } from '../services/aiContext.js'
 import { createAiJob } from '../services/aiJobs.js'
+import { bootstrapValue } from '../utils/localVault.js'
 
 const router = Router()
 
@@ -1231,22 +1233,198 @@ router.post('/repos/:owner/:repo/releases', autenticar, async (req, res) => {
   }
 })
 
+const APK_ARTIFACT_RE = /(?:^|[-_.])(apk|android|debug|release)(?:[-_.]|$)/i
+const APK_MAX_ARCHIVE_BYTES = Number(process.env.AL_GITHUB_APK_MAX_ARCHIVE_BYTES || 220 * 1024 * 1024)
+const APK_MAX_EXTRACTED_BYTES = Number(process.env.AL_GITHUB_APK_MAX_EXTRACTED_BYTES || 300 * 1024 * 1024)
+
+function isLikelyApkArtifact(artifact = {}) {
+  return APK_ARTIFACT_RE.test(String(artifact?.name || artifact?.nome || ''))
+}
+
+function artifactBuildType(name = '') {
+  const value = String(name || '').toLowerCase()
+  if (/(?:^|[-_.])release(?:[-_.]|$)/.test(value)) return 'release'
+  if (/(?:^|[-_.])debug(?:[-_.]|$)/.test(value)) return 'debug'
+  return 'apk'
+}
+
+function extractSemver(value = '') {
+  const m = String(value || '').match(/(?:^|[^0-9])(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?:$|[^0-9])/)
+  return m?.[1] || ''
+}
+
+function safeDownloadBase(value = 'app') {
+  return String(value || 'app')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_.]+|[-_.]+$/g, '')
+    .slice(0, 100) || 'app'
+}
+
+function packageDisplayName(name = '', fallback = 'app') {
+  const raw = String(name || fallback || 'app').trim()
+  if (/^al[-_ ]?sistemas$/i.test(raw) || /^alsistemas$/i.test(raw)) return 'AL-Sistemas'
+  return raw.split(/[\s_-]+/).filter(Boolean).map(part => part.length <= 2 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)).join('-') || 'App'
+}
+
+async function readRepoPackageInfo(owner, repo, ref = '') {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : ''
+  for (const pkgPath of ['frontend/package.json', 'package.json']) {
+    try {
+      const data = await githubFetch(`/repos/${owner}/${repo}/contents/${pkgPath}${q}`)
+      if (!data?.content || data.encoding !== 'base64') continue
+      const parsed = JSON.parse(Buffer.from(String(data.content).replace(/\n/g, ''), 'base64').toString('utf8'))
+      if (parsed?.version || parsed?.name) return { name: parsed?.name || '', version: parsed?.version || '', path: pkgPath }
+    } catch (err) {
+      if (err?.status !== 404) throw err
+    }
+  }
+  return { name: '', version: '', path: '' }
+}
+
+function serializeArtifact(a = {}) {
+  const nome = a.name || a.nome || ''
+  return {
+    id: a.id,
+    nome,
+    tamanho: a.size_in_bytes ?? a.tamanho ?? 0,
+    expiradoEm: a.expires_at || a.expiradoEm || null,
+    criadoEm: a.created_at || a.criadoEm || null,
+    expirado: Boolean(a.expired ?? a.expirado),
+    url: a.archive_download_url || a.url || '',
+    workflowRunId: a.workflow_run?.id || a.workflowRunId || null,
+    headSha: a.workflow_run?.head_sha || a.headSha || null,
+    buildType: artifactBuildType(nome),
+    provavelApk: isLikelyApkArtifact(a),
+    versao: extractSemver(nome),
+  }
+}
+
+async function buildArtifactDownloadMeta(owner, repo, artifact) {
+  const item = serializeArtifact(artifact)
+  let pkg = { name: '', version: '' }
+  if (item.provavelApk) {
+    try { pkg = await readRepoPackageInfo(owner, repo, item.headSha || '') } catch { /* nome amigável é opcional */ }
+  }
+  const version = item.versao || pkg.version || ''
+  const projectName = packageDisplayName(pkg.name, repo)
+  const buildType = item.buildType === 'apk' ? '' : item.buildType
+  const pieces = [projectName, version, buildType].filter(Boolean)
+  const apkFileName = `${safeDownloadBase(pieces.join('-'))}.apk`
+  const zipFileName = `${safeDownloadBase(item.nome || `${repo}-artifact-${item.id}`)}.zip`
+  return { ...item, version, projectName, apkFileName, zipFileName }
+}
+
+async function buildReleaseApkMeta(owner, repo, release, asset) {
+  let pkg = { name: '', version: '' }
+  try { pkg = await readRepoPackageInfo(owner, repo, release?.target_commitish || '') } catch { /* opcional */ }
+  const version = extractSemver(release?.tag_name || '') || extractSemver(asset?.name || '') || pkg.version || ''
+  const projectName = packageDisplayName(pkg.name, repo)
+  const pieces = [projectName, version, 'release'].filter(Boolean)
+  return {
+    id: asset.id,
+    nome: asset.name || `${repo}-release.apk`,
+    tamanho: asset.size || 0,
+    criadoEm: asset.created_at || release?.published_at || release?.created_at || null,
+    atualizadoEm: asset.updated_at || null,
+    expirado: false,
+    expiradoEm: null,
+    source: 'release',
+    releaseId: release?.id || null,
+    releaseTag: release?.tag_name || '',
+    releaseUrl: release?.html_url || '',
+    buildType: 'release',
+    provavelApk: true,
+    version,
+    projectName,
+    apkFileName: `${safeDownloadBase(pieces.join('-'))}.apk`,
+  }
+}
+
+function pickReleaseApk(releases = []) {
+  const ordered = [...releases]
+    .filter(r => !r?.draft)
+    .sort((a, b) => {
+      if (Boolean(a.prerelease) !== Boolean(b.prerelease)) return a.prerelease ? 1 : -1
+      return new Date(b.published_at || b.created_at || 0) - new Date(a.published_at || a.created_at || 0)
+    })
+  for (const release of ordered) {
+    const apks = (release.assets || []).filter(a => /\.apk$/i.test(String(a?.name || '')))
+    if (!apks.length) continue
+    const asset = apks.find(a => /(?:^|[-_.])release(?:[-_.]|$)/i.test(a.name))
+      || apks.find(a => !/(?:^|[-_.])debug(?:[-_.]|$)/i.test(a.name))
+      || apks[0]
+    return { release, asset }
+  }
+  return null
+}
+
+function signArtifactDownloadTicket(payload) {
+  return jwt.sign(
+    { typ: 'github-artifact-download', ...payload },
+    bootstrapValue('JWT_SECRET'),
+    { expiresIn: '5m', audience: 'github-artifact-download' },
+  )
+}
+
+function verifyArtifactDownloadTicket(token) {
+  const data = jwt.verify(token, bootstrapValue('JWT_SECRET'), { audience: 'github-artifact-download' })
+  if (data?.typ !== 'github-artifact-download') throw new Error('Ticket de download inválido.')
+  return data
+}
+
+function signReleaseAssetDownloadTicket(payload) {
+  return jwt.sign(
+    { typ: 'github-release-apk-download', ...payload },
+    bootstrapValue('JWT_SECRET'),
+    { expiresIn: '5m', audience: 'github-release-apk-download' },
+  )
+}
+
+function verifyReleaseAssetDownloadTicket(token) {
+  const data = jwt.verify(token, bootstrapValue('JWT_SECRET'), { audience: 'github-release-apk-download' })
+  if (data?.typ !== 'github-release-apk-download') throw new Error('Ticket de download inválido.')
+  return data
+}
+
 /* GET /api/github/repos/:owner/:repo/artifacts */
 router.get('/repos/:owner/:repo/artifacts', autenticar, async (req, res) => {
   const { owner, repo } = req.params
   if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
   try {
     const data = await githubFetch(`/repos/${owner}/${repo}/actions/artifacts?per_page=20`)
-    const lista = (data.artifacts || []).map(a => ({
-      id: a.id, nome: a.name, tamanho: a.size_in_bytes,
-      expiradoEm: a.expires_at, criadoEm: a.created_at,
-      expirado: a.expired, url: a.archive_download_url,
-      workflowRunId: a.workflow_run?.id || null,
-    }))
+    const lista = (data.artifacts || []).map(serializeArtifact)
     res.json({ artifacts: lista, total: data.total_count || lista.length })
   } catch (err) {
     if (err.status === 404) return res.json({ artifacts: [], total: 0 })
     res.status(err.status || 500).json({ erro: err.message, artifacts: [] })
+  }
+})
+
+/* GET /api/github/repos/:owner/:repo/latest-apk — APK mais recente, se existir */
+router.get('/repos/:owner/:repo/latest-apk', autenticar, async (req, res) => {
+  const { owner, repo } = req.params
+  if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
+  try {
+    // Releases têm prioridade: quando o projeto publicou um APK de produção,
+    // o card principal oferece esse arquivo antes de qualquer artefato debug.
+    const releases = await githubFetch(`/repos/${owner}/${repo}/releases?per_page=10`).catch(err => {
+      if (err?.status === 404) return []
+      throw err
+    })
+    const releaseApk = pickReleaseApk(Array.isArray(releases) ? releases : [])
+    if (releaseApk) return res.json({ apk: await buildReleaseApkMeta(owner, repo, releaseApk.release, releaseApk.asset) })
+
+    const data = await githubFetch(`/repos/${owner}/${repo}/actions/artifacts?per_page=50`)
+    const candidate = (data.artifacts || [])
+      .filter(a => !a.expired && isLikelyApkArtifact(a))
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0]
+    if (!candidate) return res.json({ apk: null })
+    res.json({ apk: { ...(await buildArtifactDownloadMeta(owner, repo, candidate)), source: 'artifact' } })
+  } catch (err) {
+    if (err.status === 404) return res.json({ apk: null })
+    res.status(err.status || 500).json({ erro: err.message, apk: null })
   }
 })
 
@@ -1985,6 +2163,160 @@ router.get('/runs/:runId/logs/download', autenticar, async (req, res) => {
     Readable.fromWeb(resp.body).pipe(res)
   } catch (err) {
     res.status(500).json({ erro: err.message })
+  }
+})
+
+/* POST /api/github/artifacts/:artifactId/download-ticket
+   Emite URL temporária para que navegador/Android possam usar o gerenciador
+   nativo de downloads sem expor o token GitHub nem o token da sessão. */
+router.post('/artifacts/:artifactId/download-ticket', autenticar, async (req, res) => {
+  const { artifactId } = req.params
+  const { owner, repo } = req.body || {}
+  const preferApk = req.body?.preferApk === true
+  if (!/^\d+$/.test(String(artifactId || ''))) return res.status(400).json({ erro: 'Artefato inválido.' })
+  if (!owner || !repo || !validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Parâmetros owner e repo obrigatórios.' })
+  try {
+    const artifact = await githubFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}`)
+    if (!artifact || artifact.expired) return res.status(410).json({ erro: 'Este artefato expirou e não está mais disponível.' })
+    const meta = await buildArtifactDownloadMeta(owner, repo, artifact)
+    const format = preferApk && meta.provavelApk ? 'apk' : 'zip'
+    const filename = format === 'apk' ? meta.apkFileName : meta.zipFileName
+    const ticket = signArtifactDownloadTicket({
+      artifactId: String(artifactId), owner, repo, format, filename,
+      buildType: meta.buildType, artifactName: meta.nome,
+      uid: String(req.usuario?._id || ''),
+    })
+    res.json({
+      ok: true, ticket, artifactId: String(artifactId), format, filename,
+      buildType: meta.buildType, version: meta.version || '', expiresInSeconds: 300,
+    })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
+/* GET /api/github/artifacts/:artifactId/download-public?ticket=...
+   Endpoint temporário sem cookie/Bearer para downloads externos no Android. */
+router.get('/artifacts/:artifactId/download-public', async (req, res) => {
+  const { artifactId } = req.params
+  try {
+    const ticket = verifyArtifactDownloadTicket(String(req.query.ticket || ''))
+    if (String(ticket.artifactId) !== String(artifactId)) return res.status(403).json({ erro: 'Ticket não corresponde ao artefato solicitado.' })
+    const { owner, repo, format = 'zip' } = ticket
+    if (!owner || !repo || !validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Ticket incompleto.' })
+
+    const { value: token } = await getCredential('github', 'GITHUB_TOKEN')
+    if (!token) return res.status(503).json({ erro: 'GITHUB_TOKEN não configurado.' })
+    const resp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'AL-Sistemas' },
+      redirect: 'follow',
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      return res.status(resp.status).send(body || `Erro ${resp.status}`)
+    }
+
+    const requestedName = safeDownloadBase(String(ticket.filename || 'download').replace(/\.(apk|zip)$/i, ''))
+    if (format === 'apk') {
+      const archiveLength = Number(resp.headers.get('content-length') || 0)
+      if (archiveLength && archiveLength > APK_MAX_ARCHIVE_BYTES) return res.status(413).json({ erro: 'Artefato grande demais para extração segura no servidor.' })
+      const bytes = Buffer.from(await resp.arrayBuffer())
+      if (bytes.length > APK_MAX_ARCHIVE_BYTES) return res.status(413).json({ erro: 'Artefato grande demais para extração segura no servidor.' })
+      const zip = await JSZip.loadAsync(bytes)
+      const entries = Object.values(zip.files).filter(entry => !entry.dir && /\.apk$/i.test(entry.name))
+      if (!entries.length) return res.status(422).json({ erro: 'O artefato foi baixado, mas nenhum arquivo APK foi encontrado dentro dele.' })
+      const buildType = String(ticket.buildType || '')
+      const preferred = entries.find(entry => buildType && new RegExp(buildType, 'i').test(entry.name)) || entries[0]
+      const apk = await preferred.async('nodebuffer')
+      if (apk.length > APK_MAX_EXTRACTED_BYTES) return res.status(413).json({ erro: 'APK extraído excede o limite de segurança do servidor.' })
+      const filename = `${requestedName || 'app'}.apk`
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive')
+      res.setHeader('Content-Length', String(apk.length))
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+      res.setHeader('Cache-Control', 'private, no-store')
+      return res.end(apk)
+    }
+
+    const filename = `${requestedName || `artifact-${artifactId}`}.zip`
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    const { Readable } = await import('stream')
+    Readable.fromWeb(resp.body).pipe(res)
+  } catch (err) {
+    const jwtError = ['JsonWebTokenError', 'NotBeforeError', 'TokenExpiredError'].includes(err?.name)
+    if (jwtError) {
+      const expired = err?.name === 'TokenExpiredError' || /expired/i.test(String(err?.message || ''))
+      return res.status(expired ? 410 : 403).json({
+        erro: expired ? 'Este link de download expirou. Toque em baixar novamente.' : 'Link de download inválido.',
+      })
+    }
+    res.status(err?.status || 500).json({ erro: err?.message || 'Falha ao preparar o download do artefato.' })
+  }
+})
+
+/* POST /api/github/release-assets/:assetId/download-ticket
+   Release APK tem prioridade no card do projeto e usa ticket temporário para
+   funcionar também em repositórios privados sem expor a credencial GitHub. */
+router.post('/release-assets/:assetId/download-ticket', autenticar, async (req, res) => {
+  const { assetId } = req.params
+  const { owner, repo } = req.body || {}
+  if (!/^\d+$/.test(String(assetId || ''))) return res.status(400).json({ erro: 'Asset inválido.' })
+  if (!owner || !repo || !validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Parâmetros owner e repo obrigatórios.' })
+  try {
+    const asset = await githubFetch(`/repos/${owner}/${repo}/releases/assets/${assetId}`)
+    if (!asset || !/\.apk$/i.test(String(asset.name || ''))) return res.status(422).json({ erro: 'O asset selecionado não é um APK.' })
+    const releases = await githubFetch(`/repos/${owner}/${repo}/releases?per_page=20`).catch(() => [])
+    const release = (Array.isArray(releases) ? releases : []).find(r => (r.assets || []).some(a => String(a.id) === String(assetId))) || null
+    const meta = await buildReleaseApkMeta(owner, repo, release, asset)
+    const ticket = signReleaseAssetDownloadTicket({
+      assetId: String(assetId), owner, repo, filename: meta.apkFileName,
+      assetName: asset.name || '', uid: String(req.usuario?._id || ''),
+    })
+    res.json({ ok: true, ticket, assetId: String(assetId), format: 'apk', filename: meta.apkFileName, buildType: 'release', version: meta.version || '', expiresInSeconds: 300 })
+  } catch (err) {
+    res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
+/* GET /api/github/release-assets/:assetId/download-public?ticket=... */
+router.get('/release-assets/:assetId/download-public', async (req, res) => {
+  const { assetId } = req.params
+  try {
+    const ticket = verifyReleaseAssetDownloadTicket(String(req.query.ticket || ''))
+    if (String(ticket.assetId) !== String(assetId)) return res.status(403).json({ erro: 'Ticket não corresponde ao APK solicitado.' })
+    const { owner, repo } = ticket
+    if (!owner || !repo || !validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Ticket incompleto.' })
+    const { value: token } = await getCredential('github', 'GITHUB_TOKEN')
+    if (!token) return res.status(503).json({ erro: 'GITHUB_TOKEN não configurado.' })
+    const resp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/releases/assets/${assetId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/octet-stream',
+        'X-GitHub-Api-Version': '2026-03-10',
+        'User-Agent': 'AL-Sistemas',
+      },
+      redirect: 'follow',
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      return res.status(resp.status).send(body || `Erro ${resp.status}`)
+    }
+    const filename = `${safeDownloadBase(String(ticket.filename || ticket.assetName || `release-${assetId}`).replace(/\.apk$/i, ''))}.apk`
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive')
+    const length = resp.headers.get('content-length')
+    if (length) res.setHeader('Content-Length', length)
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    const { Readable } = await import('stream')
+    Readable.fromWeb(resp.body).pipe(res)
+  } catch (err) {
+    const jwtError = ['JsonWebTokenError', 'NotBeforeError', 'TokenExpiredError'].includes(err?.name)
+    if (jwtError) {
+      const expired = err?.name === 'TokenExpiredError' || /expired/i.test(String(err?.message || ''))
+      return res.status(expired ? 410 : 403).json({ erro: expired ? 'Este link de download expirou. Toque em baixar novamente.' : 'Link de download inválido.' })
+    }
+    res.status(err?.status || 500).json({ erro: err?.message || 'Falha ao preparar o APK da release.' })
   }
 })
 

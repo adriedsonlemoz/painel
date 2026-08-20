@@ -7,8 +7,37 @@
  * Todas as chamadas passam pelo proxy backend. Token NUNCA exposto no frontend.
  */
 import { api, BASE_URL, authFetch, withAuthHeaders } from './http.js'
+import { Capacitor } from '@capacitor/core'
 
 
+
+
+async function abrirDownloadDireto(url) {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { Browser } = await import('@capacitor/browser')
+      await Browser.open({ url, windowName: '_blank' })
+      return { mode: 'android-browser' }
+    } catch { /* fallback web abaixo */ }
+  }
+
+  const a = document.createElement('a')
+  a.href = url
+  a.rel = 'noopener noreferrer'
+  a.target = Capacitor.isNativePlatform() ? '_blank' : '_self'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  return { mode: Capacitor.isNativePlatform() ? 'native-fallback' : 'browser' }
+}
+
+function artifactPublicUrl(artifactId, ticket) {
+  return `${BASE_URL}/github/artifacts/${artifactId}/download-public?ticket=${encodeURIComponent(ticket)}`
+}
+
+function releaseAssetPublicUrl(assetId, ticket) {
+  return `${BASE_URL}/github/release-assets/${assetId}/download-public?ticket=${encodeURIComponent(ticket)}`
+}
 
 async function baixarAutenticado(url, fallbackName = 'download') {
   const resp = await authFetch(url, { method:'GET' })
@@ -23,7 +52,9 @@ async function baixarAutenticado(url, fallbackName = 'download') {
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = href; a.download = filename
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(href)
+  document.body.appendChild(a); a.click(); a.remove()
+  // Revogar imediatamente pode cancelar downloads em WebView/Android.
+  setTimeout(() => URL.revokeObjectURL(href), 30_000)
   return { ok:true, filename }
 }
 
@@ -50,6 +81,7 @@ export const githubService = {
   commits:   (owner, repo, page = 1) => api(`/github/repos/${owner}/${repo}/commits?per_page=20&page=${page}`),
   releases:  (owner, repo) => api(`/github/repos/${owner}/${repo}/releases`),
   artifacts: (owner, repo) => api(`/github/repos/${owner}/${repo}/artifacts`),
+  latestApk: (owner, repo) => api(`/github/repos/${owner}/${repo}/latest-apk`, { timeoutMs: 15000 }),
   analysis:  (owner, repo) => api(`/github/repos/${owner}/${repo}/analysis`),
 
   criarRelease: (owner, repo, dados) =>
@@ -122,10 +154,40 @@ export const githubService = {
     `${BASE_URL}/github/runs/${runId}/logs/download?owner=${owner}&repo=${repo}`,
     `${repo || 'github'}-logs.zip`,
   ),
-  baixarArtifact: (artifactId, owner, repo, nome = '') => baixarAutenticado(
-    `${BASE_URL}/github/artifacts/${artifactId}/download?owner=${owner}&repo=${repo}&nome=${encodeURIComponent(nome)}`,
-    nome || 'artifact.zip',
-  ),
+  prepararDownloadArtifact: (artifactId, owner, repo, { preferApk = false } = {}) =>
+    api(`/github/artifacts/${artifactId}/download-ticket`, {
+      method: 'POST',
+      body: JSON.stringify({ owner, repo, preferApk }),
+      timeoutMs: 20000,
+    }),
+  prepararDownloadReleaseAsset: (assetId, owner, repo) =>
+    api(`/github/release-assets/${assetId}/download-ticket`, {
+      method: 'POST',
+      body: JSON.stringify({ owner, repo }),
+      timeoutMs: 20000,
+    }),
+
+  async baixarReleaseApk(assetId, owner, repo, nome = '', options = {}) {
+    const { onStatus } = options || {}
+    onStatus?.('connecting')
+    const prepared = await githubService.prepararDownloadReleaseAsset(assetId, owner, repo)
+    onStatus?.('downloading', prepared)
+    const url = releaseAssetPublicUrl(assetId, prepared.ticket)
+    const opened = await abrirDownloadDireto(url)
+    onStatus?.('started', { ...prepared, ...opened })
+    return { ok: true, ...prepared, ...opened, url, nomeOriginal: nome, source: 'release' }
+  },
+
+  async baixarArtifact(artifactId, owner, repo, nome = '', options = {}) {
+    const { preferApk = false, onStatus } = options || {}
+    onStatus?.('connecting')
+    const prepared = await githubService.prepararDownloadArtifact(artifactId, owner, repo, { preferApk })
+    onStatus?.('downloading', prepared)
+    const url = artifactPublicUrl(artifactId, prepared.ticket)
+    const opened = await abrirDownloadDireto(url)
+    onStatus?.('started', { ...prepared, ...opened })
+    return { ok: true, ...prepared, ...opened, url, nomeOriginal: nome }
+  },
 
   /** Proxy autenticado — baixa o código-fonte do repo como ZIP */
   downloadZipUrl: (owner, repo, branch = '') => {

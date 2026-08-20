@@ -57,6 +57,11 @@ function fmtRepoSize(kb) {
   return `${(n / 1024).toFixed(n >= 10240 ? 0 : 1)} MB`
 }
 
+function ehArtefatoApk(a = {}) {
+  if (a?.provavelApk === true) return true
+  return /(?:^|[-_.])(apk|android|debug|release)(?:[-_.]|$)/i.test(String(a?.nome || ''))
+}
+
 function shortDate(iso) {
   if (!iso) return '—'
   try { return new Intl.DateTimeFormat('pt-BR', { day:'2-digit', month:'short', year:'numeric' }).format(new Date(iso)).replace('.', '') }
@@ -929,11 +934,90 @@ function AbaReleases({ releases, showRelease, setShowRelease, novaRelease, setNo
 }
 
 /* ── ABA: Artefatos ──────────────────────────────────────── */
+function ArtifactDownloadCard({ artifact: a, owner, repo, toastShow }) {
+  const [downloadState, setDownloadState] = useState('idle')
+  const [downloadInfo, setDownloadInfo] = useState(null)
+  const isApk = ehArtefatoApk(a)
+  const isZip = /zip/i.test(a.nome || '') && !isApk
+  const type = isApk ? 'APK' : isZip ? 'ZIP' : 'ARQUIVO'
+  const busy = ['connecting', 'preparing', 'downloading'].includes(downloadState)
+
+  async function iniciarDownload() {
+    if (a.expirado || busy) return
+    setDownloadInfo(null)
+    setDownloadState('connecting')
+    const preparingTimer = setTimeout(() => setDownloadState(prev => prev === 'connecting' ? 'preparing' : prev), 450)
+    try {
+      const result = await githubService.baixarArtifact(a.id, owner, repo, a.nome, {
+        preferApk: isApk,
+        onStatus: (status, info) => {
+          if (status === 'connecting') setDownloadState('connecting')
+          if (status === 'downloading') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadState('downloading') }
+          if (status === 'started') { clearTimeout(preparingTimer); setDownloadInfo(info); setDownloadState('started') }
+        },
+      })
+      setDownloadInfo(result)
+      setDownloadState('started')
+      setTimeout(() => setDownloadState(prev => prev === 'started' ? 'idle' : prev), 5000)
+    } catch (e) {
+      clearTimeout(preparingTimer)
+      setDownloadState('error')
+      toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro')
+    }
+  }
+
+  const statusText = downloadState === 'connecting' ? 'Conectando…'
+    : downloadState === 'preparing' ? `Preparando ${isApk ? 'APK' : 'arquivo'}…`
+    : downloadState === 'downloading' ? 'Abrindo download…'
+    : downloadState === 'started' ? (downloadInfo?.mode === 'android-browser' ? 'Download aberto no Android ✓' : 'Download iniciado ✓')
+    : downloadState === 'error' ? 'Falhou — toque para tentar de novo'
+    : `Baixar ${isApk ? 'APK' : isZip ? 'ZIP' : 'arquivo'}`
+
+  return (
+    <article
+      className={`gh-artifact-card ${a.expirado ? 'expired' : 'downloadable'} ${busy ? 'busy' : ''} ${downloadState === 'error' ? 'download-error' : ''}`}
+      onClick={a.expirado ? undefined : iniciarDownload}
+      onKeyDown={e => {
+        if (a.expirado) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); iniciarDownload() }
+      }}
+      role={a.expirado ? undefined : 'button'}
+      tabIndex={a.expirado ? undefined : 0}
+      aria-busy={busy || undefined}
+      aria-label={a.expirado ? undefined : `${statusText}: ${a.nome}`}
+    >
+      <div className="gh-artifact-card-top">
+        <div className={`gh-artifact-type-icon ${isApk ? 'apk' : ''}`}><span>{busy ? '↻' : isApk ? 'A' : '□'}</span></div>
+        <div className="gh-artifact-main">
+          <div className="gh-artifact-kicker"><span>{type}</span>{a.expirado && <em>EXPIRADO</em>}</div>
+          <h4>{a.nome}</h4>
+          <p>{a.workflowRunId ? `Gerado pela execução #${a.workflowRunId}` : 'Gerado pelo GitHub Actions'}</p>
+        </div>
+      </div>
+      <div className="gh-artifact-facts">
+        <div><small>TAMANHO</small><b>{fmtBytes(a.tamanho)}</b></div>
+        <div><small>CRIADO</small><b>{relTime(a.criadoEm)}</b></div>
+        <div><small>EXPIRAÇÃO</small><b>{a.expirado ? 'Expirado' : a.expiradoEm ? new Date(a.expiradoEm).toLocaleDateString('pt-BR') : '—'}</b></div>
+      </div>
+      <div className="gh-artifact-footer">
+        {a.expirado ? (
+          <span className="gh-artifact-unavailable">Download indisponível</span>
+        ) : (
+          <span className={`gh-artifact-download-state ${busy ? 'busy' : ''} ${downloadState === 'started' ? 'success' : ''} ${downloadState === 'error' ? 'error' : ''}`}>
+            <span className="gh-artifact-download-icon" aria-hidden="true">{busy ? '↻' : downloadState === 'started' ? '✓' : '↓'}</span>
+            <span><b>{statusText}</b>{downloadInfo?.filename && downloadState === 'started' && <small>{downloadInfo.filename}</small>}</span>
+          </span>
+        )}
+      </div>
+    </article>
+  )
+}
+
 function AbaArtifacts({ artifacts, owner, repo, toastShow }) {
   if (!artifacts) return <div className="gh-artifacts-loading"><span>◌</span><div><b>Carregando artefatos</b><small>Consultando os arquivos gerados pelo GitHub Actions…</small></div></div>
   const ativos = artifacts.filter(a => !a.expirado)
   const expirados = artifacts.length - ativos.length
-  const apks = ativos.filter(a => /apk/i.test(a.nome || '')).length
+  const apks = ativos.filter(ehArtefatoApk).length
   return (
     <div className="gh-artifacts-page">
       <section className="gh-artifacts-hero">
@@ -941,7 +1025,7 @@ function AbaArtifacts({ artifacts, owner, repo, toastShow }) {
         <div className="gh-artifacts-hero-copy">
           <small>GITHUB ACTIONS</small>
           <h3>Central de artefatos</h3>
-          <p>Builds, APKs e outros arquivos produzidos automaticamente pelos workflows deste projeto.</p>
+          <p>Toque em qualquer card disponível para iniciar o download. APKs são extraídos do pacote do Actions e entregues diretamente como .apk.</p>
         </div>
         <div className="gh-artifacts-stats">
           <div><span>Disponíveis</span><b>{ativos.length}</b></div>
@@ -957,39 +1041,13 @@ function AbaArtifacts({ artifacts, owner, repo, toastShow }) {
         </div>
       ) : (
         <div className="gh-artifacts-grid">
-          {artifacts.map(a => {
-            const isApk=/apk/i.test(a.nome||'')
-            const isZip=/zip/i.test(a.nome||'')
-            const type=isApk?'APK':isZip?'ZIP':'ARQUIVO'
-            return <article key={a.id} className={`gh-artifact-card ${a.expirado?'expired':''}`}>
-              <div className="gh-artifact-card-top">
-                <div className={`gh-artifact-type-icon ${isApk?'apk':''}`}><span>{isApk?'A':'□'}</span></div>
-                <div className="gh-artifact-main">
-                  <div className="gh-artifact-kicker"><span>{type}</span>{a.expirado&&<em>EXPIRADO</em>}</div>
-                  <h4>{a.nome}</h4>
-                  <p>{a.workflowRunId?`Gerado pela execução #${a.workflowRunId}`:'Gerado pelo GitHub Actions'}</p>
-                </div>
-              </div>
-              <div className="gh-artifact-facts">
-                <div><small>TAMANHO</small><b>{fmtBytes(a.tamanho)}</b></div>
-                <div><small>CRIADO</small><b>{relTime(a.criadoEm)}</b></div>
-                <div><small>EXPIRAÇÃO</small><b>{a.expirado?'Expirado':a.expiradoEm?new Date(a.expiradoEm).toLocaleDateString('pt-BR'):'—'}</b></div>
-              </div>
-              <div className="gh-artifact-footer">
-                {a.expirado ? <span className="gh-artifact-unavailable">Download indisponível</span> : <button type="button"
-                  onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome)
-                    .catch(e => toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro'))}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  Baixar {isApk?'APK':isZip?'ZIP':'arquivo'}
-                </button>}
-              </div>
-            </article>
-          })}
+          {artifacts.map(a => <ArtifactDownloadCard key={a.id} artifact={a} owner={owner} repo={repo} toastShow={toastShow} />)}
         </div>
       )}
     </div>
   )
 }
+
 
 /* ── ABA: Análise ────────────────────────────────────────── */
 function AbaAnalysis({ analysis: an }) {
@@ -1914,10 +1972,11 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
                               </div>
                               <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap' }}>
                                 {arts.map(a => {
-                                  const isApk = /apk/i.test(a.nome)
+                                  const isApk = ehArtefatoApk(a)
                                   return (
                                     <button key={a.id} type="button"
-                                      onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome)
+                                      onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome, { preferApk: isApk })
+                                        .then(r => toastShow?.(`${isApk ? 'APK' : 'Download'} iniciado${r?.filename ? `: ${r.filename}` : '.'}`, 'ok'))
                                         .catch(e => toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro'))}
                                       style={{
                                         display: 'inline-flex', alignItems: 'center', gap: SPACE.sm,
@@ -2039,13 +2098,78 @@ function AnaliseWorkflowConteudo({ dados, modo, onCopy }) {
 }
 
 /* ── Card de repo (lista principal) ─────────────────────── */
-function RepoCard({ repo, meta, insight, onAbrir }) {
+function RepoCard({ repo, meta, insight, onAbrir, toastShow }) {
   const statusCfg = STATUS_CFG[meta?.statusInterno]
   const acesso = repo.permissoes?.admin || repo.permissoes?.maintain || repo.permissoes?.push ? 'Leitura e escrita' : 'Somente leitura'
   const resumo = repo.descricao?.trim() || insight?.resumo || `${repo.linguagem ? `Projeto ${repo.linguagem}` : 'Repositório'} no GitHub · branch principal ${repo.branch || '—'}`
   const visibilidade = repo.privado ? 'Privado' : 'Público'
+  const cardRef = useRef(null)
+  const [latestApk, setLatestApk] = useState(undefined)
+  const [apkDownloadState, setApkDownloadState] = useState('idle')
+
+  useEffect(() => {
+    const [owner, nome] = String(repo.nomeCompleto || '').split('/')
+    if (!owner || !nome) { setLatestApk(null); return undefined }
+    let cancelled = false
+    let started = false
+    let observer = null
+    const load = () => {
+      if (started) return
+      started = true
+      githubService.latestApk(owner, nome)
+        .then(data => { if (!cancelled) setLatestApk(data?.apk || null) })
+        .catch(() => { if (!cancelled) setLatestApk(null) })
+    }
+    const node = cardRef.current
+    if (node && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { load(); observer?.disconnect() }
+      }, { rootMargin: '280px 0px' })
+      observer.observe(node)
+    } else load()
+    return () => { cancelled = true; observer?.disconnect() }
+  }, [repo.id, repo.nomeCompleto])
+
+  async function baixarApkRapido(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!latestApk || ['connecting', 'downloading'].includes(apkDownloadState)) return
+    const [owner, nome] = String(repo.nomeCompleto || '').split('/')
+    try {
+      setApkDownloadState('connecting')
+      const download = latestApk.source === 'release'
+        ? githubService.baixarReleaseApk(latestApk.id, owner, nome, latestApk.nome, {
+            onStatus: status => {
+              if (status === 'connecting') setApkDownloadState('connecting')
+              if (status === 'downloading') setApkDownloadState('downloading')
+              if (status === 'started') setApkDownloadState('started')
+            },
+          })
+        : githubService.baixarArtifact(latestApk.id, owner, nome, latestApk.nome, {
+            preferApk: true,
+            onStatus: status => {
+              if (status === 'connecting') setApkDownloadState('connecting')
+              if (status === 'downloading') setApkDownloadState('downloading')
+              if (status === 'started') setApkDownloadState('started')
+            },
+          })
+      await download
+      setApkDownloadState('started')
+      setTimeout(() => setApkDownloadState(prev => prev === 'started' ? 'idle' : prev), 4500)
+    } catch (err) {
+      setApkDownloadState('error')
+      toastShow?.(err.message || 'Falha ao baixar APK.', 'erro')
+    }
+  }
+
+  const apkLabel = apkDownloadState === 'connecting' ? 'Conectando…'
+    : apkDownloadState === 'downloading' ? 'Baixando…'
+    : apkDownloadState === 'started' ? 'Iniciado ✓'
+    : apkDownloadState === 'error' ? 'Tentar APK'
+    : 'Baixar APK'
+
   return (
-    <article className="gh-repo-card" onClick={() => onAbrir(repo)}>
+    <article ref={cardRef} className="gh-repo-card" onClick={() => onAbrir(repo)}>
       <div className="gh-card-topline" />
       <div style={{ display:'flex', justifyContent:'space-between', gap:SPACE.md, alignItems:'flex-start' }}>
         <div style={{ minWidth:0, flex:1 }}>
@@ -2096,6 +2220,18 @@ function RepoCard({ repo, meta, insight, onAbrir }) {
           <span title="Issues abertas">● <b>{repo.issues || 0}</b></span>
           {repo.watchers > 0 && <span title="Watchers">◉ <b>{repo.watchers}</b></span>}
         </div>
+        {latestApk && (
+          <button
+            type="button"
+            className={`gh-repo-apk-btn ${['connecting','downloading'].includes(apkDownloadState) ? 'busy' : ''} ${apkDownloadState === 'started' ? 'success' : ''} ${apkDownloadState === 'error' ? 'error' : ''}`}
+            onClick={baixarApkRapido}
+            aria-disabled={apkDownloadState === 'connecting' || apkDownloadState === 'downloading'}
+            title={`${latestApk.source === 'release' ? 'Release' : 'GitHub Actions'} · ${latestApk.apkFileName || latestApk.nome || 'APK mais recente'}`}
+          >
+            <span aria-hidden="true">{apkDownloadState === 'started' ? '✓' : apkDownloadState === 'connecting' || apkDownloadState === 'downloading' ? '↻' : '↓'}</span>
+            {apkLabel}
+          </button>
+        )}
       </div>
 
       {meta?.tags?.length > 0 && (
@@ -2260,11 +2396,11 @@ export default function AdminGitHub() {
         .gh-repo-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
         .gh-repo-facts>div{background:var(--adm-surface2);border:1px solid var(--adm-border);border-radius:8px;padding:8px 7px;min-width:0}
         .gh-repo-facts b{display:block;margin-top:3px;font-size:10px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .gh-repo-footer{display:flex;align-items:center;gap:10px;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}
+        .gh-repo-footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:9px;border-top:1px solid var(--adm-border);color:var(--adm-muted);font-size:10px}.gh-repo-apk-btn{margin-left:auto;border:1px solid color-mix(in srgb,var(--adm-success) 30%,var(--adm-border));background:color-mix(in srgb,var(--adm-success) 8%,var(--adm-surface));color:var(--adm-success);border-radius:8px;padding:6px 9px;display:inline-flex;align-items:center;justify-content:center;gap:5px;font:inherit;font-weight:850;cursor:pointer;transition:.15s ease}.gh-repo-apk-btn:hover{border-color:color-mix(in srgb,var(--adm-success) 52%,var(--adm-border));background:color-mix(in srgb,var(--adm-success) 13%,var(--adm-surface))}.gh-repo-apk-btn.busy{opacity:.65;cursor:wait}.gh-repo-apk-btn.success{background:color-mix(in srgb,var(--adm-success) 14%,var(--adm-surface))}.gh-repo-apk-btn.error{color:var(--adm-red);border-color:color-mix(in srgb,var(--adm-red) 35%,var(--adm-border));background:color-mix(in srgb,var(--adm-red) 7%,var(--adm-surface))}
         .gh-repo-counters{display:flex;align-items:center;gap:12px}.gh-repo-counters b{color:var(--adm-text)}
         .gh-filter-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:8px}
         .gh-command-select{display:none;width:100%;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:9px;padding:10px 11px;color:var(--adm-text);font-size:12px;font-weight:700;outline:none}
-        .gh-more-wrap{position:relative;flex:0 0 auto}.gh-more-menu{position:absolute;right:0;top:calc(100% + 7px);z-index:30;min-width:190px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(15,23,42,.16)}.gh-more-menu button{width:100%;border:0;background:transparent;color:var(--adm-text);border-radius:9px;padding:9px;display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;text-align:left;cursor:pointer}.gh-more-menu button:hover{background:var(--adm-surface2)}.gh-more-menu button>span:first-child{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:color-mix(in srgb,var(--adm-red) 9%,var(--adm-surface));color:var(--adm-red);font-size:15px;font-weight:900}.gh-more-menu b{display:block;font-size:10px;color:var(--adm-red)}.gh-more-menu small{display:block;margin-top:2px;font-size:8px;color:var(--adm-muted)}.gh-repo-head-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:126px;min-height:35px;padding:7px 11px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2);color:var(--adm-muted);font-size:11px;font-weight:750;cursor:pointer;transition:.15s ease}.gh-repo-head-action:hover{border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border));color:var(--adm-text);background:var(--adm-surface)}.gh-repo-head-action:disabled{opacity:.6;cursor:wait}.gh-artifacts-page{display:grid;gap:14px}.gh-artifacts-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:16px;border:1px solid var(--adm-border);border-radius:15px;background:linear-gradient(135deg,var(--adm-surface),var(--adm-surface2));overflow:hidden;position:relative}.gh-artifacts-hero:after{content:'';position:absolute;right:-45px;top:-65px;width:160px;height:160px;border-radius:50%;border:1px solid color-mix(in srgb,var(--adm-accent) 14%,transparent);box-shadow:0 0 0 28px color-mix(in srgb,var(--adm-accent) 5%,transparent);pointer-events:none}.gh-artifacts-hero-icon{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 20%,var(--adm-border));color:var(--adm-accent);font-size:20px;font-weight:900;position:relative;z-index:1}.gh-artifacts-hero-copy{min-width:0;position:relative;z-index:1}.gh-artifacts-hero-copy small{display:block;font-size:8px;font-weight:900;letter-spacing:.09em;color:var(--adm-accent)}.gh-artifacts-hero-copy h3{margin:3px 0 4px;font-size:16px;color:var(--adm-text)}.gh-artifacts-hero-copy p{margin:0;max-width:560px;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-artifacts-stats{display:grid;grid-template-columns:repeat(3,minmax(78px,1fr));gap:6px;position:relative;z-index:1}.gh-artifacts-stats>div{padding:8px 9px;border:1px solid var(--adm-border);border-radius:9px;background:color-mix(in srgb,var(--adm-surface) 88%,transparent);text-align:center}.gh-artifacts-stats span{display:block;font-size:7px;font-weight:850;letter-spacing:.06em;color:var(--adm-muted);text-transform:uppercase}.gh-artifacts-stats b{display:block;margin-top:3px;font-size:14px;color:var(--adm-text)}.gh-artifacts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.gh-artifact-card{display:grid;grid-template-rows:auto auto 1fr;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface);overflow:hidden;min-width:0;transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease}.gh-artifact-card:hover{border-color:color-mix(in srgb,var(--adm-accent) 36%,var(--adm-border));transform:translateY(-1px);box-shadow:0 10px 26px rgba(15,23,42,.055)}.gh-artifact-card.expired{opacity:.68}.gh-artifact-card-top{display:grid;grid-template-columns:40px minmax(0,1fr);gap:10px;padding:13px}.gh-artifact-type-icon{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;background:var(--adm-surface2);border:1px solid var(--adm-border);color:var(--adm-muted);font-weight:900}.gh-artifact-type-icon.apk{background:color-mix(in srgb,var(--adm-success) 8%,var(--adm-surface));border-color:color-mix(in srgb,var(--adm-success) 24%,var(--adm-border));color:var(--adm-success)}.gh-artifact-main{min-width:0}.gh-artifact-kicker{display:flex;align-items:center;gap:6px}.gh-artifact-kicker span,.gh-artifact-kicker em{font-style:normal;font-size:7px;font-weight:900;letter-spacing:.07em}.gh-artifact-kicker span{color:var(--adm-accent)}.gh-artifact-kicker em{padding:2px 5px;border-radius:999px;background:color-mix(in srgb,var(--adm-red) 8%,var(--adm-surface));color:var(--adm-red)}.gh-artifact-main h4{margin:4px 0 2px;font-size:12px;color:var(--adm-text);overflow-wrap:anywhere}.gh-artifact-main p{margin:0;font-size:9px;color:var(--adm-muted)}.gh-artifact-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--adm-border);border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-artifact-facts>div{padding:8px 9px;border-right:1px solid var(--adm-border);min-width:0}.gh-artifact-facts>div:last-child{border-right:0}.gh-artifact-facts small{display:block;font-size:6.5px;font-weight:850;letter-spacing:.05em;color:var(--adm-muted)}.gh-artifact-facts b{display:block;margin-top:3px;font-size:8.5px;color:var(--adm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-artifact-footer{display:flex;align-items:flex-end;justify-content:flex-end;padding:10px 12px}.gh-artifact-footer button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:9px;background:var(--adm-accent);color:#fff;padding:8px 11px;font-size:9.5px;font-weight:800;cursor:pointer}.gh-artifact-unavailable{font-size:9px;color:var(--adm-muted)}.gh-artifacts-empty{padding:32px 18px;text-align:center;border:1px dashed var(--adm-border);border-radius:14px;background:var(--adm-surface2)}.gh-artifacts-empty>span{display:grid;place-items:center;width:42px;height:42px;margin:0 auto 9px;border-radius:12px;background:var(--adm-surface);border:1px solid var(--adm-border);color:var(--adm-muted)}.gh-artifacts-empty h4{margin:0;font-size:13px;color:var(--adm-text)}.gh-artifacts-empty p{margin:5px auto 0;max-width:430px;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-artifacts-loading{display:flex;align-items:center;gap:10px;padding:18px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface)}.gh-artifacts-loading>span{font-size:20px;color:var(--adm-accent)}.gh-artifacts-loading>div{display:grid;gap:2px}.gh-artifacts-loading b{font-size:11px;color:var(--adm-text)}.gh-artifacts-loading small{font-size:9px;color:var(--adm-muted)}
+        .gh-more-wrap{position:relative;flex:0 0 auto}.gh-more-menu{position:absolute;right:0;top:calc(100% + 7px);z-index:30;min-width:190px;background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(15,23,42,.16)}.gh-more-menu button{width:100%;border:0;background:transparent;color:var(--adm-text);border-radius:9px;padding:9px;display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;text-align:left;cursor:pointer}.gh-more-menu button:hover{background:var(--adm-surface2)}.gh-more-menu button>span:first-child{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:color-mix(in srgb,var(--adm-red) 9%,var(--adm-surface));color:var(--adm-red);font-size:15px;font-weight:900}.gh-more-menu b{display:block;font-size:10px;color:var(--adm-red)}.gh-more-menu small{display:block;margin-top:2px;font-size:8px;color:var(--adm-muted)}.gh-repo-head-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:126px;min-height:35px;padding:7px 11px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2);color:var(--adm-muted);font-size:11px;font-weight:750;cursor:pointer;transition:.15s ease}.gh-repo-head-action:hover{border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border));color:var(--adm-text);background:var(--adm-surface)}.gh-repo-head-action:disabled{opacity:.6;cursor:wait}.gh-artifacts-page{display:grid;gap:14px}.gh-artifacts-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:16px;border:1px solid var(--adm-border);border-radius:15px;background:linear-gradient(135deg,var(--adm-surface),var(--adm-surface2));overflow:hidden;position:relative}.gh-artifacts-hero:after{content:'';position:absolute;right:-45px;top:-65px;width:160px;height:160px;border-radius:50%;border:1px solid color-mix(in srgb,var(--adm-accent) 14%,transparent);box-shadow:0 0 0 28px color-mix(in srgb,var(--adm-accent) 5%,transparent);pointer-events:none}.gh-artifacts-hero-icon{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-accent) 20%,var(--adm-border));color:var(--adm-accent);font-size:20px;font-weight:900;position:relative;z-index:1}.gh-artifacts-hero-copy{min-width:0;position:relative;z-index:1}.gh-artifacts-hero-copy small{display:block;font-size:8px;font-weight:900;letter-spacing:.09em;color:var(--adm-accent)}.gh-artifacts-hero-copy h3{margin:3px 0 4px;font-size:16px;color:var(--adm-text)}.gh-artifacts-hero-copy p{margin:0;max-width:560px;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-artifacts-stats{display:grid;grid-template-columns:repeat(3,minmax(78px,1fr));gap:6px;position:relative;z-index:1}.gh-artifacts-stats>div{padding:8px 9px;border:1px solid var(--adm-border);border-radius:9px;background:color-mix(in srgb,var(--adm-surface) 88%,transparent);text-align:center}.gh-artifacts-stats span{display:block;font-size:7px;font-weight:850;letter-spacing:.06em;color:var(--adm-muted);text-transform:uppercase}.gh-artifacts-stats b{display:block;margin-top:3px;font-size:14px;color:var(--adm-text)}.gh-artifacts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.gh-artifact-card{display:grid;grid-template-rows:auto auto 1fr;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface);overflow:hidden;min-width:0;transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease,background .15s ease;outline:none}.gh-artifact-card.downloadable{cursor:pointer}.gh-artifact-card.downloadable:hover,.gh-artifact-card.downloadable:focus-visible{border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border));transform:translateY(-1px);box-shadow:0 10px 26px rgba(15,23,42,.07)}.gh-artifact-card.busy{cursor:wait;border-color:color-mix(in srgb,var(--adm-accent) 36%,var(--adm-border));background:color-mix(in srgb,var(--adm-accent) 2.5%,var(--adm-surface))}.gh-artifact-card.download-error{border-color:color-mix(in srgb,var(--adm-red) 35%,var(--adm-border))}.gh-artifact-card.expired{opacity:.68}.gh-artifact-card-top{display:grid;grid-template-columns:40px minmax(0,1fr);gap:10px;padding:13px}.gh-artifact-type-icon{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;background:var(--adm-surface2);border:1px solid var(--adm-border);color:var(--adm-muted);font-weight:900}.gh-artifact-type-icon.apk{background:color-mix(in srgb,var(--adm-success) 8%,var(--adm-surface));border-color:color-mix(in srgb,var(--adm-success) 24%,var(--adm-border));color:var(--adm-success)}.gh-artifact-main{min-width:0}.gh-artifact-kicker{display:flex;align-items:center;gap:6px}.gh-artifact-kicker span,.gh-artifact-kicker em{font-style:normal;font-size:7px;font-weight:900;letter-spacing:.07em}.gh-artifact-kicker span{color:var(--adm-accent)}.gh-artifact-kicker em{padding:2px 5px;border-radius:999px;background:color-mix(in srgb,var(--adm-red) 8%,var(--adm-surface));color:var(--adm-red)}.gh-artifact-main h4{margin:4px 0 2px;font-size:12px;color:var(--adm-text);overflow-wrap:anywhere}.gh-artifact-main p{margin:0;font-size:9px;color:var(--adm-muted)}.gh-artifact-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--adm-border);border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-artifact-facts>div{padding:8px 9px;border-right:1px solid var(--adm-border);min-width:0}.gh-artifact-facts>div:last-child{border-right:0}.gh-artifact-facts small{display:block;font-size:6.5px;font-weight:850;letter-spacing:.05em;color:var(--adm-muted)}.gh-artifact-facts b{display:block;margin-top:3px;font-size:8.5px;color:var(--adm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-artifact-footer{display:flex;align-items:center;justify-content:flex-end;min-height:54px;padding:9px 11px}.gh-artifact-download-state{width:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:8px 9px;border:1px solid color-mix(in srgb,var(--adm-accent) 20%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-accent) 6%,var(--adm-surface2));color:var(--adm-accent)}.gh-artifact-download-state>span:last-child{display:grid;gap:1px;min-width:0}.gh-artifact-download-state b{font-size:9.5px;line-height:1.2}.gh-artifact-download-state small{font-size:7.8px;color:var(--adm-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gh-artifact-download-state.success{color:var(--adm-success);border-color:color-mix(in srgb,var(--adm-success) 28%,var(--adm-border));background:color-mix(in srgb,var(--adm-success) 7%,var(--adm-surface2))}.gh-artifact-download-state.error{color:var(--adm-red);border-color:color-mix(in srgb,var(--adm-red) 30%,var(--adm-border));background:color-mix(in srgb,var(--adm-red) 6%,var(--adm-surface2))}.gh-artifact-download-icon{width:24px;height:24px;display:grid;place-items:center;border-radius:7px;background:var(--adm-surface);border:1px solid currentColor;font-size:13px;font-weight:900;flex:0 0 auto}.gh-artifact-download-state.busy .gh-artifact-download-icon,.gh-artifact-card.busy .gh-artifact-type-icon span,.gh-repo-apk-btn.busy>span{animation:gh-download-spin .8s linear infinite}@keyframes gh-download-spin{to{transform:rotate(360deg)}}.gh-artifact-unavailable{font-size:9px;color:var(--adm-muted)}.gh-artifacts-empty{padding:32px 18px;text-align:center;border:1px dashed var(--adm-border);border-radius:14px;background:var(--adm-surface2)}.gh-artifacts-empty>span{display:grid;place-items:center;width:42px;height:42px;margin:0 auto 9px;border-radius:12px;background:var(--adm-surface);border:1px solid var(--adm-border);color:var(--adm-muted)}.gh-artifacts-empty h4{margin:0;font-size:13px;color:var(--adm-text)}.gh-artifacts-empty p{margin:5px auto 0;max-width:430px;font-size:10px;line-height:1.45;color:var(--adm-muted)}.gh-artifacts-loading{display:flex;align-items:center;gap:10px;padding:18px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface)}.gh-artifacts-loading>span{font-size:20px;color:var(--adm-accent)}.gh-artifacts-loading>div{display:grid;gap:2px}.gh-artifacts-loading b{font-size:11px;color:var(--adm-text)}.gh-artifacts-loading small{font-size:9px;color:var(--adm-muted)}
         .gh-repo-status-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px 14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));border:1px solid color-mix(in srgb,var(--adm-accent) 28%,var(--adm-border));border-radius:14px;box-shadow:0 5px 18px rgba(15,23,42,.035)}.gh-repo-status-icon{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface);color:var(--adm-accent);font-size:16px}.gh-repo-status-copy{min-width:0;display:grid;gap:3px}.gh-repo-status-copy b{font-size:12px;color:var(--adm-text)}.gh-repo-status-copy small{font-size:9px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-repo-status-dot{width:9px;height:9px;border-radius:50%;background:var(--adm-success);box-shadow:0 0 0 5px color-mix(in srgb,var(--adm-success) 13%,transparent)}
         .gh-command-title{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:16px 2px 10px}.gh-command-title>div{min-width:0}.gh-command-title span,.gh-command-group-label{display:block;font-size:8px;font-weight:900;letter-spacing:.13em;color:var(--adm-accent)}.gh-command-title b{display:block;margin-top:3px;font-size:14px;color:var(--adm-text)}.gh-command-title>small{max-width:260px;font-size:8.5px;line-height:1.4;color:var(--adm-muted);text-align:right}
         .gh-command-group{margin-top:13px}.gh-command-group-label{margin:0 2px 6px;color:var(--adm-muted)}.gh-command-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.gh-command-card{min-width:0;min-height:72px;text-align:left;border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:14px;padding:11px;display:grid;grid-template-columns:32px minmax(0,1fr);gap:9px;align-items:center;color:var(--adm-text);cursor:pointer;box-shadow:0 5px 18px rgba(15,23,42,.03);transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}.gh-command-card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--adm-accent) 48%,var(--adm-border));box-shadow:0 9px 24px rgba(15,23,42,.055)}.gh-command-card.destaque{border-color:color-mix(in srgb,var(--adm-success) 36%,var(--adm-border));background:linear-gradient(145deg,var(--adm-surface),color-mix(in srgb,var(--adm-success) 4%,var(--adm-surface2)))}.gh-command-card-icon{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);font-size:15px;font-weight:900;color:var(--adm-text)}.gh-command-card.destaque .gh-command-card-icon{color:var(--adm-success);border-color:color-mix(in srgb,var(--adm-success) 28%,var(--adm-border))}.gh-command-card-copy{min-width:0;display:grid;gap:3px}.gh-command-card-copy b{font-size:12.5px;line-height:1.2;overflow-wrap:anywhere}.gh-command-card-copy small{font-size:10px;line-height:1.32;color:var(--adm-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -2296,8 +2432,8 @@ export default function AdminGitHub() {
         .gh-version-journey{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);gap:7px;align-items:center;padding:10px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2)}.gh-version-journey>div{min-width:0;display:grid;gap:2px}.gh-version-journey>div:last-child{text-align:right}.gh-version-journey small{font-size:6.5px;font-weight:900;letter-spacing:.07em;color:var(--adm-muted)}.gh-version-journey b{font-size:15px;color:var(--adm-text)}.gh-version-journey span{font-size:8px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-version-journey>i{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--adm-border);background:var(--adm-surface);font-style:normal;font-weight:900;color:var(--adm-accent)}.gh-version-journey.warn{border-color:color-mix(in srgb,var(--adm-amber) 35%,var(--adm-border))}.gh-version-journey.error{border-color:color-mix(in srgb,var(--adm-red) 35%,var(--adm-border))}.gh-preflight-banner{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px;border-radius:11px;border:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-preflight-banner>span{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--adm-surface);font-weight:900}.gh-preflight-banner.ok{border-color:color-mix(in srgb,var(--adm-success) 35%,var(--adm-border))}.gh-preflight-banner.ok>span{color:var(--adm-success)}.gh-preflight-banner.error>span{color:var(--adm-red)}.gh-preflight-banner>div{display:grid;gap:2px}.gh-preflight-banner b{font-size:10px;color:var(--adm-text)}.gh-preflight-banner small{font-size:8px;line-height:1.35;color:var(--adm-muted)}.gh-preflight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-preflight-check{display:grid;grid-template-columns:24px minmax(0,1fr);gap:7px;align-items:center;padding:8px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface)}.gh-preflight-check>span{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:var(--adm-surface2);font-weight:900}.gh-preflight-check.ok>span{color:var(--adm-success)}.gh-preflight-check.warn>span{color:var(--adm-amber)}.gh-preflight-check.error>span{color:var(--adm-red)}.gh-preflight-check div{min-width:0;display:grid;gap:1px}.gh-preflight-check b{font-size:8.5px;color:var(--adm-text)}.gh-preflight-check small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}.gh-preflight-warnings{display:grid;gap:3px;padding:9px;border-radius:9px;background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));border:1px solid color-mix(in srgb,var(--adm-amber) 25%,var(--adm-border));font-size:8px;color:var(--adm-muted)}.gh-preflight-warnings b{color:var(--adm-amber);font-size:9px}.gh-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.gh-live-head h3{margin:0}.gh-live-head p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-live-progress{display:grid;gap:5px}.gh-live-progress>div{display:flex;justify-content:space-between;font-size:8px;color:var(--adm-muted)}.gh-live-progress b{color:var(--adm-text)}.gh-live-progress>i{height:7px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.gh-live-progress>i>em{display:block;height:100%;background:var(--adm-accent);border-radius:inherit;transition:width .25s}.gh-publish-monitor{display:grid;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--adm-accent) 34%,var(--adm-border));border-radius:14px;background:linear-gradient(145deg,var(--adm-surface),var(--adm-surface2));box-shadow:0 8px 24px rgba(15,23,42,.045)}.gh-publish-monitor.error{border-color:color-mix(in srgb,var(--adm-red) 42%,var(--adm-border))}.gh-publish-monitor-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.gh-publish-monitor-top>div{min-width:0;display:grid;gap:3px}.gh-publish-monitor-top small{font-size:7px;font-weight:900;letter-spacing:.1em;color:var(--adm-muted)}.gh-publish-monitor-top b{font-size:12px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-top strong{font-size:28px;line-height:1;color:var(--adm-accent);font-variant-numeric:tabular-nums}.gh-publish-monitor.error .gh-publish-monitor-top strong{color:var(--adm-red)}.gh-publish-monitor-track{height:9px;border-radius:999px;overflow:hidden;background:var(--adm-bg);border:1px solid var(--adm-border)}.gh-publish-monitor-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--adm-accent),color-mix(in srgb,var(--adm-accent) 72%,white));transition:width .25s ease}.gh-publish-monitor.error .gh-publish-monitor-track i{background:var(--adm-red)}.gh-publish-monitor-current{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-bg)}.gh-publish-op{max-width:110px;padding:4px 6px;border-radius:7px;background:color-mix(in srgb,var(--adm-accent) 10%,var(--adm-surface));color:var(--adm-accent);font-size:7px;font-weight:900;font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-current code{min-width:0;font-size:9px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-publish-monitor-current em{font-size:7px;font-style:normal;color:var(--adm-muted);white-space:nowrap}.gh-publish-monitor-stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.gh-publish-monitor-stages span{min-width:0;padding:5px 4px;border-radius:7px;border:1px solid var(--adm-border);background:var(--adm-bg);text-align:center;font-size:7px;font-weight:850;color:var(--adm-muted)}.gh-publish-monitor-stages span.active{border-color:color-mix(in srgb,var(--adm-accent) 45%,var(--adm-border));color:var(--adm-accent)}.gh-publish-monitor-stages span.done{border-color:color-mix(in srgb,var(--adm-success) 35%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 5%,var(--adm-bg))}.gh-live-log{display:grid;border:1px solid var(--adm-border);border-radius:11px;background:var(--adm-surface);overflow:hidden;max-height:260px;overflow-y:auto}.gh-live-log-title{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;padding:8px 9px;border-bottom:1px solid var(--adm-border);background:var(--adm-surface2)}.gh-live-log-title b{font-size:9px;color:var(--adm-text)}.gh-live-log-title span{font-size:7px;color:var(--adm-muted)}.gh-log-line{display:grid;grid-template-columns:54px 18px minmax(0,1fr) auto;gap:6px;align-items:start;padding:7px 9px;border-bottom:1px solid var(--adm-border)}.gh-log-line:last-child{border-bottom:0}.gh-log-line time{font-size:7px;color:var(--adm-muted)}.gh-log-line>span{font-size:9px;font-weight:900;color:var(--adm-accent)}.gh-log-line.done>span{color:var(--adm-success)}.gh-log-line.error>span{color:var(--adm-red)}.gh-log-line.off>span{color:var(--adm-muted)}.gh-log-line>div{min-width:0;display:grid;gap:1px}.gh-log-line b{font-size:8.5px;color:var(--adm-text)}.gh-log-line small{font-size:7.5px;line-height:1.4;color:var(--adm-muted);overflow-wrap:anywhere}.gh-log-line>em{font-size:7px;font-style:normal;color:var(--adm-muted)}.gh-postcheck{display:grid;gap:5px}.gh-postcheck>b{font-size:9px;color:var(--adm-text)}.gh-postcheck>span{display:grid;grid-template-columns:20px 120px minmax(0,1fr);gap:6px;align-items:center;padding:7px 8px;border:1px solid var(--adm-border);border-radius:8px;background:var(--adm-surface)}.gh-postcheck i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;background:var(--adm-surface2);font-style:normal;font-weight:900}.gh-postcheck .ok i{color:var(--adm-success)}.gh-postcheck .warn i{color:var(--adm-amber)}.gh-postcheck .error i{color:var(--adm-red)}.gh-postcheck em{font-size:8px;font-style:normal;font-weight:800;color:var(--adm-text)}.gh-postcheck small{font-size:7px;color:var(--adm-muted);overflow-wrap:anywhere}
         .gh-review-compact,.gh-publish-minimal,.gh-result-minimal{min-height:0!important;display:grid;gap:10px;padding:2px 0}.gh-preflight-summary{grid-template-columns:30px minmax(0,1fr)!important;padding:10px 11px!important}.gh-preflight-summary small{font-size:9px!important}.gh-review-summary-line,.gh-result-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.gh-review-summary-line>span,.gh-result-summary>span{min-width:0;padding:8px 9px;border:1px solid var(--adm-border);border-radius:9px;background:var(--adm-surface2)}.gh-review-summary-line small,.gh-result-summary small{display:block;font-size:6.5px;letter-spacing:.08em;font-weight:900;color:var(--adm-muted)}.gh-review-summary-line b,.gh-result-summary b{display:block;margin-top:2px;font-size:9.5px;color:var(--adm-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gh-compact-warning{padding:7px 9px;border-radius:8px;border:1px solid color-mix(in srgb,var(--adm-amber) 30%,var(--adm-border));background:color-mix(in srgb,var(--adm-amber) 7%,var(--adm-surface));font-size:8.5px;color:var(--adm-amber)}.gh-disclosure-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:9px;padding:9px 10px;font-size:9.5px;font-weight:850;cursor:pointer}.gh-disclosure-button b{font-size:12px;color:var(--adm-muted)}.gh-disclosure-panel{display:grid;gap:8px;padding:9px;border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2)}.gh-review-detail-actions,.gh-events-actions{display:flex;justify-content:flex-end}.gh-publish-minimal .gh-publish-monitor{padding:12px;gap:9px}.gh-publish-minimal .gh-publish-monitor-current{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px 9px}.gh-publish-minimal .gh-publish-monitor-current code{font-size:9px}.gh-publish-minimal .gh-publish-monitor-current em{font-size:7.5px}.gh-publish-error-help{display:grid;gap:4px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--adm-red) 34%,var(--adm-border));border-radius:9px;background:color-mix(in srgb,var(--adm-red) 5%,var(--adm-surface))}.gh-publish-error-help b{font-size:9px;color:var(--adm-red)}.gh-publish-error-help span{font-size:8.5px;color:var(--adm-text);line-height:1.4}.gh-publish-error-help small{font-size:8px;color:var(--adm-muted);line-height:1.4}.gh-events-panel{padding:7px}.gh-events-panel .gh-live-log{max-height:210px}.gh-events-panel .gh-log-line{grid-template-columns:48px 14px minmax(0,1fr);padding:6px 7px}.gh-events-panel .gh-log-line b{font-size:8px}.gh-events-panel .gh-log-line small{font-size:7px}.gh-result-hero{display:flex;align-items:center;gap:10px;padding:5px 1px}.gh-result-hero .gh-wizard-success-icon{margin:0!important;flex:0 0 auto;width:38px;height:38px}.gh-result-hero h3{margin:0;font-size:15px;color:var(--adm-text)}.gh-result-hero p{margin:3px 0 0;font-size:9px;color:var(--adm-muted)}.gh-result-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.gh-result-details{padding:9px}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-result-minimal .gh-postcheck{margin-top:2px}
         @media(max-width:980px){.gh-repo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr)) auto!important;width:100%;gap:7px!important}.gh-repo-head-action{width:100%!important;min-width:0!important}.gh-artifacts-hero{grid-template-columns:auto minmax(0,1fr)}.gh-artifacts-stats{grid-column:1/-1;width:100%}.gh-artifacts-grid{grid-template-columns:1fr}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-command-card{min-height:0;padding:13px 12px;grid-template-columns:40px minmax(0,1fr);align-items:center;gap:10px;border-radius:14px}.gh-command-card-icon{width:40px;height:40px;font-size:18px;border-radius:12px}.gh-command-card-copy b{font-size:13.5px}.gh-command-card-copy small{font-size:10.5px;line-height:1.35}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
-        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px}.gh-command-card{min-width:0;min-height:118px;padding:10px 5px 9px;border-radius:13px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;text-align:center}.gh-command-card-icon{width:42px;height:42px;flex:0 0 42px;font-size:18px;border-radius:50%}.gh-command-card-copy{width:100%;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px}.gh-command-card-copy b{width:100%;font-size:11px;line-height:1.15;overflow-wrap:anywhere}.gh-command-card-copy small{width:100%;font-size:8.5px;line-height:1.25;-webkit-line-clamp:2;overflow-wrap:anywhere}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-package-picker{grid-template-columns:34px minmax(0,1fr) auto;padding:9px;gap:7px}.gh-package-picker-icon{width:32px;height:32px;font-size:15px}.gh-package-picker-copy b{font-size:10.5px}.gh-package-picker-copy small{font-size:8px}.gh-package-picker-action{font-size:8px;padding:6px}.gh-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-option-grid .gh-option-card:last-child{grid-column:1/-1}.gh-final-review-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-dashboard-stage{grid-template-columns:24px minmax(0,1fr);padding:8px;gap:6px}.gh-dashboard-stage-icon{width:24px;height:24px}.gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media(max-width:760px){.gh-repo-grid{grid-template-columns:1fr}.gh-filter-row{grid-template-columns:1fr 1fr}.gh-filter-row input{grid-column:1/-1}.gh-account-hero:after{right:-95px;top:-85px}.gh-repo-facts{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-repo-drawer{width:100vw!important;border-left:0!important}.gh-repo-head{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:10px!important}.gh-repo-header-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr)) auto!important;width:100%;gap:7px!important}.gh-repo-head-action{width:100%!important;min-width:0!important}.gh-artifacts-hero{grid-template-columns:auto minmax(0,1fr)}.gh-artifacts-stats{grid-column:1/-1;width:100%}.gh-artifacts-grid{grid-template-columns:1fr}.gh-github-summary{grid-template-columns:1fr}.gh-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-readme{padding:12px}.gh-readme h1{font-size:18px}.gh-readme h2{font-size:16px}.gh-command-title{align-items:flex-start}.gh-command-title>small{max-width:180px}.gh-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gh-command-card{min-height:0;padding:10px 11px;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:8px;border-radius:13px}.gh-command-card-icon{width:36px;height:36px;font-size:16px;border-radius:11px}.gh-command-card-copy b{font-size:12.5px}.gh-command-card-copy small{font-size:9.5px;line-height:1.3}.gh-repo-overview-strip{margin:12px 12px 18px}.gh-repo-overview-strip>div{padding:8px 6px;text-align:center}.gh-repo-overview-strip span{font-size:6px;letter-spacing:.04em}.gh-repo-overview-strip b{font-size:8.5px}.gh-more-menu{position:fixed;right:12px;top:132px}}
+        @media(max-width:520px){.gh-account-hero{padding:12px}.gh-profile-row{grid-template-columns:auto minmax(0,1fr)}.gh-profile-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-profile-actions>*{width:100%;justify-content:center}.gh-account-stats{margin-top:10px}.gh-account-stat{padding:8px 5px;text-align:center}.gh-account-stat span{font-size:6.8px;letter-spacing:.03em;min-height:18px;display:flex;align-items:center;justify-content:center}.gh-account-stat b{font-size:11px}.gh-profile-avatar{width:40px;height:40px}.gh-profile-meta h1{font-size:15px}.gh-profile-meta p{font-size:10px}.gh-repo-card{padding:13px}.gh-repo-footer{gap:7px}.gh-repo-apk-btn{margin-left:auto;padding:6px 8px;font-size:9px}.gh-repo-facts>div{padding:7px 5px}.gh-repo-facts span{font-size:7px;letter-spacing:.04em}.gh-repo-facts b{font-size:9px}.gh-profile-form-grid{grid-template-columns:1fr}.gh-profile-wide{grid-column:auto}.gh-profile-edit-head{align-items:flex-start;flex-wrap:wrap}.gh-external-btn{width:100%}.gh-overview-pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.gh-overview-card{padding:9px}.gh-overview-head{align-items:flex-start}.gh-overview-head b{font-size:10.5px}.gh-overview-body p{font-size:9px}.gh-compact-info{gap:4px}.gh-compact-info>div{padding:5px}.gh-compact-info b{font-size:8.5px}.gh-publish-intro{grid-template-columns:1fr}.gh-destination-pill{max-width:none}.gh-publish-grid,.gh-cloud-grid{grid-template-columns:1fr}.gh-two-fields{grid-template-columns:1fr 1fr}.gh-publish-card{padding:10px}.gh-publish-confirm{grid-template-columns:1fr}.gh-wizard-step{min-height:260px}.gh-wizard-progress-top{align-items:flex-start}.gh-wizard-progress-top span{text-align:right}.gh-wizard-dots{gap:3px}.gh-wizard-dots button{height:22px;padding:0}.gh-wizard-actions>*{flex:1;justify-content:center}.gh-command-title{display:grid;gap:5px}.gh-command-title>small{max-width:none;text-align:left}.gh-command-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px}.gh-command-card{min-width:0;min-height:96px;padding:7px 4px 7px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;text-align:center}.gh-command-card-icon{width:34px;height:34px;flex:0 0 34px;font-size:15px;border-radius:50%}.gh-command-card-copy{width:100%;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}.gh-command-card-copy b{width:100%;font-size:10.5px;line-height:1.12;overflow-wrap:anywhere}.gh-command-card-copy small{width:100%;font-size:7.9px;line-height:1.2;-webkit-line-clamp:2;overflow-wrap:anywhere}.gh-repo-status-card{padding:11px}.gh-repo-status-icon{width:31px;height:31px}.gh-repo-status-copy b{font-size:11px}.gh-repo-status-copy small{font-size:8px}.gh-run-card{flex-direction:column!important}.gh-run-actions{width:100%;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px!important}.gh-run-actions>*{width:100%;min-width:0;justify-content:center;white-space:nowrap;font-size:9px!important;padding-left:5px!important;padding-right:5px!important}.gh-log-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.gh-package-picker{grid-template-columns:34px minmax(0,1fr) auto;padding:9px;gap:7px}.gh-package-picker-icon{width:32px;height:32px;font-size:15px}.gh-package-picker-copy b{font-size:10.5px}.gh-package-picker-copy small{font-size:8px}.gh-package-picker-action{font-size:8px;padding:6px}.gh-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-option-grid .gh-option-card:last-child{grid-column:1/-1}.gh-final-review-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.gh-dashboard-stage{grid-template-columns:24px minmax(0,1fr);padding:8px;gap:6px}.gh-dashboard-stage-icon{width:24px;height:24px}.gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:620px){.gh-files-hero{grid-template-columns:1fr}.gh-files-hero-actions{display:grid;grid-template-columns:1fr 1fr}.gh-files-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-files-toolbar{align-items:flex-start}.gh-files-selectionbar{align-items:flex-start;flex-direction:column}.gh-files-selectionbar>div{width:100%;justify-content:flex-start}.gh-file-card{grid-template-columns:22px minmax(0,1fr) auto}.gh-file-meta{grid-column:2/3;justify-items:start;display:flex;gap:5px}.gh-file-row-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.gh-file-row-actions>*{width:100%;justify-content:center}.gh-preflight-banner{grid-template-columns:28px minmax(0,1fr)}.gh-preflight-banner>button{grid-column:1/-1;width:100%}.gh-preflight-grid{grid-template-columns:1fr}.gh-version-journey b{font-size:13px}.gh-log-line{grid-template-columns:44px 16px minmax(0,1fr)}.gh-log-line>em{display:none}.gh-postcheck>span{grid-template-columns:20px 90px minmax(0,1fr)}.gh-live-head{display:grid;grid-template-columns:1fr auto}.gh-publish-monitor{padding:12px}.gh-publish-monitor-top strong{font-size:24px}.gh-publish-monitor-current{grid-template-columns:auto minmax(0,1fr)}.gh-publish-monitor-current em{grid-column:1/-1;text-align:right}.gh-publish-op{max-width:86px}.gh-file-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:620px){.gh-review-summary-line{grid-template-columns:repeat(3,minmax(0,1fr))}.gh-review-summary-line>span{padding:7px 6px}.gh-review-summary-line b{font-size:8.5px}.gh-result-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-result-details .gh-finish-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gh-publish-minimal .gh-publish-monitor-current{grid-template-columns:minmax(0,1fr) auto}.gh-publish-minimal .gh-publish-monitor-current em{grid-column:auto;text-align:right}.gh-postcheck>span{grid-template-columns:20px 78px minmax(0,1fr)}}
       `}</style>
@@ -2407,7 +2543,7 @@ export default function AdminGitHub() {
         </div>
       ) : (
         <div className="gh-repo-grid">
-          {reposFiltrados.map(repo => <RepoCard key={repo.id} repo={repo} meta={metas[repo.id]} insight={insights[repo.id]} onAbrir={setRepoAberto} />)}
+          {reposFiltrados.map(repo => <RepoCard key={repo.id} repo={repo} meta={metas[repo.id]} insight={insights[repo.id]} onAbrir={setRepoAberto} toastShow={toastShow} />)}
         </div>
       )}
 

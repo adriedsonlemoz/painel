@@ -5,8 +5,8 @@
 # Disparo manual   : Actions → "Build Android APK" → escolha Debug ou Release
 #
 # Artifacts gerados (aba "Artifacts" de cada run):
-#   alsistemas-debug-<sha>   → APK de teste, sem assinatura, 14 dias
-#   alsistemas-release-<sha> → APK assinado, produção, 90 dias (requer secrets)
+#   AL-Sistemas-<versão>-debug   → APK de teste, sem assinatura, 14 dias
+#   AL-Sistemas-<versão>-release → APK assinado, produção, 90 dias (requer secrets)
 #
 # Secrets necessários para o build Release (Settings → Secrets → Actions):
 #   KEYSTORE_BASE64     – keystore codificado em base64
@@ -87,15 +87,21 @@ jobs:
         run: npm install --no-audit --no-fund --prefer-offline
         working-directory: ${{ env.WORKING_DIR }}
 
+      - name: 🏷️ Ler versão do app
+        id: app_version
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Versão do pacote: $APP_VERSION"
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: 🔎 Conferir versões do Capacitor
-        run: npm ls @capacitor/core @capacitor/cli @capacitor/android tar --depth=2
+        run: npm ls @capacitor/core @capacitor/cli @capacitor/android @capacitor/browser tar --depth=2
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
-        run: |
-          APP_VERSION="$(node -p "require('./package.json').version")"
-          echo "Versão do pacote: $APP_VERSION"
-          VITE_APP_VERSION="$APP_VERSION" npm run build
+        run: VITE_APP_VERSION="$APP_VERSION" npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
@@ -124,11 +130,18 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: ${{ env.WORKING_DIR }}/android
 
+      - name: 🏷️ Preparar APK Debug versionado
+        run: |
+          mkdir -p dist-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist-apk/AL-Sistemas-${APP_VERSION}-debug.apk"
+          ls -lh dist-apk/
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: 📤 Upload APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: alsistemas-debug-${{ github.sha }}
-          path: ${{ env.WORKING_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          name: AL-Sistemas-${{ steps.app_version.outputs.version }}-debug
+          path: ${{ env.WORKING_DIR }}/dist-apk/AL-Sistemas-${{ steps.app_version.outputs.version }}-debug.apk
           retention-days: 14
 
       - name: 📋 Resumo
@@ -139,6 +152,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **App ID** | \`com.alsistemas.painel\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Versão** | \`$APP_VERSION\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Build** | Debug (não assinado) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${GITHUB_SHA::7}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -187,15 +201,21 @@ jobs:
         run: npm install --no-audit --no-fund --prefer-offline
         working-directory: ${{ env.WORKING_DIR }}
 
+      - name: 🏷️ Ler versão do app
+        id: app_version
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Versão do pacote: $APP_VERSION"
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: 🔎 Conferir versões do Capacitor
-        run: npm ls @capacitor/core @capacitor/cli @capacitor/android tar --depth=2
+        run: npm ls @capacitor/core @capacitor/cli @capacitor/android @capacitor/browser tar --depth=2
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🏗️ Build Vite (produção)
-        run: |
-          APP_VERSION="$(node -p "require('./package.json').version")"
-          echo "Versão do pacote: $APP_VERSION"
-          VITE_APP_VERSION="$APP_VERSION" npm run build
+        run: VITE_APP_VERSION="$APP_VERSION" npm run build
         working-directory: ${{ env.WORKING_DIR }}
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://al-sistemas-api.onrender.com/api' }}
@@ -243,11 +263,20 @@ jobs:
           $ANDROID_SDK_ROOT/build-tools/$(ls $ANDROID_SDK_ROOT/build-tools | tail -1)/apksigner verify --print-certs "$APK"
         working-directory: ${{ env.WORKING_DIR }}/android
 
+      - name: 🏷️ Preparar APK Release versionado
+        run: |
+          mkdir -p dist-apk
+          APK="$(find android/app/build/outputs/apk/release -name 'app-release*.apk' | head -1)"
+          test -n "$APK"
+          cp "$APK" "dist-apk/AL-Sistemas-${APP_VERSION}-release.apk"
+          ls -lh dist-apk/
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: 📤 Upload APK Release
         uses: actions/upload-artifact@v4
         with:
-          name: alsistemas-release-${{ github.sha }}
-          path: ${{ env.WORKING_DIR }}/android/app/build/outputs/apk/release/app-release*.apk
+          name: AL-Sistemas-${{ steps.app_version.outputs.version }}-release
+          path: ${{ env.WORKING_DIR }}/dist-apk/AL-Sistemas-${{ steps.app_version.outputs.version }}-release.apk
           retention-days: 90
 
       - name: 🗑️ Remover keystore da memória
@@ -263,6 +292,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **App ID** | \`com.alsistemas.painel\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Versão** | \`$APP_VERSION\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Build** | Release (assinado com keystore) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${GITHUB_SHA::7}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
