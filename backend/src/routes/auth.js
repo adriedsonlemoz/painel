@@ -28,14 +28,14 @@ function requestIsCrossOrigin(req) {
   try { return Boolean(origin && new URL(origin).host!==req.get('host')) } catch { return false }
 }
 
-function cookieOpts(req) {
+function cookieOpts(req, persist = true) {
   const crossOrigin=requestIsCrossOrigin(req)
   const secure=crossOrigin || req.secure || String(req.headers['x-forwarded-proto']||'').includes('https')
   return {
     httpOnly:true,
     secure,
     sameSite:crossOrigin?'none':'lax',
-    maxAge:7*24*60*60*1000,
+    ...(persist ? { maxAge:7*24*60*60*1000 } : {}),
     path:'/',
   }
 }
@@ -54,7 +54,7 @@ function gerarToken(usuario, expiresIn = process.env.JWT_EXPIRES_IN || '7d', ext
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
 router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) => {
   try {
-    const { email, senha } = req.body
+    const { email, senha, manter_conectado = false } = req.body
 
     // Busca incluindo campos ocultos pelo select:false + populate de permissões
     // IMPORTANTE: sem o populate aqui, perfil_id chega sem permissoes no frontend
@@ -106,8 +106,10 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
 
     // #1 — Cookie HttpOnly continua sendo o transporte principal.
     const crossOrigin=requestIsCrossOrigin(req)
-    const cloudToken=crossOrigin ? gerarToken(usuario, process.env.JWT_CLOUD_EXPIRES_IN || '12h', { transport:'cloud' }) : ''
-    res.cookie('alsistemas_token', token, cookieOpts(req))
+    const persist = manter_conectado === true
+    const cloudExpires = persist ? (process.env.JWT_CLOUD_PERSIST_EXPIRES_IN || '7d') : (process.env.JWT_CLOUD_EXPIRES_IN || '12h')
+    const cloudToken=crossOrigin ? gerarToken(usuario, cloudExpires, { transport:'cloud', persistent:persist }) : ''
+    res.cookie('alsistemas_token', token, cookieOpts(req, persist))
     res.json({
       usuario,
       // Em frontend/backend cross-origin (ex.: Vercel → Render), alguns
@@ -120,7 +122,8 @@ router.post('/login', loginLimiter, regraLogin, validar, async (req, res, next) 
         crossOrigin,
         cookie:{httpOnly:true,secure:cookieOpts(req).secure,sameSite:cookieOpts(req).sameSite},
         bearerFallback:crossOrigin,
-        bearerExpiresIn:crossOrigin?(process.env.JWT_CLOUD_EXPIRES_IN || '12h'):null,
+        bearerExpiresIn:crossOrigin?cloudExpires:null,
+        persistent:persist,
       },
     })
   } catch (err) { next(err) }
@@ -173,7 +176,7 @@ router.put('/me', autenticar, async (req, res, next) => {
 
 // ── POST /api/auth/logout ─────────────────────────────────────────────────────
 router.post('/logout', (req, res) => {
-  res.clearCookie('alsistemas_token', { ...cookieOpts(req), maxAge: undefined })
+  res.clearCookie('alsistemas_token', { ...cookieOpts(req, false), maxAge: undefined })
   res.json({ mensagem: 'Logout realizado' })
 })
 

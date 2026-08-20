@@ -1785,6 +1785,155 @@ function AbaSecrets({ secrets, owner, repo, onRefresh, toastShow }) {
   )
 }
 
+/* ── Logs estruturados do GitHub Actions ─────────────────────────────── */
+function parseWorkflowLog(text='') {
+  const rawLines = String(text || '').split(/\r?\n/)
+  const lines = rawLines.map((raw, index) => {
+    const tm = raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s?(.*)$/)
+    const timestamp = tm?.[1] || ''
+    const body = tm ? tm[2] : raw
+    const compactTime = timestamp ? timestamp.slice(11,19) : ''
+    let kind = 'info'
+    if (/##\[error\]|npm ERR!|BUILD FAILED|(?:^|\s)(?:ERROR|Error|Exception|Failure|Failed)(?:\s|:|$)|Process completed with exit code\s*[1-9]|Gradle.*fail/i.test(body)) kind = 'error'
+    else if (/##\[warning\]|(?:^|\s)(?:WARN|Warning)(?:\s|:|$)/i.test(body)) kind = 'warning'
+    else if (/##\[group\]/i.test(body)) kind = 'group-start'
+    else if (/##\[endgroup\]/i.test(body)) kind = 'group-end'
+    else if (/success|succeeded|passed|completed successfully|✓/i.test(body)) kind = 'success'
+    return { index, raw, body, timestamp, compactTime, kind }
+  })
+
+  const sections = []
+  let current = { id:'root', title:'Execução', start:0, end:Math.max(0,lines.length-1), lines:[] }
+  const pushCurrent = () => { if (current.lines.length) sections.push(current) }
+  for (const line of lines) {
+    const group = line.body.match(/##\[group\](.*)$/i)
+    if (group) {
+      pushCurrent()
+      current = { id:`group-${line.index}`, title:(group[1] || 'Etapa').trim(), start:line.index, end:line.index, lines:[line] }
+      continue
+    }
+    current.lines.push(line); current.end = line.index
+    if (/##\[endgroup\]/i.test(line.body)) {
+      pushCurrent()
+      current = { id:`after-${line.index}`, title:'Continuação', start:line.index+1, end:line.index+1, lines:[] }
+    }
+  }
+  pushCurrent()
+
+  const errors = []
+  const errorIndexes = lines.filter(l => l.kind === 'error').map(l => l.index)
+  for (const idx of errorIndexes) {
+    if (errors.some(e => Math.abs(e.index - idx) <= 2)) continue
+    const before = Math.max(0, idx - 4), after = Math.min(lines.length - 1, idx + 5)
+    const section = sections.find(s => idx >= s.start && idx <= s.end)
+    errors.push({ index:idx, line:lines[idx], section:section?.title || 'Execução', context:lines.slice(before, after + 1), before, after })
+  }
+  return { lines, sections, errors }
+}
+
+function logKindMeta(kind) {
+  if (kind === 'error') return { icon:'✕', label:'Erro', cls:'error' }
+  if (kind === 'warning') return { icon:'!', label:'Aviso', cls:'warning' }
+  if (kind === 'success') return { icon:'✓', label:'Sucesso', cls:'success' }
+  if (kind === 'group-start') return { icon:'▶', label:'Início de etapa', cls:'group' }
+  if (kind === 'group-end') return { icon:'■', label:'Fim de etapa', cls:'group' }
+  return { icon:'•', label:'Informação', cls:'info' }
+}
+
+function buildErrorCopy(parsed, job) {
+  const err = parsed?.errors?.[0]
+  if (!err) return `Etapa: ${job?.nome || 'Workflow'}\nNenhum erro destacado automaticamente. Consulte o log completo.`
+  const exit = parsed.lines.find(l => /Process completed with exit code/i.test(l.body))
+  return sanitizeLogText([
+    'Erro do GitHub Actions',
+    `Job: ${job?.nome || '—'}`,
+    `Etapa: ${err.section}`,
+    exit ? exit.body : '',
+    '',
+    ...err.context.map(l => l.raw),
+  ].filter(Boolean).join('\n'))
+}
+
+function WorkflowLogModal({ open, onClose, run, job, text, loading, toastShow }) {
+  const [view, setView] = useState('erros')
+  const [order, setOrder] = useState('desc')
+  const [query, setQuery] = useState('')
+  const [visible, setVisible] = useState(500)
+  const [openSections, setOpenSections] = useState({})
+  const parsed = parseWorkflowLog(text || '')
+
+  useEffect(() => {
+    if (!open) return
+    setView(parsed.errors.length ? 'erros' : 'etapas')
+    setOrder('desc'); setQuery(''); setVisible(500)
+    const errorSection = parsed.sections.find(s => s.lines.some(l => l.kind === 'error'))
+    setOpenSections(errorSection ? { [errorSection.id]:true } : {})
+  }, [open, job?.id, text])
+
+  const copy = async (value, message) => {
+    try { await navigator.clipboard.writeText(sanitizeLogText(value || '')); toastShow?.(message || 'Copiado.', 'ok') }
+    catch { toastShow?.('Não foi possível copiar.', 'erro') }
+  }
+  const q = query.trim().toLowerCase()
+  const filtered = q ? parsed.lines.filter(l => l.raw.toLowerCase().includes(q)) : parsed.lines
+  const ordered = order === 'desc' ? [...filtered].reverse() : filtered
+  const shown = ordered.slice(0, visible)
+  const matches = q ? filtered.length : 0
+  const duration = job?.fimEm && job?.inicioEm ? fmtDuracao(new Date(job.fimEm)-new Date(job.inicioEm)) : (run?.duracaoMs ? fmtDuracao(run.duracaoMs) : '—')
+
+  return <DSModal open={open} onClose={onClose} title="Log da execução" size="xl">
+    <div className="gh-log-modal">
+      <div className="gh-log-modal__head">
+        <div><b>{job?.nome || run?.mensagem || run?.nome || 'Execução'}</b><small><RunBadge status={job?.status || run?.status} conclusao={job?.conclusao || run?.conclusao} /> · {duration}</small></div>
+        <div className="gh-log-order">
+          <button className={order==='desc'?'active':''} onClick={()=>setOrder('desc')}>Mais recentes primeiro</button>
+          <button className={order==='asc'?'active':''} onClick={()=>setOrder('asc')}>Mais antigos primeiro</button>
+        </div>
+      </div>
+
+      <div className="gh-log-tabs">
+        <button className={view==='erros'?'active':''} onClick={()=>setView('erros')}>Erros {parsed.errors.length ? `(${parsed.errors.length})` : ''}</button>
+        <button className={view==='etapas'?'active':''} onClick={()=>setView('etapas')}>Etapas ({parsed.sections.length})</button>
+        <button className={view==='completo'?'active':''} onClick={()=>setView('completo')}>Log completo</button>
+      </div>
+
+      <div className="gh-log-search">
+        <span>⌕</span><input value={query} onChange={e=>{setQuery(e.target.value);setVisible(500)}} placeholder="Buscar no log: error, gradle, npm, apk…" />
+        {q && <small>{matches} {matches===1?'resultado':'resultados'}</small>}
+      </div>
+
+      {loading ? <div className="gh-log-empty">Carregando log…</div> : !text ? <div className="gh-log-empty">Log vazio.</div> : view === 'erros' ? (
+        <div className="gh-log-errors">
+          {parsed.errors.length === 0 ? <div className="gh-log-empty">Nenhuma linha de erro foi identificada automaticamente. Consulte Etapas ou Log completo.</div> : parsed.errors.map((err, i)=><div key={`${err.index}-${i}`} className="gh-error-card">
+            <div className="gh-error-card__title"><span>✕</span><div><b>{i===0?'Erro principal':'Erro detectado'}</b><small>Etapa: {err.section}</small></div></div>
+            <div className="gh-error-context">{err.context.map(l=>{const m=logKindMeta(l.kind);return <div key={l.index} className={`gh-log-line2 ${m.cls} ${l.index===err.index?'focus':''}`}><time>{l.compactTime||'--:--:--'}</time><span>{m.icon}</span><code>{l.body || ' '}</code></div>})}</div>
+            <div className="gh-log-copy-actions"><DSBtn size="sm" variant="primary" onClick={()=>copy(buildErrorCopy({ ...parsed, errors:[err] },job),'Erro copiado.')}>Copiar erro</DSBtn><DSBtn size="sm" variant="ghost" onClick={()=>{setView('completo');setQuery(err.line.body.slice(0,80))}}>Ver no log completo</DSBtn></div>
+          </div>)}
+        </div>
+      ) : view === 'etapas' ? (
+        <div className="gh-log-sections">{parsed.sections.map(section=>{
+          const hasError=section.lines.some(l=>l.kind==='error'), isOpen=!!openSections[section.id]
+          return <div key={section.id} className={`gh-log-section ${hasError?'has-error':''}`}>
+            <button className="gh-log-section__bar" onClick={()=>setOpenSections(v=>({...v,[section.id]:!v[section.id]}))}><span>{isOpen?'▼':'▶'} {section.title}</span><small>{section.lines.length} linhas{hasError?' · erro':''}</small></button>
+            {isOpen && <div className="gh-log-section__body">{(order==='desc'?[...section.lines].reverse():section.lines).slice(0,500).map(l=>{const m=logKindMeta(l.kind);return <div key={l.index} className={`gh-log-line2 ${m.cls}`}><time>{l.compactTime||'--:--:--'}</time><span>{m.icon}</span><code>{l.body || ' '}</code></div>})}<div className="gh-log-copy-actions"><DSBtn size="sm" variant="ghost" onClick={()=>copy(section.lines.map(l=>l.raw).join('\n'),'Etapa copiada.')}>Copiar etapa</DSBtn></div></div>}
+          </div>
+        })}</div>
+      ) : (
+        <div className="gh-log-full">
+          <div className="gh-log-window-note">Mostrando {shown.length} de {ordered.length} linhas {order==='desc'?'mais recentes':'mais antigas'}.</div>
+          {shown.map(l=>{const m=logKindMeta(l.kind);return <div key={l.index} className={`gh-log-line2 ${m.cls}`} title={l.timestamp || undefined}><time>{l.compactTime||'--:--:--'}</time><span>{m.icon}</span><code>{l.body || ' '}</code></div>})}
+          {visible < ordered.length && <button className="gh-log-load" onClick={()=>setVisible(v=>v+500)}>Carregar mais 500 linhas</button>}
+        </div>
+      )}
+
+      <div className="gh-log-footer-actions">
+        <DSBtn size="sm" variant="primary" onClick={()=>copy(buildErrorCopy(parsed,job),'Erro copiado.')} disabled={!parsed.errors.length}>Copiar erro</DSBtn>
+        <DSBtn size="sm" variant="ghost" onClick={()=>copy(text,'Log completo copiado.')}>Copiar log completo</DSBtn>
+      </div>
+    </div>
+  </DSModal>
+}
+
 /* ── ABA: Workflows ──────────────────────────────────────── */
 function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   const [wfSel, setWfSel]       = useState(null)
@@ -1793,8 +1942,8 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   const [runAberto, setRunAberto] = useState(null)
   const [jobs, setJobs]         = useState(null)
   const [loadJobs, setLoadJobs] = useState(false)
-  const [jobLogAberto, setJobLogAberto] = useState(null)
-  const [logTexto, setLogTexto] = useState(null)
+  const [logModal, setLogModal] = useState(null)
+  const [logTexto, setLogTexto] = useState('')
   const [loadLog, setLoadLog]   = useState(false)
   const [artifactsCache, setArtifactsCache] = useState(null)
   const [analiseModal, setAnaliseModal] = useState(null)
@@ -1803,296 +1952,75 @@ function AbaWorkflows({ workflows, owner, repo, toastShow }) {
   const [analiseCancelando, setAnaliseCancelando] = useState(false)
 
   async function selecionarWorkflow(wf) {
-    setWfSel(wf); setRuns(null); setRunAberto(null); setJobs(null); setArtifactsCache(null)
+    setWfSel(wf); setRuns(null); setRunAberto(null); setJobs(null); setArtifactsCache(null); setLogModal(null)
     setLoadRuns(true)
     try { const d = await githubService.runs(owner, repo, wf.id); setRuns(d.runs || []) }
-    catch (e) { toastShow('Erro ao carregar runs: ' + e.message, 'erro') }
+    catch (e) { toastShow('Erro ao carregar execuções: ' + e.message, 'erro') }
     finally   { setLoadRuns(false) }
   }
 
-  async function abrirLogDoJob(job) {
+  async function carregarLog(run, job) {
     if (!job?.id) return
-    setJobLogAberto(job.id)
-    setLoadLog(true)
-    setLogTexto(null)
-    try {
-      const texto = await githubService.jobLogs(job.id, owner, repo)
-      setLogTexto(texto)
-    } catch (e) {
-      setLogTexto(`Erro ao carregar log: ${e.message}`)
-    } finally {
-      setLoadLog(false)
-    }
+    setLogModal({ run, job }); setLoadLog(true); setLogTexto('')
+    try { setLogTexto(await githubService.jobLogs(job.id, owner, repo)) }
+    catch (e) { setLogTexto(`##[error]Erro ao carregar log: ${e.message}`) }
+    finally { setLoadLog(false) }
   }
 
   async function abrirRun(run, options = {}) {
     const { openFirstLog = false } = options
-    setRunAberto(run); setJobs(null); setJobLogAberto(null); setLogTexto(null)
+    setRunAberto(run); setJobs(null)
     if (!run?.id) return
     setLoadJobs(true)
-    const [jobsP, artsP] = [
-      githubService.jobs(run.id, owner, repo),
-      artifactsCache === null ? githubService.artifacts(owner, repo) : Promise.resolve(null),
-    ]
+    const [jobsP, artsP] = [githubService.jobs(run.id, owner, repo), artifactsCache === null ? githubService.artifacts(owner, repo) : Promise.resolve(null)]
     try {
       const d = await jobsP
       const list = d.jobs || []
       setJobs(list)
       if (openFirstLog && list.length > 0) {
-        const preferido = list.find(job => ['failure', 'failed'].includes(job.conclusao) || ['failure', 'failed'].includes(job.status)) || list[0]
-        await abrirLogDoJob(preferido)
+        const preferido = list.find(j => ['failure','failed'].includes(j.conclusao) || ['failure','failed'].includes(j.status)) || list[0]
+        await carregarLog(run, preferido)
       }
-    }
-    catch (e) { toastShow('Erro ao carregar jobs: ' + e.message, 'erro') }
-    finally   { setLoadJobs(false) }
+    } catch (e) { toastShow('Erro ao carregar jobs: ' + e.message, 'erro') }
+    finally { setLoadJobs(false) }
     if (artifactsCache === null) artsP.then(d => setArtifactsCache(d?.artifacts || [])).catch(() => setArtifactsCache([]))
   }
 
-  function fecharRun() { setRunAberto(null); setJobs(null); setJobLogAberto(null); setLogTexto(null) }
-
-  async function verLog(job) {
-    if (job.id === jobLogAberto) {
-      setJobLogAberto(null)
-      setLogTexto(null)
-      return
-    }
-    await abrirLogDoJob(job)
-  }
-
-  async function abrirLogsDaRun(run) {
-    await abrirRun(run, { openFirstLog: true })
-  }
-
+  function fecharRun(){ setRunAberto(null);setJobs(null) }
   async function analisarRun(run) {
-    const titulo = 'Resumo da execução'
-    setAnaliseModal({ run, modo: 'resumo', titulo })
-    setAnaliseDados(null); setAnaliseLoad(true)
-    try {
-      const d = await githubService.analyzeRun(run.id, owner, repo, 'resumo', wfSel?.nome || '', job=>setAnaliseDados({job:true,id:job.id,progress:job.progress||0,message:job.message||'Processando',status:job.status}))
-      setAnaliseDados(d)
-    } catch (e) {
-      setAnaliseDados({ erro: e.code==='AI_JOB_CANCELLED'?'Resumo cancelado.':(e.message || 'Falha ao gerar o resumo da execução.') })
-    } finally { setAnaliseLoad(false); setAnaliseCancelando(false) }
+    setAnaliseModal({ run, modo:'resumo', titulo:'Resumo da execução' }); setAnaliseDados(null); setAnaliseLoad(true)
+    try { setAnaliseDados(await githubService.analyzeRun(run.id, owner, repo, 'resumo', wfSel?.nome || '', job=>setAnaliseDados({job:true,id:job.id,progress:job.progress||0,message:job.message||'Processando',status:job.status}))) }
+    catch(e){ setAnaliseDados({erro:e.code==='AI_JOB_CANCELLED'?'Resumo cancelado.':(e.message||'Falha ao gerar o resumo da execução.')}) }
+    finally { setAnaliseLoad(false);setAnaliseCancelando(false) }
   }
+  async function cancelarAnalise(){ const id=analiseDados?.id;if(!id||analiseCancelando)return;setAnaliseCancelando(true);try{await githubService.cancelAiJob(id);setAnaliseDados(d=>({...d,job:true,status:'cancelled',message:'Cancelando resumo…'}))}catch(e){toastShow('Não foi possível cancelar: '+e.message,'erro');setAnaliseCancelando(false)} }
 
-  async function cancelarAnalise(){
-    const id=analiseDados?.id
-    if(!id||analiseCancelando)return
-    setAnaliseCancelando(true)
-    try{await githubService.cancelAiJob(id);setAnaliseDados(d=>({...d,job:true,status:'cancelled',message:'Cancelando resumo…'}))}
-    catch(e){toastShow('Não foi possível cancelar: '+e.message,'erro');setAnaliseCancelando(false)}
-  }
+  if (!workflows) return <div style={{fontSize:FONT.base,color:C.muted}}>Carregando...</div>
+  if (!workflows.length) return <div style={{fontSize:FONT.base,color:C.muted}}>Nenhum workflow encontrado. Crie arquivos <code>.github/workflows/*.yml</code> no repositório.</div>
 
-  if (!workflows) return <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando...</div>
-  if (workflows.length === 0) return (
-    <div style={{ fontSize: FONT.base, color: C.muted }}>
-      Nenhum workflow encontrado. Crie arquivos <code>.github/workflows/*.yml</code> no repositório.
-    </div>
-  )
+  return <div>
+    <DSSectionTitle style={{marginBottom:SPACE.lg}}>Workflows ({workflows.length})</DSSectionTitle>
+    <div style={{display:'grid',gap:SPACE.sm,marginBottom:SPACE.xl3}}>{workflows.map(wf=>{const ativo=wf.estado==='active';return <button key={wf.id} onClick={()=>selecionarWorkflow(wf)} style={{background:wfSel?.id===wf.id?`${C.accent}18`:C.surface,border:`1px solid ${wfSel?.id===wf.id?C.accent:C.border}`,borderRadius:RADIUS.md,padding:`${SPACE.md+2}px 14px`,cursor:'pointer',textAlign:'left',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}><div><div style={{fontSize:FONT.base,fontWeight:700,color:C.text}}>⚙ {wf.nome}</div><div style={{fontSize:FONT.xs,color:C.muted,marginTop:2}}>{wf.arquivo}</div></div><DSBadge variant={ativo?'green':'amber'}>{runStatusLabel(wf.estado)}</DSBadge></button>})}</div>
 
-  return (
-    <div>
-      <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Workflows ({workflows.length})</DSSectionTitle>
-      <div style={{ display: 'grid', gap: SPACE.sm, marginBottom: SPACE.xl3 }}>
-        {workflows.map(wf => {
-          const ativo = wf.estado === 'active'
-          return (
-            <button key={wf.id} onClick={() => selecionarWorkflow(wf)} style={{
-              background: wfSel?.id === wf.id ? `${C.accent}18` : C.surface,
-              border: `1px solid ${wfSel?.id === wf.id ? C.accent : C.border}`,
-              borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px 14px`, cursor: 'pointer', textAlign: 'left',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <div>
-                <div style={{ fontSize: FONT.base, fontWeight: 700, color: C.text }}>⚙ {wf.nome}</div>
-                <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 2 }}>{wf.arquivo}</div>
-              </div>
-              <DSBadge variant={ativo ? 'green' : 'amber'}>{runStatusLabel(wf.estado)}</DSBadge>
-            </button>
-          )
-        })}
-      </div>
+    {wfSel && <><DSSectionTitle style={{marginBottom:SPACE.lg}}>Execuções — {wfSel.nome}</DSSectionTitle>
+      {loadRuns?<div style={{fontSize:FONT.base,color:C.muted}}>Carregando execuções...</div>:runs?.length===0?<div style={{fontSize:FONT.base,color:C.muted}}>Nenhuma execução encontrada.</div>:runs?<div className="gh-run-list">{runs.map(run=>{const cor=STATUS_RUN_COR[run.conclusao||run.status]||C.muted,isAberto=runAberto?.id===run.id;return <div key={run.id}>
+        <div className="gh-run-card gh-run-card--compact" style={{background:C.surface,border:`1px solid ${isAberto?cor:C.border}`}}>
+          <div className="gh-run-main"><div className="gh-run-title"><RunBadge status={run.status} conclusao={run.conclusao}/><span>{run.mensagem||run.nome}</span></div><div className="gh-run-meta"><span>{run.branch}</span>{run.sha&&<span>#{run.sha}</span>}<span>{relTime(run.criadoEm)}</span>{run.duracaoMs>0&&<span>{fmtDuracao(run.duracaoMs)}</span>}</div></div>
+          <div className="gh-run-actions gh-run-actions--tabs"><DSBtn size="sm" variant="primary" onClick={()=>analisarRun(run)}>Resumo</DSBtn><DSBtn size="sm" onClick={()=>isAberto?fecharRun():abrirRun(run)}>{isAberto?'Fechar Jobs':'Jobs'}</DSBtn><DSBtn size="sm" onClick={()=>abrirRun(run,{openFirstLog:true})}>Log</DSBtn></div>
+        </div>
+        {isAberto&&<div className="gh-jobs-list">{loadJobs?<div className="gh-log-empty">Carregando jobs...</div>:jobs?.map(job=>{const dur=job.fimEm&&job.inicioEm?fmtDuracao(new Date(job.fimEm)-new Date(job.inicioEm)):'—';const falha=(job.steps||[]).find(st=>['failure','failed'].includes(st.conclusao||st.status));return <div className="gh-job-row" key={job.id}><div className="gh-job-row__main"><RunBadge status={job.status} conclusao={job.conclusao}/><b>{job.nome}</b><span>· {dur}</span><small>{plural((job.steps||[]).length,'etapa')}{falha?` · falhou em ${falha.nome}`:''}</small></div><div className="gh-job-row__actions"><DSBtn size="sm" variant="ghost" onClick={()=>carregarLog(run,job)}>Log</DSBtn></div></div>})}
+          {artifactsCache!==null&&(()=>{const arts=artifactsCache.filter(a=>a.workflowRunId===run.id&&!a.expirado);if(!arts.length)return null;return <div className="gh-run-artifacts"><div><b>Artefatos desta execução</b><DSBtn size="sm" variant="ghost" onClick={()=>githubService.baixarLogs(run.id,owner,repo).then(()=>toastShow?.('Download dos logs iniciado.','ok')).catch(e=>toastShow?.(e.message||'Falha ao baixar logs.','erro'))}>Baixar ZIP de logs</DSBtn></div><div>{arts.map(a=>{const isApk=ehArtefatoApk(a);return <button key={a.id} type="button" onClick={()=>githubService.baixarArtifact(a.id,owner,repo,a.nome,{preferApk:isApk}).then(r=>toastShow?.(`${isApk?'APK':'Download'} iniciado${r?.filename?`: ${r.filename}`:'.'}`,'ok')).catch(e=>toastShow?.(e.message||'Falha ao baixar artefato.','erro'))} title={`${fmtBytes(a.tamanho)} · criado ${relTime(a.criadoEm)}`}>{isApk?'📱':'📦'} {isApk?'Baixar APK':a.nome}</button>})}</div></div>})()}
+        </div>}
+      </div>})}</div>:null}</>}
 
-      {wfSel && (
-        <>
-          <DSSectionTitle style={{ marginBottom: SPACE.lg }}>Execuções — {wfSel.nome}</DSSectionTitle>
-          {loadRuns ? (
-            <div style={{ fontSize: FONT.base, color: C.muted }}>Carregando execuções...</div>
-          ) : runs && runs.length === 0 ? (
-            <div style={{ fontSize: FONT.base, color: C.muted }}>Nenhuma execução encontrada.</div>
-          ) : runs ? (
-            <div className="gh-run-list">
-              {runs.map(run => {
-                const cor      = STATUS_RUN_COR[run.conclusao || run.status] || C.muted
-                const isAberto = runAberto?.id === run.id
-                return (
-                  <div key={run.id}>
-                    <div className="gh-run-card" style={{
-                      background: C.surface, border: `1px solid ${isAberto ? cor : C.border}`,
-                      borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px 14px`,
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: SPACE.md + 2,
-                    }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: FONT.base, fontWeight: 700, color: C.text, display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap' }}>
-                          <RunBadge status={run.status} conclusao={run.conclusao} />
-                          <span style={{ wordBreak: 'break-word' }}>{run.mensagem || run.nome}</span>
-                        </div>
-                        <div style={{ fontSize: FONT.xs, color: C.muted, marginTop: 3, display: 'flex', gap: SPACE.md, flexWrap: 'wrap' }}>
-                          <span>🌿 {run.branch}</span>
-                          {run.sha && <span>#{run.sha}</span>}
-                          <span>{relTime(run.criadoEm)}</span>
-                          {run.duracaoMs > 0 && <span>⏱ {fmtDuracao(run.duracaoMs)}</span>}
-                        </div>
-                      </div>
-                      <div className="gh-run-actions" style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                        gap: SPACE.sm,
-                        flexShrink: 0,
-                        width: 'min(100%, 330px)',
-                      }}>
-                        <DSBtn size="sm" variant="primary" style={{ width: '100%', justifyContent: 'center', minHeight: 34 }} onClick={() => analisarRun(run)}>Resumo</DSBtn>
-                        <DSBtn size="sm" style={{ width: '100%', justifyContent: 'center', minHeight: 34 }} onClick={() => isAberto ? fecharRun() : abrirRun(run)}>
-                          {isAberto ? 'Fechar jobs' : 'Jobs'}
-                        </DSBtn>
-                        <DSBtn size="sm" style={{ width: '100%', justifyContent: 'center', minHeight: 34 }} onClick={() => abrirLogsDaRun(run)}>
-                          Log
-                        </DSBtn>
-                      </div>
-                    </div>
+    <WorkflowLogModal open={!!logModal} onClose={()=>setLogModal(null)} run={logModal?.run} job={logModal?.job} text={logTexto} loading={loadLog} toastShow={toastShow}/>
 
-                    {isAberto && (
-                      <div style={{ marginLeft: SPACE.lg, marginTop: SPACE.xs, display: 'grid', gap: SPACE.xs }}>
-                        {loadJobs ? (
-                          <div style={{ fontSize: FONT.sm, color: C.muted, padding: `${SPACE.md}px 0` }}>Carregando jobs...</div>
-                        ) : jobs?.map(job => {
-                          const jcor     = STATUS_RUN_COR[job.conclusao || job.status] || C.muted
-                          const logAberto = jobLogAberto === job.id
-                          return (
-                            <div key={job.id}>
-                              <div style={{
-                                  background: C.bg, border: `1px solid ${logAberto ? jcor : C.border}`,
-                                  borderRadius: RADIUS.sm, padding: `${SPACE.md}px ${SPACE.lg}px`,
-                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap',
-                                }}>
-                                  <div style={{ minWidth: 0, flex: 1 }}>
-                                    <div style={{ fontSize: FONT.sm, fontWeight: 700, color: C.text, display: 'flex', gap: SPACE.sm, alignItems: 'center', flexWrap: 'wrap' }}>
-                                      <RunBadge status={job.status} conclusao={job.conclusao} />
-                                      <span style={{ wordBreak: 'break-word' }}>{job.nome}</span>
-                                    </div>
-                                    {job.fimEm && job.inicioEm && (
-                                      <div style={{ fontSize: FONT.xs, color: C.muted }}>⏱ {fmtDuracao(new Date(job.fimEm) - new Date(job.inicioEm))}</div>
-                                    )}
-                                  </div>
-                                  <div style={{ display:'flex', gap:SPACE.sm, flexWrap:'wrap', width:'100%', justifyContent:'flex-end' }}>
-                                    <DSBtn size="sm" style={{ minHeight: 38 }} onClick={() => verLog(job)}>{logAberto ? 'Fechar log' : 'Ver log'}</DSBtn>
-                                    <DSBtn size="sm" style={{ minHeight: 38 }} onClick={async () => {
-                                      try {
-                                        if (!navigator?.clipboard?.writeText) throw new Error('Clipboard indisponível')
-                                        await navigator.clipboard.writeText(logTexto || '')
-                                        toastShow?.('Log copiado.', 'ok')
-                                      } catch {
-                                        toastShow?.('Não foi possível copiar o log.', 'erro')
-                                      }
-                                    }} disabled={!logAberto || !logTexto}>Copiar</DSBtn>
-                                  </div>
-                                </div>
-
-                              {logAberto && (
-                                <div style={{
-                                  background: C.surf2, border: `1px solid ${jcor}35`,
-                                  borderRadius: `0 0 ${RADIUS.sm}px ${RADIUS.sm}px`, marginTop: -1,
-                                  padding: SPACE.lg, maxHeight: 360, overflowY: 'auto',
-                                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: FONT.xs, color: C.text,
-                                  lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                                }}>
-                                  {loadLog ? <span style={{ color: C.muted }}>Carregando log...</span>
-                                    : logTexto ? logTexto.split('\n').map((linha, i) => {
-                                        const lcor = /error|fail|✗/i.test(linha) ? C.red
-                                          : /success|passed|✓/i.test(linha) ? C.greenSolid
-                                          : /warning|warn/i.test(linha) ? C.amber : C.text
-                                        return <div key={i} style={{ color: lcor, padding: '2px 0' }}>{linha || '\u00a0'}</div>
-                                      })
-                                    : <span style={{ color: C.muted }}>Log vazio.</span>}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-
-                        {(() => {
-                          if (artifactsCache === null) return null
-                          const arts = artifactsCache.filter(a => a.workflowRunId === run.id && !a.expirado)
-                          if (arts.length === 0) return null
-                          return (
-                            <div style={{ marginTop: SPACE.sm, background: C.surface, border: `1px solid ${C.border}`, borderRadius: RADIUS.md, padding: `${SPACE.md + 2}px ${SPACE.lg}px` }}>
-                              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:SPACE.sm, flexWrap:'wrap', marginBottom: SPACE.md }}>
-                                <div style={{ fontSize: FONT.xs, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: .5 }}>📦 Artefatos desta execução</div>
-                                <DSBtn size="sm" onClick={() => githubService.baixarLogs(run.id, owner, repo)
-                                  .then(() => toastShow?.('Download dos logs iniciado.', 'ok'))
-                                  .catch(e => toastShow?.(e.message || 'Falha ao baixar logs.', 'erro'))}>Baixar ZIP de logs</DSBtn>
-                              </div>
-                              <div style={{ display: 'flex', gap: SPACE.sm, flexWrap: 'wrap' }}>
-                                {arts.map(a => {
-                                  const isApk = ehArtefatoApk(a)
-                                  return (
-                                    <button key={a.id} type="button"
-                                      onClick={() => githubService.baixarArtifact(a.id, owner, repo, a.nome, { preferApk: isApk })
-                                        .then(r => toastShow?.(`${isApk ? 'APK' : 'Download'} iniciado${r?.filename ? `: ${r.filename}` : '.'}`, 'ok'))
-                                        .catch(e => toastShow?.(e.message || 'Falha ao baixar artefato.', 'erro'))}
-                                      style={{
-                                        display: 'inline-flex', alignItems: 'center', gap: SPACE.sm,
-                                        fontSize: FONT.sm, fontWeight: 700, cursor: 'pointer',
-                                        color: isApk ? '#fff' : C.text,
-                                        background: isApk ? C.greenSolid : C.surf2,
-                                        border: `1px solid ${isApk ? C.greenSolid : C.border}`,
-                                        borderRadius: RADIUS.sm, padding: `${SPACE.xs + 1}px ${SPACE.lg}px`,
-                                        whiteSpace: 'nowrap',
-                                      }}
-                                      title={`${fmtBytes(a.tamanho)} · criado ${relTime(a.criadoEm)}`}>
-                                      {isApk ? '📱' : '📦'} ⬇ {isApk ? 'Baixar APK' : a.nome}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          )
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ) : null}
-        </>
-      )}
-
-      <DSModal open={!!analiseModal} onClose={() => setAnaliseModal(null)} title={analiseModal?.titulo || 'Execução'} size="lg">
-        {analiseLoad ? (
-          <div style={{ color: C.muted, fontSize: FONT.base, padding: `${SPACE.xl}px 0`, display:'grid', gap:10 }}>
-            <span>{analiseDados?.job ? analiseDados.message : 'Montando resumo da execução...'}</span>
-            {analiseDados?.job&&<div style={{height:8,borderRadius:999,background:C.surf2,overflow:'hidden'}}><div style={{height:'100%',width:`${analiseDados.progress||0}%`,background:C.accent,transition:'width .25s'}}/></div>}
-            {analiseDados?.job&&<small>{analiseDados.progress||0}% · você pode fechar este popup; o resultado fica persistido no backend.</small>}
-            {analiseDados?.job&&analiseDados?.id&&<div><DSBtn size="sm" variant="danger" onClick={cancelarAnalise} disabled={analiseCancelando}>{analiseCancelando?'Cancelando…':'Cancelar resumo'}</DSBtn></div>}
-          </div>
-        ) : analiseDados?.erro ? (
-          <div style={{ color: C.red, fontSize: FONT.base }}>{analiseDados.erro}</div>
-        ) : analiseDados ? (
-          <AnaliseWorkflowConteudo dados={analiseDados} modo={analiseModal?.modo} onCopy={async () => {
-            try {
-              if (!navigator?.clipboard?.writeText) throw new Error('Clipboard indisponível')
-              await navigator.clipboard.writeText(buildResumoTexto(analiseDados, analiseModal?.modo))
-              toastShow('Resumo copiado.')
-            } catch {
-              toastShow('Não foi possível copiar o resumo.', 'erro')
-            }
-          }} />
-        ) : null}
-      </DSModal>
-    </div>
-  )
+    <DSModal open={!!analiseModal} onClose={()=>setAnaliseModal(null)} title={analiseModal?.titulo||'Execução'} size="lg">
+      {analiseLoad?<div style={{color:C.muted,fontSize:FONT.base,padding:`${SPACE.xl}px 0`,display:'grid',gap:10}}><span>{analiseDados?.job?analiseDados.message:'Montando resumo da execução...'}</span>{analiseDados?.job&&<div style={{height:8,borderRadius:999,background:C.surf2,overflow:'hidden'}}><div style={{height:'100%',width:`${analiseDados.progress||0}%`,background:C.accent,transition:'width .25s'}}/></div>}{analiseDados?.job&&<small>{analiseDados.progress||0}% · você pode fechar este popup; o resultado fica persistido no backend.</small>}{analiseDados?.job&&analiseDados?.id&&<div><DSBtn size="sm" variant="danger" onClick={cancelarAnalise} disabled={analiseCancelando}>{analiseCancelando?'Cancelando…':'Cancelar resumo'}</DSBtn></div>}</div>:analiseDados?.erro?<div style={{color:C.red,fontSize:FONT.base}}>{analiseDados.erro}</div>:analiseDados?<AnaliseWorkflowConteudo dados={analiseDados} modo={analiseModal?.modo} onCopy={async()=>{try{await navigator.clipboard.writeText(buildResumoTexto(analiseDados,analiseModal?.modo));toastShow('Resumo copiado.')}catch{toastShow('Não foi possível copiar o resumo.','erro')}}}/>:null}
+    </DSModal>
+  </div>
 }
+
 
 function buildResumoTexto(dados, modo = 'resumo') {
   const r = dados?.resumo || {}

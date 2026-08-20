@@ -9,7 +9,7 @@
  *  - Ambiente e latência interna do backend
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate, Navigate, Link } from 'react-router-dom'
+import { useNavigate, Navigate, Link, useSearchParams } from 'react-router-dom'
 import {
   LayoutDashboard, Eye, EyeOff, LogIn,
   ChevronDown, ChevronUp, Clipboard, ClipboardCheck, RefreshCw,
@@ -74,8 +74,13 @@ export default function Login() {
   const { user, login, ensureSession } = useAuth()
   const { siteName, panelSubtitle, productName } = useBranding()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   useEffect(() => { ensureSession() }, [ensureSession])
+
+  useEffect(() => {
+    if (searchParams.get('motivo') === 'sessao') toast.error('Sua sessão expirou. Entre novamente.')
+  }, [searchParams])
 
   useEffect(() => {
     document.title = `Entrar | ${siteName}`
@@ -86,6 +91,7 @@ export default function Login() {
   const [senha, setSenha]          = useState('')
   const [mostrarSenha, setMostrar] = useState(false)
   const [loading, setLoading]      = useState(false)
+  const [manterConectado, setManterConectado] = useState(true)
 
   const [logEntries, setLogEntries]   = useState([])
   const [diagRunning, setDiagRunning] = useState(false)
@@ -424,7 +430,7 @@ export default function Login() {
     if (!email || !senha) { toast.error('Preencha email e senha'); return }
     try {
       setLoading(true)
-      await login(email, senha)
+      await login(email, senha, manterConectado)
       navigate('/admin')
     } catch (err) {
       toast.error(err.message || 'Falha ao entrar')
@@ -484,6 +490,16 @@ export default function Login() {
                 </button>
               </div>
             </div>
+
+            <label className="auth-remember">
+              <input
+                type="checkbox"
+                checked={manterConectado}
+                onChange={e => setManterConectado(e.target.checked)}
+                disabled={loading}
+              />
+              <span><b>Manter conectado</b><small>Sessão persistente; sua senha não é salva.</small></span>
+            </label>
 
             <button type="submit" disabled={loading} className="auth-submit">
               {loading ? <><span className="auth-spinner" /> Entrando...</> : <><LogIn size={16} /> Entrar</>}

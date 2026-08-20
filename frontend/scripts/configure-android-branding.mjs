@@ -198,8 +198,8 @@ public class ALDownloadManagerPlugin extends Plugin {
 `
 fs.writeFileSync(pluginPath, pluginJava)
 if (!mainJava.includes('registerPlugin(ALDownloadManagerPlugin.class)')) {
-  if (mainJava.includes('protected void onCreate')) {
-    mainJava = mainJava.replace(/(protected void onCreate\([^)]*\)\s*\{)/, '$1\n        registerPlugin(ALDownloadManagerPlugin.class);')
+  if (/\b(?:public|protected)\s+void\s+onCreate\s*\(/.test(mainJava)) {
+    mainJava = mainJava.replace(/((?:public|protected)\s+void\s+onCreate\([^)]*\)\s*\{)/, '$1\n        registerPlugin(ALDownloadManagerPlugin.class);')
   } else {
     const lastBrace = mainJava.lastIndexOf('}')
     if (lastBrace < 0) throw new Error('Estrutura de MainActivity.java inválida.')
@@ -216,3 +216,99 @@ if (!manifest.includes('android.permission.WRITE_EXTERNAL_STORAGE')) {
   fs.writeFileSync(manifestPath, manifest)
 }
 console.log('✓ Gerenciador Android integrado: Downloads/AL-Sistemas + progresso nativo')
+
+// ── Sessão nativa protegida ────────────────────────────────────────────────
+// Guarda apenas o token de sessão persistente do APK usando Android Keystore
+// + AES/GCM. A senha administrativa nunca é armazenada.
+const secureSessionPluginPath = path.join(path.dirname(mainActivityPath), 'ALSecureSessionPlugin.java')
+const secureSessionJava = `package ${packageName};
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+
+@CapacitorPlugin(name = "ALSecureSession")
+public class ALSecureSessionPlugin extends Plugin {
+  private static final String PREFS = "al_secure_session";
+  private static final String ALIAS = "al_sistemas_session_key";
+  private static final String TOKEN = "token";
+  private static final String IV = "iv";
+
+  private SharedPreferences prefs() {
+    return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+  }
+
+  private SecretKey getOrCreateKey() throws Exception {
+    KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+    ks.load(null);
+    if (ks.containsAlias(ALIAS)) return ((KeyStore.SecretKeyEntry) ks.getEntry(ALIAS, null)).getSecretKey();
+    KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+    kg.init(new KeyGenParameterSpec.Builder(ALIAS,
+      KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+      .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+      .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+      .setRandomizedEncryptionRequired(true)
+      .build());
+    return kg.generateKey();
+  }
+
+  @PluginMethod
+  public void set(PluginCall call) {
+    String value = call.getString("value");
+    if (value == null || value.isEmpty()) { remove(call); return; }
+    try {
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+      byte[] encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+      prefs().edit()
+        .putString(TOKEN, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+        .putString(IV, Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
+        .apply();
+      JSObject ret = new JSObject(); ret.put("ok", true); call.resolve(ret);
+    } catch (Exception e) { call.reject("Não foi possível proteger a sessão: " + e.getMessage(), e); }
+  }
+
+  @PluginMethod
+  public void get(PluginCall call) {
+    try {
+      String enc = prefs().getString(TOKEN, "");
+      String iv = prefs().getString(IV, "");
+      JSObject ret = new JSObject();
+      if (enc.isEmpty() || iv.isEmpty()) { ret.put("value", ""); call.resolve(ret); return; }
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), new GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)));
+      String value = new String(cipher.doFinal(Base64.decode(enc, Base64.NO_WRAP)), StandardCharsets.UTF_8);
+      ret.put("value", value); call.resolve(ret);
+    } catch (Exception e) {
+      prefs().edit().clear().apply();
+      JSObject ret = new JSObject(); ret.put("value", ""); call.resolve(ret);
+    }
+  }
+
+  @PluginMethod
+  public void remove(PluginCall call) {
+    prefs().edit().clear().apply();
+    JSObject ret = new JSObject(); ret.put("ok", true); call.resolve(ret);
+  }
+}
+`
+fs.writeFileSync(secureSessionPluginPath, secureSessionJava)
+if (!mainJava.includes('registerPlugin(ALSecureSessionPlugin.class)')) {
+  mainJava = fs.readFileSync(mainActivityPath, 'utf8')
+  mainJava = mainJava.replace('registerPlugin(ALDownloadManagerPlugin.class);', 'registerPlugin(ALDownloadManagerPlugin.class);\n        registerPlugin(ALSecureSessionPlugin.class);')
+  fs.writeFileSync(mainActivityPath, mainJava)
+}
+console.log('✓ Sessão persistente do APK protegida pelo Android Keystore')

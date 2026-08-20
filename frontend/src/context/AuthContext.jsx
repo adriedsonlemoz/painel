@@ -20,7 +20,7 @@ export function AuthProvider({ children }) {
     setLoading(true)
     checkingPromise.current = (async () => {
       try {
-        const { data } = await authService.getSession()
+        const { data } = await authService.getSession({ restore: true })
         const sessionUser = data?.session?.user ?? null
         setUser(sessionUser)
         setAuthTransport(data?.auth?.transport || (sessionUser ? 'cookie' : 'none'))
@@ -38,8 +38,8 @@ export function AuthProvider({ children }) {
     return checkingPromise.current
   }, [user])
 
-  async function login(email, senha) {
-    const { data, error } = await authService.login(email, senha)
+  async function login(email, senha, manterConectado = false) {
+    const { data, error } = await authService.login(email, senha, manterConectado)
     if (error) throw error
     checked.current = true
     setSessionChecked(true)

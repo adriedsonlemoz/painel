@@ -1,6 +1,6 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.141",
+  "version": "1.0.142",
   "packageFormat": 2,
   "changelog": [
     "Integra o ícone aprovado AL Sistemas ao PWA e ao APK Android.",

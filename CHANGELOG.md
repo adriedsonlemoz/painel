@@ -1,3 +1,15 @@
+# 1.0.142 — Workflows e sessão persistente segura
+
+- Logs de GitHub Actions agora abrem em modal dedicado, com padrão de mais recentes primeiro.
+- Nova leitura estruturada por Erros, Etapas e Log completo, preservando o conteúdo bruto.
+- Detecção de erros com contexto, seção automática, busca interna e cópia de erro/etapa/log.
+- Renderização progressiva do log completo em blocos de 500 linhas para reduzir travamentos no celular.
+- Jobs compactados com duração na mesma linha, quantidade de etapas e etapa que falhou quando disponível.
+- Resumo das execuções compactado e navegação Resumo | Jobs | Log mantida na mesma fileira.
+- Login administrativo ganhou “Manter conectado”, sem persistir senha.
+- Web prioriza cookie HttpOnly; no APK o fallback Bearer persistente é protegido com Android Keystore + AES/GCM.
+- Logout e sessão expirada removem também a sessão persistida do dispositivo.
+
 # 1.0.141 — GitHub, downloads, publicação e UX móvel
 
 - Corrige o vínculo do ID do DownloadManager Android e evita falsos estados de falha/conclusão.

@@ -1,26 +1,17 @@
-# Relatório de implementação — 1.0.141
+# Relatório de implementação — 1.0.142
 
-Esta versão consolida as correções e melhorias dos módulos GitHub, projetos, downloads, arquivos, workflows, secrets, R2 Storage e Home.
+## Workflows
 
-## Pontos críticos
+A visualização de logs foi movida para modal de tela ampla, especialmente no celular. O conteúdo é interpretado sem alterar o texto original: timestamps compactos, tipos de linha, grupos `##[group]` / `##[endgroup]`, erros e contexto. A aba Log completo renderiza no máximo 500 linhas por vez e permite carregar blocos seguintes, enquanto a cópia preserva o texto completo sanitizado.
 
-- ID do download nativo tratado como string entre Java e JavaScript, sem exigir entrada manual.
-- Estados de download separados em preparando, fila, progresso, pausado, segundo plano, concluído, falhou e cancelado.
-- Conclusão só é exibida quando o Android DownloadManager confirma `STATUS_SUCCESSFUL`.
-- O arquivo concluído pode ser aberto pelo plugin nativo e downloads ativos podem ser cancelados.
+A visualização Erros identifica indicadores comuns de GitHub Actions, npm, Gradle, Java e códigos de saída. A seção com falha é aberta automaticamente na visão Etapas. Jobs mostram status, nome e duração juntos, além da contagem de etapas e etapa falha quando disponível.
 
-## Dados de projeto
+## Sessão administrativa
 
-- Um detector central consulta manifests e configurações reais do repositório.
-- Nome, versão, tipo, framework, frontend, backend, plataforma e package manager são reutilizados no cabeçalho, cards, análise e nome do ZIP.
-- Ausência de versão permanece como ausência; não há versão inventada.
+O login passou a enviar a preferência `manter_conectado`. Quando desativada, o cookie do navegador é de sessão. Quando ativada, o backend mantém a sessão por até 7 dias. Em ambientes cross-origin que rejeitam cookies, o APK pode persistir apenas o Bearer de sessão através do plugin `ALSecureSession`, protegido por Android Keystore e AES/GCM. A senha nunca é armazenada.
 
-## Interface
+No navegador Web não é gravado Bearer persistente em localStorage; o mecanismo preferencial continua sendo cookie HttpOnly. Logout e respostas 401 limpam token temporário e token nativo persistente.
 
-- Home usa GitHub como fonte de projetos.
-- Lista de arquivos, Workflows, Secrets e R2 foram compactados com foco em mobile.
-- Publicação ganhou comparação de versão, produção detectada mais clara, acontecimentos recentes no topo e cópia sanitizada do resumo/log.
+## Compatibilidade
 
-## Critério de atividade
-
-Um repositório é considerado ativo quando não está arquivado e recebeu push nos últimos 90 dias.
+As rotas, funções de workflows, downloads, artefatos, análise por IA e autenticação existentes foram preservadas. O endpoint de log inline passou de 200 KB para teto defensivo de 4 MB para manter acesso ao log bruto, enquanto a interface controla a quantidade renderizada.

@@ -36,6 +36,7 @@ import sanitizeHtml     from 'sanitize-html'
 import multer           from 'multer'
 import JSZip            from 'jszip'
 import crypto           from 'node:crypto'
+import { Readable }      from 'node:stream'
 import { githubFetch, githubFetchText, GITHUB_API }  from '../utils/githubClient.js'
 import { getCredential } from '../utils/credentialStore.js'  // Sprint 6-B: utilitário centralizado
 import { storeProjectSnapshot, testR2UpdateStorage } from '../services/cloudUpdateStorage.js'
@@ -2242,10 +2243,13 @@ router.get('/jobs/:jobId/logs', autenticar, async (req, res) => {
       const body = await resp.text()
       return res.status(resp.status).json({ erro: body || `Erro ${resp.status}` })
     }
-    const texto = await resp.text()
-    // Limita a 200KB para não estourar o response
+    // Faz streaming do log bruto completo. A interface controla quantas linhas
+    // entram no DOM, portanto não precisamos cortar o conteúdo recebido.
     res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    res.send(texto.slice(0, 200 * 1024))
+    const len = resp.headers.get('content-length')
+    if (len) res.setHeader('Content-Length', len)
+    if (resp.body) Readable.fromWeb(resp.body).pipe(res)
+    else res.end('')
   } catch (err) {
     res.status(500).json({ erro: err.message })
   }

@@ -3,6 +3,10 @@
  * Gerencia cookie HttpOnly, fallback Bearer para frontend/backend em domínios
  * diferentes, redirecionamento 401, timeout e parse de erros.
  */
+import { Capacitor, registerPlugin } from '@capacitor/core'
+
+const NativeSecureSession = registerPlugin('ALSecureSession')
+
 export const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:3001/api' : '/api')
 
 // Base sem o sufixo /api — usado para montar URLs de download autenticado
@@ -26,6 +30,30 @@ export function setSessionToken(token = '', mode = '') {
 
 export function clearSessionToken() {
   setSessionToken('', '')
+}
+
+export async function persistSessionToken(token = '') {
+  if (!Capacitor.isNativePlatform()) return false
+  try {
+    if (token) await NativeSecureSession.set({ value: token })
+    else await NativeSecureSession.remove()
+    return true
+  } catch { return false }
+}
+
+export async function restorePersistentSession() {
+  if (!Capacitor.isNativePlatform()) return ''
+  try {
+    const data = await NativeSecureSession.get()
+    const token = String(data?.value || '')
+    if (token) setSessionToken(token, 'bearer-persistent-native')
+    return token
+  } catch { return '' }
+}
+
+export async function clearPersistentSession() {
+  if (!Capacitor.isNativePlatform()) return false
+  try { await NativeSecureSession.remove(); return true } catch { return false }
 }
 
 export function authMode() {
@@ -85,6 +113,7 @@ export async function api(path, options = {}) {
 
     if (res.status === 401 && !path.startsWith('/auth/')) {
       clearSessionToken()
+      await clearPersistentSession()
       if (window.location.pathname !== '/login') window.location.href = '/login?motivo=sessao'
       throw new Error('Sessão expirada. Faça login novamente.')
     }
