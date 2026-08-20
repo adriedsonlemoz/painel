@@ -1,3 +1,13 @@
+# Changelog
+
+## 1.0.139 — Ícone, Android e Home
+- Ícone aprovado “AL Sistemas” integrado aos assets PWA e ao build Android.
+- Workflow do APK passa a aplicar o ícone aprovado diretamente no app gerado.
+- Barra de status e navegação do Android alinhadas ao fundo principal do painel (`#f0ede8`).
+- Dashboard ganhou resumo compacto de projetos com total, ativos e acesso rápido a GitHub/APKs.
+- Toast de boas-vindas após login removido.
+- Tempos das notificações reduzidos: sucesso 3,5 s, informativas 4,5 s e erros 8 s.
+
 # 1.0.138
 
 - GitHub mostra **Baixar APK** diretamente no card do repositório; APKs publicados em **Releases** têm prioridade e o GitHub Actions é usado como fallback.

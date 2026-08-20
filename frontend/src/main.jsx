@@ -151,13 +151,13 @@ ReactDOM.createRoot(rootElement).render(
           containerStyle={{ top: 92, right: 12, left: 12 }}
           gutter={10}
           toastOptions={{
-            duration: 9000,
+            duration: 4500,
             success: {
-              duration: 7500,
+              duration: 3500,
               iconTheme: { primary: '#22c55e', secondary: '#fff' },
             },
             error: {
-              duration: 16000,
+              duration: 8000,
               iconTheme: { primary: '#ef4444', secondary: '#fff' },
             },
             loading: { duration: Infinity },

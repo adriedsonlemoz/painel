@@ -1,8 +1,12 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.138",
+  "version": "1.0.139",
   "packageFormat": 2,
   "changelog": [
+    "Integra o ícone aprovado AL Sistemas ao PWA e ao APK Android.",
+    "Ajusta barra de status, barra de navegação e fundo inicial do Android para acompanhar a cor principal do painel.",
+    "Adiciona ao Dashboard um resumo de projetos com total, projetos ativos e atalho direto para GitHub e APKs.",
+    "Remove a notificação Bem-vindo após o login e reduz a duração dos pop-ups de sucesso, informação e erro.",
     "GitHub detecta o APK de cada repositório e exibe Baixar APK diretamente no card; Releases têm prioridade e artefatos do GitHub Actions são usados como fallback.",
     "Reduz a altura dos cards da Central do Repositório no celular, mantendo três colunas e melhor aproveitamento vertical.",
     "Artefatos inteiros ficam clicáveis e mostram estados de conexão, preparação, abertura do download, sucesso e falha, evitando cliques sem retorno visual.",

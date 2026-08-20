@@ -122,6 +122,10 @@ jobs:
         env:
           CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
 
+      - name: 🎨 Aplicar identidade AL Sistemas no Android
+        run: node scripts/configure-android-branding.mjs
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: 🔑 Permissão gradlew
         run: chmod +x gradlew
         working-directory: ${{ env.WORKING_DIR }}/android
@@ -235,6 +239,10 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
         env:
           CAPACITOR_WEB_URL: ${{ vars.CAPACITOR_WEB_URL || 'https://paineliguanews.vercel.app' }}
+
+      - name: 🎨 Aplicar identidade AL Sistemas no Android
+        run: node scripts/configure-android-branding.mjs
+        working-directory: ${{ env.WORKING_DIR }}
 
       - name: 🔑 Permissão gradlew
         run: chmod +x gradlew

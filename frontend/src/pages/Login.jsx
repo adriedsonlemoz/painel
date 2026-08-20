@@ -425,7 +425,6 @@ export default function Login() {
     try {
       setLoading(true)
       await login(email, senha)
-      toast.success('Bem-vindo!')
       navigate('/admin')
     } catch (err) {
       toast.error(err.message || 'Falha ao entrar')
