@@ -71,6 +71,7 @@ export const infraestruturaService = {
   async renderServicos()         { return api('/admin/infraestrutura/plataformas/render/servicos') },
   async renderDeploys(svcId)     { return api(`/admin/infraestrutura/plataformas/render/servicos/${svcId}/deploys`) },
   async renderVariaveis(svcId)   { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env`) },
+  async renderRevelarVariavel(svcId, key) { return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env/${encodeURIComponent(key)}/reveal`, { method:'POST', body:'{}' }) },
   async renderSalvarVariavel(svcId, key, value, { deploy=false } = {}) {
     return api(`/admin/infraestrutura/plataformas/render/servicos/${encodeURIComponent(svcId)}/env/${encodeURIComponent(key)}`, {
       method:'PUT', body:JSON.stringify({value,deploy}),
@@ -121,6 +122,7 @@ export const infraestruturaService = {
   async vercelProjetos()         { return api('/admin/infraestrutura/plataformas/vercel/projetos') },
   async vercelDeploys(projId)    { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${projId}/deploys`) },
   async vercelVariaveis(projId)  { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env`) },
+  async vercelRevelarVariavel(projId, key, envId='') { return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env/${encodeURIComponent(key)}/reveal`, { method:'POST', body:JSON.stringify({envId}) }) },
   async vercelSalvarVariavel(projId, key, value, { envId='', target=['production'], sensitive=false, deploy=false } = {}) {
     return api(`/admin/infraestrutura/plataformas/vercel/projetos/${encodeURIComponent(projId)}/env/${encodeURIComponent(key)}`, {
       method:'PUT', body:JSON.stringify({value,envId,target,sensitive,deploy}),

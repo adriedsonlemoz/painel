@@ -1,26 +1,15 @@
-# 1.0.147 — Correção Vercel e confirmações personalizadas
+# 1.0.148 — Auditoria de APIs, credenciais e segredos
 
-- Corrigido redeploy da Vercel após alteração de variável: a criação do deployment agora envia o `name` obrigatório, descoberto automaticamente a partir do deployment quando necessário.
-- Mantido o fluxo da Render conforme a API oficial: variável por `PUT /env-vars/{key}` e deploy separado por `POST /deploys`.
-- Removidos os `window.confirm()`/`confirm()` nativos restantes das telas administrativas.
-- Adicionado diálogo global de confirmação usando o Design System do AL Sistemas, responsivo e compatível com tema/mobile.
-- Ações destrutivas ou sensíveis agora exibem títulos e rótulos contextualizados (Excluir, Revogar, Purgar, Rollback, Salvar e publicar etc.).
-- Versão sincronizada em 1.0.147.
-
-# 1.0.146 — R2 Storage completo, compartilhamento e responsividade
-
-- Corrige o estouro de layout no módulo Cloudflare/R2 em celular: nomes longos de conta/e-mail, cards, estatísticas, toolbars e ações agora respeitam a largura disponível, com truncamento/quebra responsiva.
-- Explorer R2 ganha exclusão segura de pastas lógicas (prefixos), com nome da pasta, contagem/tamanho, confirmação digitada e bloqueio preventivo acima de 10.000 objetos por operação de pasta.
-- Adiciona copiar/mover pastas, copiar arquivo, mover/renomear, seleção múltipla para excluir/mover/copiar e ações compactas com `AdminIcon`, tooltip e `aria-label`.
-- Adiciona compartilhamento de arquivo por link temporário revogável; o token é aleatório e somente seu hash fica no MongoDB, sem expor API Token, Access Key ID ou Secret Access Key.
-- Quando o bucket possui domínio público ativo, também oferece link permanente e deixa explícita a diferença entre acesso público e temporário.
-- Adiciona copiar link rápido: usa link público quando existe; em bucket privado cria um link temporário revogável de 1 hora.
-- Detalhes de objeto passam a mostrar e copiar nome, tipo, tamanho, caminho, bucket, data, ETag, Cache-Control, classe, acesso e link público; Content-Type/Cache-Control podem ser atualizados.
-- Nova área **Configurações do bucket** com dados gerais, classe Standard/Infrequent Access, controle `r2.dev`, custom domains, CORS, uso e capacidades realmente detectadas.
-- Upload preferencial passa a ser direto navegador → R2 por URL PUT temporária, com progresso, velocidade, cancelar e tentar novamente; fallback antigo pelo backend é preservado para arquivos de até 50 MB.
-- Pesquisa e ordenação por nome, data, tamanho e tipo foram adicionadas à pasta carregada; a UI informa quando ainda existem páginas não carregadas.
-- Documenta a divisão entre Cloudflare REST API e S3-compatible API, permissões necessárias e limitações deliberadas em `docs/R2_ADMIN_CAPABILITIES.md`.
-- Versão sincronizada em **1.0.146**.
+- Auditoria completa documentada em `CREDENTIAL_AUDIT.md`.
+- Revelação individual e sob demanda das credenciais que o backend realmente consegue recuperar.
+- Copiar credencial com feedback `Copiado`, sem `alert()` nativo.
+- Inventário de segredos de sistema vindos do ambiente do backend.
+- Vercel/Render: origem, disponibilidade real do valor e revelação individual consultando o provedor.
+- Mensagem explícita quando o provedor não devolve o segredo original.
+- Responsividade reforçada para tokens/valores longos no Android.
+- Diálogos nativos administrativos remanescentes migrados para confirmação personalizada (`ConfirmModal`/`confirmAction`).
+- Respostas de revelação com `Cache-Control: no-store`; auditoria não registra valores secretos.
+- Observação de origem: o ZIP recebido declara internamente 1.0.145; alterações foram aplicadas diretamente nele, sem rebase em outra cópia.
 
 # 1.0.145 — Variáveis de ambiente via API
 

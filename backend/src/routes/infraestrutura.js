@@ -1009,20 +1009,6 @@ async function vercelApi(token,pathName,teamId='',{method='GET',body=null}={}) {
   return payload
 }
 
-async function redeployVercel(token,teamId,deploymentId,projectName='') {
-  const id=String(deploymentId||'').trim()
-  if(!id)throw new Error('Vercel: deployment inválido para redeploy.')
-  let name=String(projectName||'').trim()
-  if(!name){
-    try {
-      const source=await vercelApi(token,`/v13/deployments/${encodeURIComponent(id)}`,teamId)
-      name=String(source?.name||source?.project?.name||source?.projectName||'').trim()
-    } catch {}
-  }
-  if(!name)throw new Error('Vercel: não foi possível identificar o nome do projeto para o redeploy.')
-  return vercelApi(token,'/v13/deployments',teamId,{method:'POST',body:{name,deploymentId:id,target:'production'}})
-}
-
 function maskSecretValue(value='') {
   const v=String(value??'')
   if(!v)return '••••••••'
@@ -1039,6 +1025,8 @@ async function smartRenderEnv(apiKey,serviceId) {
       key:item.key||item.name||'',
       valueMasked:maskSecretValue(item.value),
       configured:item.value!==undefined&&item.value!==null,
+      valueAvailable:item.value!==undefined&&item.value!==null && !/^[*•]+$/.test(String(item.value)),
+      origin:'Render', updatedAt:item.updatedAt||item.updated_at||null,
     }
   }).filter(x=>x.key)
 }
@@ -1052,6 +1040,8 @@ async function smartVercelEnv(token,teamId,projectId) {
     type:item.type||'encrypted',
     gitBranch:item.gitBranch||null,
     valueMasked:item.value?maskSecretValue(item.value):'protegida',
+    valueAvailable:Boolean(item.value)&&!/^[*•]+$/.test(String(item.value)),
+    origin:'Vercel', updatedAt:item.updatedAt||item.updated_at||item.createdAt||null,
   })).filter(x=>x.key)
 }
 
@@ -1572,6 +1562,18 @@ router.get('/plataformas/render/servicos/:serviceId/env', async (req,res,next)=>
   } catch(err){next(err)}
 })
 
+router.post('/plataformas/render/servicos/:serviceId/env/:key/reveal', async(req,res,next)=>{
+  try{
+    const cred=await getCredential('render','RENDER_API_KEY'); if(!cred.value)return res.status(409).json({erro:'Render não conectada.'})
+    const key=String(req.params.key||'').trim(); const env=await smartRenderEnv(cred.value,req.params.serviceId); const item=env.find(x=>x.key===key)
+    if(!item)return res.status(404).json({erro:'Variável não encontrada na Render.'})
+    const raw=await renderApi(cred.value,`/v1/services/${encodeURIComponent(req.params.serviceId)}/env-vars?limit=100`)
+    const rows=Array.isArray(raw)?raw:(raw?.envVars||[]); const found=rows.map(r=>r?.envVar||r||{}).find(x=>(x.key||x.name)===key); const value=found?.value
+    if(value===undefined||value===null||/^[*•]+$/.test(String(value)))return res.status(409).json({erro:'A Render não disponibilizou o valor original desta variável pela API. Substitua o valor para atualizá-la.'})
+    res.set('Cache-Control','no-store, private');res.json({ok:true,value:String(value),source:'Render',updatedAt:found?.updatedAt||found?.updated_at||null})
+  }catch(err){next(err)}
+})
+
 router.put('/plataformas/render/servicos/:serviceId/env/:key', async (req,res,next)=>{
   try {
     const cred=await getCredential('render','RENDER_API_KEY')
@@ -1697,6 +1699,17 @@ router.get('/plataformas/vercel/projetos/:projectId/env', async (req,res,next)=>
   } catch(err){next(err)}
 })
 
+router.post('/plataformas/vercel/projetos/:projectId/env/:key/reveal', async(req,res,next)=>{
+  try{
+    const cred=await getCredential('vercel','VERCEL_TOKEN'); if(!cred.value)return res.status(409).json({erro:'Vercel não conectada.'})
+    const projectId=String(req.params.projectId||'').trim(), key=String(req.params.key||'').trim(), envId=String(req.body?.envId||'').trim(), teamId=cred.metadata?.teamId||''
+    const data=await vercelApi(cred.value,`/v9/projects/${encodeURIComponent(projectId)}/env`,teamId); const rows=data?.envs||data?.env||[]; const found=rows.find(x=>(envId&&x.id===envId)||(!envId&&x.key===key)); const value=found?.value
+    if(!found)return res.status(404).json({erro:'Variável não encontrada na Vercel.'})
+    if(!value||/^[*•]+$/.test(String(value)))return res.status(409).json({erro:'A Vercel não disponibilizou o valor original desta variável pela API. Substitua o valor para atualizá-la.'})
+    res.set('Cache-Control','no-store, private');res.json({ok:true,value:String(value),source:'Vercel',updatedAt:found?.updatedAt||found?.createdAt||null})
+  }catch(err){next(err)}
+})
+
 router.put('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res,next)=>{
   try {
     const cred=await getCredential('vercel','VERCEL_TOKEN')
@@ -1727,7 +1740,7 @@ router.put('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res,ne
     let deploy=null
     if(deployAfter){
       const latest=(await smartVercelDeploys(cred.value,teamId,projectId,1))[0]
-      if(latest?.id)deploy=await redeployVercel(cred.value,teamId,latest.id,latest?.name||latest?.projectName||'')
+      if(latest?.id)deploy=await vercelApi(cred.value,'/v13/deployments',teamId,{method:'POST',body:{deploymentId:latest.id}})
     }
     res.json({ok:true,key,id:saved?.id||saved?.created?.id||envId||null,valueMasked:maskSecretValue(value),target,type:envType,deploy,
       mensagem:deployAfter?(deploy?`${key} salva e redeploy iniciado na Vercel.`:`${key} salva na Vercel; não havia deployment para refazer.`):`${key} salva na Vercel. Faça um novo deploy para aplicar a mudança.`,
@@ -1778,7 +1791,7 @@ router.put('/plataformas/producao/env/:provider/:key', async (req,res,next)=>{
     if(existing?.id)await vercelApi(cred.value,`/v9/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(existing.id)}`,teamId,{method:'PATCH',body:{key,value,target:['production'],type:'encrypted'}})
     else await vercelApi(cred.value,`/v10/projects/${encodeURIComponent(projectId)}/env`,teamId,{method:'POST',body:{key,value,target:['production'],type:'encrypted'}})
     let deploy=null
-    if(deployAfter){const latest=(await smartVercelDeploys(cred.value,teamId,projectId,1))[0];if(latest?.id)deploy=await redeployVercel(cred.value,teamId,latest.id,latest?.name||latest?.projectName||'')}
+    if(deployAfter){const latest=(await smartVercelDeploys(cred.value,teamId,projectId,1))[0];if(latest?.id)deploy=await vercelApi(cred.value,'/v13/deployments',teamId,{method:'POST',body:{deploymentId:latest.id}})}
     res.json({ok:true,provider,key,targetId:projectId,deploy,mensagem:deployAfter?(deploy?`${key} aplicada no frontend principal e redeploy iniciado.`:`${key} aplicada na Vercel; não havia deployment para refazer.`):`${key} aplicada no frontend principal.`})
   } catch(err){next(err)}
 })
@@ -1798,8 +1811,10 @@ router.post('/plataformas/vercel/deploys/:deploymentId/redeploy', async (req,res
     if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
     const deploymentId=String(req.params.deploymentId||'').trim()
     if(!deploymentId)return res.status(400).json({erro:'Deployment Vercel inválido.'})
+    const body={deploymentId}
     const name=String(req.body?.name||'').trim()
-    const deploy=await redeployVercel(cred.value,cred.metadata?.teamId||'',deploymentId,name)
+    if(name)body.name=name
+    const deploy=await vercelApi(cred.value,'/v13/deployments',cred.metadata?.teamId||'',{method:'POST',body})
     res.status(201).json({
       ok:true,deploy,
       mensagem:'Redeploy iniciado na Vercel usando as configurações do deployment selecionado.',

@@ -16,6 +16,7 @@ const router = Router(); router.use(autenticar, verificarPermissao('configuracoe
 const MASK='••••••••••••••••'
 const EXPORT_MASK='****************'
 const defs = { github:'GITHUB_TOKEN', cloudinary:'CLOUDINARY', cloudflare:'CF_API_TOKEN', render:'RENDER_API_KEY', vercel:'VERCEL_TOKEN', gemini:'GEMINI_API_KEY', openrouter:'OPENROUTER_API_KEY', api_ninjas:'API_NINJAS_KEY', api_football:'API_FOOTBALL_KEY', resend:'RESEND_API_KEY' }
+const systemSecretDefs=['JWT_SECRET','CREDENTIALS_MASTER_KEY','REDIS_URL','METRICS_TOKEN','SETUP_TOKEN','AL_GITHUB_PUBLISH_TOKEN','ADMIN_SENHA']
 const safe = (d) => ({
   configured:Boolean(d?.value)||Boolean(d?.locked),
   usable:Boolean(d?.value),
@@ -51,6 +52,7 @@ router.get('/status', async (_req,res,next)=>{ try {
       persistentConfigPath:vaultPaths().dataDir,
     },
     integrations,
+    systemSecrets:systemSecretDefs.map(name=>({name,configured:Boolean(process.env[name]),masked:process.env[name]?MASK:'',source:process.env[name]?'environment':null,revealable:Boolean(process.env[name])})),
     vault:{ protected:true, localKey:!process.env.CREDENTIALS_MASTER_KEY, paths:Object.values(vaultPaths()).map(p=>p.split('/').pop()) }
   })
 } catch(e){next(e)} })
@@ -545,6 +547,47 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
   return rows
 }
 
+
+// Revelação sob demanda: nunca faz parte do /status e nunca é registrada em logs.
+router.post('/mongodb/reveal', async(req,res)=>{ try {
+  const b=readBootstrap(); const value=b.MONGO_URI||process.env.MONGO_URI||''
+  if(!value)return res.status(404).json({erro:'MongoDB não configurado.'})
+  await audit(req,'mongodb.revelar',{campo:'MONGO_URI',origem:b.MONGO_URI?'local-vault':'environment'})
+  res.set('Cache-Control','no-store, private'); res.set('Pragma','no-cache')
+  res.json({ok:true,value,label:'MONGO_URI',source:b.MONGO_URI?'local-vault':'environment'})
+} catch(e){res.status(400).json({erro:'Não foi possível recuperar a URI do MongoDB.'})} })
+
+router.post('/system-secret/reveal', async(req,res)=>{ try{
+  const name=String(req.body?.name||'').trim().toUpperCase()
+  if(!systemSecretDefs.includes(name))return res.status(404).json({erro:'Segredo de sistema inválido.'})
+  const value=process.env[name]||''; if(!value)return res.status(404).json({erro:'Segredo não configurado neste ambiente.'})
+  await audit(req,'system-secret.revelar',{campo:name,origem:'environment'})
+  res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,name,value,source:'environment'})
+ }catch{res.status(400).json({erro:'Não foi possível recuperar o segredo solicitado.'})} })
+
+router.post('/:id/reveal', async(req,res,next)=>{ try {
+  const {id}=req.params
+  if(!defs[id])return res.status(404).json({erro:'Integração inválida.'})
+  const field=String(req.body?.field||'secret')
+  const c=await getCredential(id,defs[id])
+  if(c.locked)return res.status(409).json({erro:'A credencial está protegida por uma chave de outra instalação e não pode ser revelada.'})
+  if(!c.value)return res.status(404).json({erro:'Credencial não configurada.'})
+  let value=c.value, label=defs[id]
+  if(id==='cloudinary'){
+    let x={};try{x=JSON.parse(c.value)}catch{x={apiSecret:c.value}}
+    const map={secret:['apiSecret','CLOUDINARY_API_SECRET'],apiKey:['apiKey','CLOUDINARY_API_KEY'],cloudName:['cloudName','CLOUDINARY_CLOUD_NAME']}
+    const pair=map[field]||map.secret; value=x[pair[0]]||c.metadata?.[pair[0]]||process.env[pair[1]]||''; label=pair[1]
+  } else if(id==='cloudflare'){
+    let x={};try{x=JSON.parse(c.value)}catch{x={apiToken:c.value}}
+    const map={secret:['apiToken','CF_API_TOKEN'],r2AccessKeyId:['r2AccessKeyId','CF_R2_ACCESS_KEY_ID'],r2SecretAccessKey:['r2SecretAccessKey','CF_R2_SECRET_ACCESS_KEY']}
+    const pair=map[field]||map.secret; value=x[pair[0]]||process.env[pair[1]]||''; label=pair[1]
+  }
+  if(!value)return res.status(404).json({erro:'Este valor não está cadastrado no cofre do AL Sistemas.'})
+  await audit(req,`${id}.revelar`,{campo:label,origem:c.source||'vault'})
+  res.set('Cache-Control','no-store, private')
+  res.set('Pragma','no-cache')
+  res.json({ok:true,value,label,source:c.source||'vault',updatedAt:c.updatedAt||null})
+} catch(e){next(e)} })
 
 router.post('/identities/refresh', async(req,res)=>{ try {
   const identities={}

@@ -9,7 +9,7 @@ import MarkdownEditor from '../../components/MarkdownEditor'
 import toast from 'react-hot-toast'
 import { authFetch } from '../../services/domains/http.js'
 
-import { confirmAction } from '../../utils/confirmAction'
+import { confirmAction } from '../../utils/confirmAction.js'
 function slugify(t) {
   return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
@@ -241,7 +241,7 @@ export default function AdminNoticiaForm() {
   }, [isEdicao, isDirty, form, id, noticia])
 
   async function restaurarRevisao(revisaoId) {
-    if (!await confirmAction('Restaurar esta versão? O estado atual será guardado no histórico antes da restauração.',{title:'Restaurar versão',confirmLabel:'Restaurar',variant:'warning'})) return
+    if (!await confirmAction('Restaurar esta versão? O estado atual será guardado no histórico antes da restauração.')) return
     try {
       const r = await authFetch(`${apiBase}/conteudo/noticias/${id}/restaurar/${revisaoId}`, { method: 'POST', credentials: 'include' })
       const d = await r.json().catch(() => ({}))

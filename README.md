@@ -22,12 +22,6 @@ Em **Admin → Projetos e Deploys → Variáveis**, o AL Sistemas pode listar, c
 
 No módulo **Cloudflare → R2**, a URL pública detectada do bucket padrão pode ser aplicada automaticamente como `CF_R2_PUBLIC_URL` na Vercel principal e disparar um redeploy, eliminando a cópia manual dessa configuração.
 
-## ☁️ R2 Storage avançado (1.0.146+)
-
-O módulo **Admin → Cloudflare / R2** funciona como gerenciador de objetos e configurações: buckets, pastas lógicas por prefixo, upload/download, copiar/mover/excluir, seleção múltipla, pesquisa/ordenação, metadados, links temporários revogáveis, acesso público, custom domains, CORS e classe de armazenamento. O layout foi reforçado para Android/celular e nomes longos de conta não podem mais expandir os cards além da viewport.
-
-Para reduzir carga do backend, uploads usam preferencialmente uma URL PUT temporária e limitada a um objeto, enviada diretamente ao R2. O compartilhamento de leitura privado **não expõe a URL S3 assinada**: usa um token opaco do AL, com expiração e revogação, e somente o hash é persistido. Veja a matriz técnica em `docs/R2_ADMIN_CAPABILITIES.md`.
-
 ## ✨ Funcionalidades
 
 - **Painel admin** com multi-tema (light, dark, ocean, rose)
@@ -344,3 +338,7 @@ Em **Admin → Cloudflare / R2 → R2 Storage**, ao selecionar **Usar no AL**, o
 
 A Central de Erros também permite copiar cada erro individualmente, incluindo mensagem, rota, dados técnicos e stack, sem precisar exportar o arquivo completo.
 
+
+
+## 🔐 Auditoria de credenciais (1.0.148+)
+A Central de Integrações mantém valores mascarados no carregamento e permite revelar/copiar individualmente somente quando o backend ou o provedor realmente disponibiliza o segredo. Consulte `CREDENTIAL_AUDIT.md` para o mapa de origens, limitações de Vercel/Render e regras de segurança.

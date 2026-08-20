@@ -193,10 +193,10 @@ export const cloudflareService = {
   },
 
   /** Cria um bucket R2 */
-  async criarBucket(name, locationHint = '', storageClass = 'Standard') {
+  async criarBucket(name, locationHint = '') {
     return api('/admin/cloudflare/r2/buckets', {
       method: 'POST',
-      body:   JSON.stringify({ name, locationHint, storageClass }),
+      body:   JSON.stringify({ name, locationHint }),
     })
   },
 
@@ -248,82 +248,5 @@ export const cloudflareService = {
   /** Uso de armazenamento R2 (todos os buckets) */
   async usageR2() {
     return api('/admin/cloudflare/r2/usage')
-  },
-
-  async configuracoesBucket(bucket) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/settings`)
-  },
-  async atualizarConfiguracoesBucket(bucket, payload) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/settings`, { method:'PATCH', body:JSON.stringify(payload) })
-  },
-  async corsBucket(bucket) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/cors`)
-  },
-  async salvarCorsBucket(bucket, rules) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/cors`, { method:'PUT', body:JSON.stringify({rules}) })
-  },
-  async removerCorsBucket(bucket) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/cors`, { method:'DELETE' })
-  },
-  async definirAcessoPublicoR2(bucket, enabled) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/public-access`, { method:'PUT', body:JSON.stringify({enabled}) })
-  },
-  async adicionarDominioR2(bucket, domain, opts={}) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/custom-domains`, { method:'POST', body:JSON.stringify({domain,...opts}) })
-  },
-  async atualizarDominioR2(bucket, domain, opts={}) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/custom-domains/${encodeURIComponent(domain)}`, { method:'PUT', body:JSON.stringify(opts) })
-  },
-  async removerDominioR2(bucket, domain) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/custom-domains/${encodeURIComponent(domain)}`, { method:'DELETE' })
-  },
-  async infoPasta(bucket,prefix) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/folder-info?prefix=${encodeURIComponent(prefix)}`)
-  },
-  async excluirPasta(bucket,prefix) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/folder`, { method:'DELETE', body:JSON.stringify({prefix}) })
-  },
-  async acaoPasta(bucket,action,from,to) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/folder-action`, { method:'POST', body:JSON.stringify({action,from,to}) })
-  },
-  async copiarObjeto(bucket,from,to) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/copy`, { method:'POST', body:JSON.stringify({from,to}) })
-  },
-  async acaoLote(bucket,action,keys,destination='') {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/batch-action`, { method:'POST', body:JSON.stringify({action,keys,destination}) })
-  },
-  async atualizarMetadadosObjeto(bucket,key,{contentType,cacheControl}) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/object-metadata`, { method:'PUT', body:JSON.stringify({key,contentType,cacheControl}) })
-  },
-  async prepararUploadDireto(bucket,prefix,file) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/presign-upload`, { method:'POST', body:JSON.stringify({prefix,name:file.name,size:file.size,contentType:file.type||'application/octet-stream'}) })
-  },
-  uploadDireto(prepared,file,{onProgress,onSpeed,signal}={}) {
-    return new Promise((resolve,reject)=>{
-      const xhr=new XMLHttpRequest()
-      let lastLoaded=0,lastAt=Date.now()
-      xhr.open('PUT',prepared.url)
-      Object.entries(prepared.headers||{}).forEach(([k,v])=>xhr.setRequestHeader(k,v))
-      const abort=()=>xhr.abort()
-      signal?.addEventListener?.('abort',abort,{once:true})
-      xhr.upload.onprogress=ev=>{
-        if(ev.lengthComputable)onProgress?.(Math.min(100,Math.round(ev.loaded/ev.total*100)))
-        const now=Date.now(),dt=(now-lastAt)/1000
-        if(dt>=.35){onSpeed?.((ev.loaded-lastLoaded)/Math.max(dt,.001));lastLoaded=ev.loaded;lastAt=now}
-      }
-      xhr.onerror=()=>reject(new Error('Falha no upload direto para o R2. Verifique CORS e conexão.'))
-      xhr.onabort=()=>reject(Object.assign(new Error('Upload cancelado.'),{code:'ABORTED'}))
-      xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve({ok:true,key:prepared.key}):reject(new Error(`R2 respondeu ${xhr.status}`))
-      xhr.send(file)
-    })
-  },
-  async criarCompartilhamento(bucket,key,{mode='managed',expiresIn=86400}={}) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/share`, { method:'POST', body:JSON.stringify({key,mode,expiresIn}) })
-  },
-  async listarCompartilhamentos(bucket,key) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/shares?key=${encodeURIComponent(key)}`)
-  },
-  async revogarCompartilhamento(bucket,id) {
-    return api(`/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/shares/${encodeURIComponent(id)}`, { method:'DELETE' })
   },
 }
