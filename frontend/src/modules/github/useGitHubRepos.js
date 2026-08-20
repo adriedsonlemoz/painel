@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { githubService } from '../../services/domains/github.js'
 
-export function useGitHubRepos({ page = 1, per_page = 30, sort = 'updated' } = {}) {
+export function useGitHubRepos({ page = 1, per_page = 30, sort = 'updated', enrich = true } = {}) {
   const [repos,   setRepos]   = useState([])
   const [status,  setStatus]  = useState(null)   // info da conta GitHub
   const [total,   setTotal]   = useState(0)
@@ -22,7 +22,7 @@ export function useGitHubRepos({ page = 1, per_page = 30, sort = 'updated' } = {
       // Carrega status da conta e repos em paralelo
       const [statusData, reposData] = await Promise.allSettled([
         githubService.status(),
-        githubService.repos({ page, per_page, sort }),
+        githubService.repos({ page, per_page, sort, enrich }),
       ])
 
       if (statusData.status === 'fulfilled') {
@@ -40,7 +40,7 @@ export function useGitHubRepos({ page = 1, per_page = 30, sort = 'updated' } = {
     } finally {
       setLoading(false)
     }
-  }, [page, per_page, sort])
+  }, [page, per_page, sort, enrich])
 
   useEffect(() => { carregar() }, [carregar])
 

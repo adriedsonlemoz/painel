@@ -1,3 +1,16 @@
+# 1.0.141 — GitHub, downloads, publicação e UX móvel
+
+- Corrige o vínculo do ID do DownloadManager Android e evita falsos estados de falha/conclusão.
+- Centraliza a detecção real de nome, versão, tipo, framework, plataforma e package manager dos repositórios.
+- Padroniza ZIPs como `nome-do-projeto-versão.zip` quando a versão é detectável.
+- Home passa a reutilizar repositórios enriquecidos do GitHub e critério objetivo de atividade recente (90 dias).
+- Cabeçalho de projeto, cards e análise reutilizam os mesmos metadados detectados.
+- Código · Arquivos fica mais compacto, com ações por ícone acessíveis, pluralização e SHA organizado.
+- Workflows e Secrets recebem organização mais compacta e adequada a celulares.
+- R2 Storage alinha a ação Novo bucket ao título e reduz espaços excessivos.
+- Fluxo de publicação destaca versões, arquivo, destino e produção detectada; acontecimentos ficam do mais recente para o mais antigo.
+- Status técnicos são traduzidos apenas na camada visual; resumo e acontecimentos podem ser copiados com sanitização de dados sensíveis.
+
 # Changelog
 
 ## 1.0.140 — GitHub, commits e downloads nativos

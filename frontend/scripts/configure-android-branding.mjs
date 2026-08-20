@@ -78,6 +78,7 @@ const pluginJava = `package ${packageName};
 
 import android.app.DownloadManager;
 import android.content.Context;
+import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
@@ -89,6 +90,25 @@ import com.getcapacitor.PluginMethod;
 
 @CapacitorPlugin(name = "ALDownloadManager")
 public class ALDownloadManagerPlugin extends Plugin {
+  private Long readId(PluginCall call) {
+    try {
+      String raw = call.getString("id");
+      if (raw != null && !raw.trim().isEmpty()) return Long.parseLong(raw.trim());
+    } catch (Exception ignored) {}
+    try {
+      Long direct = call.getLong("id");
+      if (direct != null) return direct;
+    } catch (Exception ignored) {}
+    try {
+      if (call.getData().has("id")) return call.getData().getLong("id");
+    } catch (Exception ignored) {}
+    return null;
+  }
+
+  private DownloadManager manager() {
+    return (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+  }
+
   @PluginMethod
   public void download(PluginCall call) {
     String url = call.getString("url");
@@ -105,25 +125,30 @@ public class ALDownloadManagerPlugin extends Plugin {
       request.setAllowedOverMetered(true);
       request.setAllowedOverRoaming(true);
       request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AL-Sistemas/" + filename);
-      DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
-      long id = manager.enqueue(request);
-      JSObject ret = new JSObject(); ret.put("id", id); ret.put("filename", filename); call.resolve(ret);
+      long id = manager().enqueue(request);
+      JSObject ret = new JSObject();
+      // String evita conversões inconsistentes de Long entre Java e JavaScript.
+      ret.put("id", String.valueOf(id));
+      ret.put("filename", filename);
+      ret.put("status", "pending");
+      call.resolve(ret);
     } catch (Exception e) { call.reject("Não foi possível iniciar o download: " + e.getMessage(), e); }
   }
 
   @PluginMethod
   public void getStatus(PluginCall call) {
-    Long id = call.getLong("id");
-    if (id == null) { call.reject("ID do download obrigatório."); return; }
-    DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+    Long id = readId(call);
+    if (id == null || id <= 0) { call.reject("Identificador do download inválido."); return; }
     DownloadManager.Query query = new DownloadManager.Query().setFilterById(id);
-    try (Cursor c = manager.query(query)) {
-      if (c == null || !c.moveToFirst()) { call.reject("Download não encontrado."); return; }
+    try (Cursor c = manager().query(query)) {
+      if (c == null || !c.moveToFirst()) {
+        JSObject ret = new JSObject(); ret.put("id", String.valueOf(id)); ret.put("status", "cancelled"); ret.put("progress", 0); call.resolve(ret); return;
+      }
       int status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
       long downloaded = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
       long total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
       int reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
-      String uri = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
+      Uri contentUri = manager().getUriForDownloadedFile(id);
       String label = "pending";
       if (status == DownloadManager.STATUS_RUNNING) label = "running";
       else if (status == DownloadManager.STATUS_PAUSED) label = "paused";
@@ -131,11 +156,43 @@ public class ALDownloadManagerPlugin extends Plugin {
       else if (status == DownloadManager.STATUS_FAILED) label = "failed";
       int progress = total > 0 ? (int)Math.min(100, Math.round(downloaded * 100.0 / total)) : (status == DownloadManager.STATUS_SUCCESSFUL ? 100 : 0);
       JSObject ret = new JSObject();
-      ret.put("id", id); ret.put("status", label); ret.put("progress", progress);
-      ret.put("downloaded", downloaded); ret.put("total", total); ret.put("reason", reason); ret.put("uri", uri == null ? "" : uri);
+      ret.put("id", String.valueOf(id)); ret.put("status", label); ret.put("progress", progress);
+      ret.put("downloaded", downloaded); ret.put("total", total); ret.put("reason", reason);
+      ret.put("uri", contentUri == null ? "" : contentUri.toString());
       if (status == DownloadManager.STATUS_FAILED) ret.put("message", "Download falhou no Android (código " + reason + ").");
       call.resolve(ret);
     } catch (Exception e) { call.reject("Falha ao consultar download: " + e.getMessage(), e); }
+  }
+
+  @PluginMethod
+  public void cancel(PluginCall call) {
+    Long id = readId(call);
+    if (id == null || id <= 0) { call.reject("Identificador do download inválido."); return; }
+    try { int removed = manager().remove(id); JSObject ret = new JSObject(); ret.put("ok", removed > 0); ret.put("id", String.valueOf(id)); call.resolve(ret); }
+    catch (Exception e) { call.reject("Não foi possível cancelar o download: " + e.getMessage(), e); }
+  }
+
+  @PluginMethod
+  public void open(PluginCall call) {
+    Long id = readId(call);
+    if (id == null || id <= 0) { call.reject("Identificador do download inválido."); return; }
+    try {
+      Uri uri = manager().getUriForDownloadedFile(id);
+      if (uri == null) { call.reject("Arquivo concluído não encontrado."); return; }
+      DownloadManager.Query q = new DownloadManager.Query().setFilterById(id);
+      String mime = "application/octet-stream";
+      try (Cursor c = manager().query(q)) {
+        if (c != null && c.moveToFirst()) {
+          String found = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE));
+          if (found != null && !found.isEmpty()) mime = found;
+        }
+      }
+      Intent intent = new Intent(Intent.ACTION_VIEW);
+      intent.setDataAndType(uri, mime);
+      intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+      getContext().startActivity(intent);
+      JSObject ret = new JSObject(); ret.put("ok", true); ret.put("id", String.valueOf(id)); ret.put("uri", uri.toString()); call.resolve(ret);
+    } catch (Exception e) { call.reject("Não foi possível abrir o arquivo: " + e.getMessage(), e); }
   }
 }
 `

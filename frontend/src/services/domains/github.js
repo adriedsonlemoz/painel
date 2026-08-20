@@ -21,32 +21,47 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
  * do sistema, grava em Downloads/AL-Sistemas e continua mesmo se a WebView pausar.
  * Na web, o servidor continua responsável pelo Content-Disposition e o navegador baixa direto.
  */
+function normalizarDownloadId(value) {
+  if (value === null || value === undefined || value === '') return ''
+  return String(value).trim()
+}
+
 async function baixarComGerenciador(url, filename = 'download', mime = 'application/octet-stream', onStatus) {
   if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('ALDownloadManager')) {
-    onStatus?.('queued', { filename, progress: 0 })
+    onStatus?.('preparing', { filename, progress: 0 })
     const queued = await NativeDownloadManager.download({ url, filename, mime })
-    const id = queued?.id
-    if (!id) throw new Error('O Android não retornou o identificador do download.')
+    const id = normalizarDownloadId(queued?.id)
+    if (!id) throw new Error('O Android não confirmou o início do download.')
+    onStatus?.('queued', { id, filename, progress:0, total:0, downloaded:0 })
     const deadline = Date.now() + 45 * 60_000
     let lastProgress = -1
+    let lastStatus = ''
     while (Date.now() < deadline) {
       const state = await NativeDownloadManager.getStatus({ id })
+      const status = String(state?.status || 'pending')
       const progress = Number.isFinite(Number(state?.progress)) ? Math.max(0, Math.min(100, Number(state.progress))) : 0
-      if (progress !== lastProgress || state?.status !== 'running') {
-        lastProgress = progress
-        onStatus?.(state?.status === 'successful' ? 'completed' : state?.status === 'failed' ? 'failed' : 'progress', { ...state, filename, progress, id })
+      if (progress !== lastProgress || status !== lastStatus) {
+        lastProgress = progress; lastStatus = status
+        const visual = status === 'successful' ? 'completed'
+          : status === 'failed' ? 'failed'
+          : status === 'cancelled' ? 'cancelled'
+          : status === 'paused' ? 'paused'
+          : status === 'pending' ? 'queued' : 'progress'
+        onStatus?.(visual, { ...state, id, filename, progress })
       }
-      if (state?.status === 'successful') return { ok:true, mode:'android-download-manager', id, filename, progress:100, uri:state.uri || '' }
-      if (state?.status === 'failed') throw new Error(state?.message || 'O Android não conseguiu concluir o download.')
+      if (status === 'successful') return { ok:true, mode:'android-download-manager', id, filename, progress:100, uri:state?.uri || '', total:state?.total || 0 }
+      if (status === 'failed') throw Object.assign(new Error(state?.message || 'O Android não conseguiu concluir o download.'), { downloadId:id, code:'ANDROID_DOWNLOAD_FAILED' })
+      if (status === 'cancelled') throw Object.assign(new Error('Download cancelado.'), { downloadId:id, code:'ANDROID_DOWNLOAD_CANCELLED' })
       await sleep(650)
     }
+    // O Android continua dono da transferência. Não marcar como falha só porque
+    // a tela deixou de acompanhar após o limite de observação.
+    onStatus?.('background', { id, filename, progress:lastProgress < 0 ? 0 : lastProgress })
     return { ok:true, mode:'android-download-manager-background', id, filename, progress:lastProgress < 0 ? 0 : lastProgress }
   }
 
   onStatus?.('downloading', { filename })
   if (Capacitor.isNativePlatform()) {
-    // Compatibilidade com APKs antigos que carregam o frontend hospedado, mas ainda
-    // não possuem o plugin nativo incluído no binário.
     const { Browser } = await import('@capacitor/browser')
     await Browser.open({ url, windowName:'_blank' })
     onStatus?.('started', { filename })
@@ -91,8 +106,8 @@ export const githubService = {
   status: () => api('/github/status'),
   orgs: () => api('/github/orgs'),
   atualizarPerfil: (dados) => api('/github/profile', { method: 'PATCH', body: JSON.stringify(dados) }),
-  repos: ({ page = 1, per_page = 30, sort = 'updated', type = 'all' } = {}) =>
-    api(`/github/repos?page=${page}&per_page=${per_page}&sort=${sort}&type=${type}`),
+  repos: ({ page = 1, per_page = 30, sort = 'updated', type = 'all', enrich = false } = {}) =>
+    api(`/github/repos?page=${page}&per_page=${per_page}&sort=${sort}&type=${type}&enrich=${enrich ? '1' : '0'}`),
   repo: (owner, repo) => api(`/github/repos/${owner}/${repo}`),
   atualizarRepo: (owner, repo, dados) => api(`/github/repos/${owner}/${repo}`, { method: 'PATCH', body: JSON.stringify(dados) }),
   sugerirDescricao: (owner, repo, provedor = '') => api(`/github/repos/${owner}/${repo}/descricao-ia`, { method: 'POST', body: JSON.stringify({ provedor }) }),
@@ -220,6 +235,22 @@ export const githubService = {
     method:'POST', body:JSON.stringify({ ref }), timeoutMs:20000,
   }),
   downloadZipUrl: (owner, repo, ticket) => `${BASE_URL}/github/repos/${owner}/${repo}/download-public?ticket=${encodeURIComponent(ticket)}`,
+
+  downloadStatus: async (id) => {
+    const downloadId = normalizarDownloadId(id)
+    if (!downloadId || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ALDownloadManager')) return null
+    return NativeDownloadManager.getStatus({ id:downloadId })
+  },
+  cancelDownload: async (id) => {
+    const downloadId = normalizarDownloadId(id)
+    if (!downloadId || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ALDownloadManager')) return { ok:false }
+    return NativeDownloadManager.cancel({ id:downloadId })
+  },
+  openDownload: async (id) => {
+    const downloadId = normalizarDownloadId(id)
+    if (!downloadId || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ALDownloadManager')) return { ok:false }
+    return NativeDownloadManager.open({ id:downloadId })
+  },
   async baixarZip(owner, repo, ref = '', options = {}) {
     const { onStatus } = options || {}
     onStatus?.('connecting')

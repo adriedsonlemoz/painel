@@ -556,58 +556,150 @@ function validarNome(str) {
 // Resumo técnico leve para enriquecer a listagem sem transformar cada card
 // em uma auditoria completa. Cache curto reduz chamadas à API do GitHub.
 const repoInsightCache = new Map()
+
+async function repoReadText(owner, repo, filePath, branch='main') {
+  try {
+    const encoded = String(filePath || '').split('/').filter(Boolean).map(encodeURIComponent).join('/')
+    const data = await githubFetch(`/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`)
+    if (!data?.content || data.encoding !== 'base64') return null
+    return Buffer.from(String(data.content).replace(/\n/g, ''), 'base64').toString('utf8')
+  } catch (err) {
+    if (Number(err?.status) === 404) return null
+    throw err
+  }
+}
+
+async function repoReadJson(owner, repo, filePath, branch='main') {
+  const text = await repoReadText(owner, repo, filePath, branch)
+  if (!text) return null
+  try { return JSON.parse(text) } catch { return null }
+}
+
+function depSet(...packages) {
+  const out = new Set()
+  for (const pkg of packages.filter(Boolean)) {
+    for (const key of Object.keys({ ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}), ...(pkg.peerDependencies || {}) })) out.add(key)
+  }
+  return out
+}
+
+function firstNonEmpty(...values) {
+  return values.map(v => String(v ?? '').trim()).find(Boolean) || null
+}
+
+function titleProjectName(value='') {
+  const raw = String(value || '').trim().replace(/^@[^/]+\//, '')
+  if (!raw) return null
+  if (/^al[-_ ]?sistemas$/i.test(raw) || /^alsistemas$/i.test(raw)) return 'AL Sistemas'
+  return raw.split(/[-_]+/).filter(Boolean).map(x => x.length <= 3 ? x.toUpperCase() : x[0].toUpperCase() + x.slice(1)).join(' ')
+}
+
+// Fonte canônica de metadados do repositório. Todas as telas devem reutilizar
+// estes dados para nome, versão, tipo, frameworks, plataforma e package manager.
+// Cache curto evita várias interpretações divergentes e reduz chamadas ao GitHub.
 async function montarRepoInsight(owner, repo, branch='main', { fresh = false } = {}) {
   const key = `${owner}/${repo}@${branch}`
   const cached = repoInsightCache.get(key)
   if (!fresh && cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data
 
-  const root = await githubFetch(`/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`)
-  const itens = Array.isArray(root) ? root : []
-  const nomes = new Set(itens.map(i => i.name))
-  const arquivos = itens.filter(i => i.type === 'file').map(i => i.name)
-  const pastas = itens.filter(i => i.type === 'dir').map(i => i.name)
-  let produto = null, versao = null
+  const rootRaw = await githubFetch(`/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`)
+  const root = Array.isArray(rootRaw) ? rootRaw : []
+  const rootNames = new Set(root.map(i => String(i.name || '').toLowerCase()))
+  const dirs = root.filter(i => i.type === 'dir').map(i => String(i.name || ''))
+  const files = root.filter(i => i.type === 'file').map(i => String(i.name || ''))
 
-  const lerJson = async (nome) => {
-    try {
-      const f = await githubFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(nome)}?ref=${encodeURIComponent(branch)}`)
-      return JSON.parse(Buffer.from(f.content || '', 'base64').toString('utf8'))
-    } catch { return null }
-  }
+  const [manifest, rootPkg, frontendPkg, backendPkg, capacitorJson, capacitorTs, pyprojectText, composer, pomText] = await Promise.all([
+    rootNames.has('al-sistemas.json') ? repoReadJson(owner, repo, 'al-sistemas.json', branch) : null,
+    rootNames.has('package.json') ? repoReadJson(owner, repo, 'package.json', branch) : null,
+    rootNames.has('frontend') ? repoReadJson(owner, repo, 'frontend/package.json', branch) : null,
+    rootNames.has('backend') ? repoReadJson(owner, repo, 'backend/package.json', branch) : null,
+    rootNames.has('capacitor.config.json') ? repoReadJson(owner, repo, 'capacitor.config.json', branch) : null,
+    (rootNames.has('capacitor.config.ts') || rootNames.has('capacitor.config.js')) ? repoReadText(owner, repo, rootNames.has('capacitor.config.ts') ? 'capacitor.config.ts' : 'capacitor.config.js', branch) : null,
+    rootNames.has('pyproject.toml') ? repoReadText(owner, repo, 'pyproject.toml', branch) : null,
+    rootNames.has('composer.json') ? repoReadJson(owner, repo, 'composer.json', branch) : null,
+    rootNames.has('pom.xml') ? repoReadText(owner, repo, 'pom.xml', branch) : null,
+  ])
 
-  if (nomes.has('al-sistemas.json')) {
-    const manifest = await lerJson('al-sistemas.json')
-    produto = manifest?.product || 'AL Sistemas'
-    versao = manifest?.version || null
-  } else if (nomes.has('package.json')) {
-    const pkg = await lerJson('package.json')
-    produto = pkg?.name || null
-    versao = pkg?.version || null
-  }
+  const deps = depSet(rootPkg, frontendPkg, backendPkg)
+  const frameworks = []
+  const add = x => { if (x && !frameworks.includes(x)) frameworks.push(x) }
+  if (deps.has('react') || deps.has('react-dom')) add('React')
+  if (deps.has('vite')) add('Vite')
+  if (deps.has('next')) add('Next.js')
+  if (deps.has('vue')) add('Vue')
+  if (deps.has('@angular/core')) add('Angular')
+  if (deps.has('svelte')) add('Svelte')
+  if (deps.has('express')) add('Express')
+  if (deps.has('fastify')) add('Fastify')
+  if (deps.has('@nestjs/core')) add('NestJS')
+  if (deps.has('@capacitor/core') || capacitorJson || capacitorTs) add('Capacitor')
+  if (deps.has('electron')) add('Electron')
+  if (pyprojectText && /\bdjango\b/i.test(pyprojectText)) add('Django')
+  if (pyprojectText && /\bfastapi\b/i.test(pyprojectText)) add('FastAPI')
+  if (composer?.require?.['laravel/framework']) add('Laravel')
+  if (pomText && /spring-boot/i.test(pomText)) add('Spring Boot')
+
+  const frontendDetected = Boolean(frontendPkg || ['React','Vite','Next.js','Vue','Angular','Svelte'].some(x => frameworks.includes(x)) || rootNames.has('index.html'))
+  const backendDetected = Boolean(backendPkg || ['Express','Fastify','NestJS','Django','FastAPI','Laravel','Spring Boot'].some(x => frameworks.includes(x)) || pyprojectText || composer || pomText)
+  const androidDetected = Boolean(rootNames.has('android') || rootNames.has('build.gradle') || rootNames.has('build.gradle.kts') || frameworks.includes('Capacitor'))
 
   let tipo = 'Repositório de código'
-  if (nomes.has('frontend') && nomes.has('backend')) tipo = 'Aplicação full-stack'
-  else if (nomes.has('frontend')) tipo = 'Aplicação frontend'
-  else if (nomes.has('backend')) tipo = 'Serviço backend'
-  else if (nomes.has('package.json')) tipo = 'Projeto Node.js'
-  else if (arquivos.some(n => /\.(sh|bash|fish)$/i.test(n))) tipo = 'Automação / CLI'
-  else if (nomes.has('index.html')) tipo = 'Aplicação web'
+  if (frontendDetected && backendDetected) tipo = 'Aplicação Full-stack'
+  else if (frontendDetected) tipo = 'Aplicação Frontend'
+  else if (backendDetected) tipo = 'Serviço Backend'
+  else if (androidDetected) tipo = 'Aplicativo Android'
+  else if (rootPkg) tipo = 'Projeto Node.js'
+  else if (pyprojectText) tipo = 'Projeto Python'
+  else if (composer) tipo = 'Projeto PHP'
+  else if (pomText) tipo = 'Projeto Java'
+  else if (files.some(n => /\.(sh|bash|fish)$/i.test(n))) tipo = 'Automação / CLI'
+  else if (rootNames.has('index.html')) tipo = 'Aplicação Web'
+
+  let packageManager = null
+  const allRoot = new Set([...rootNames])
+  if (allRoot.has('pnpm-lock.yaml') || allRoot.has('pnpm-workspace.yaml')) packageManager = 'pnpm'
+  else if (allRoot.has('yarn.lock')) packageManager = 'Yarn'
+  else if (allRoot.has('bun.lockb') || allRoot.has('bun.lock')) packageManager = 'Bun'
+  else if (allRoot.has('package-lock.json')) packageManager = 'npm'
+  else if (rootPkg || frontendPkg || backendPkg) packageManager = 'npm'
+  else if (pyprojectText) packageManager = /poetry/i.test(pyprojectText) ? 'Poetry' : 'pip'
+  else if (composer) packageManager = 'Composer'
+  else if (pomText) packageManager = 'Maven'
+
+  const produtoRaw = firstNonEmpty(manifest?.product, manifest?.name, rootPkg?.displayName, rootPkg?.productName, rootPkg?.name, frontendPkg?.displayName, frontendPkg?.name)
+  const produto = produtoRaw ? titleProjectName(produtoRaw) : titleProjectName(repo)
+  const versao = firstNonEmpty(manifest?.version, rootPkg?.version, frontendPkg?.version, backendPkg?.version)
+  const versionSources = [
+    manifest?.version && { path:'al-sistemas.json', value:String(manifest.version) },
+    rootPkg?.version && { path:'package.json', value:String(rootPkg.version) },
+    frontendPkg?.version && { path:'frontend/package.json', value:String(frontendPkg.version) },
+    backendPkg?.version && { path:'backend/package.json', value:String(backendPkg.version) },
+  ].filter(Boolean)
 
   const deploy = [
-    nomes.has('vercel.json') && 'Vercel',
-    (nomes.has('render.yaml') || nomes.has('render.yml')) && 'Render',
-    nomes.has('railway.toml') && 'Railway',
-    nomes.has('Dockerfile') && 'Docker',
+    (rootNames.has('vercel.json') || rootNames.has('.vercel')) && 'Vercel',
+    (rootNames.has('render.yaml') || rootNames.has('render.yml')) && 'Render',
+    rootNames.has('railway.toml') && 'Railway',
+    rootNames.has('dockerfile') && 'Docker',
   ].filter(Boolean)
-  const qualidade = [
-    nomes.has('README.md') && 'README',
-    nomes.has('.github') && 'GitHub Actions',
-    (nomes.has('.env.example') || nomes.has('.env.sample')) && '.env exemplo',
-  ].filter(Boolean)
+  let workflows = []
+  if (rootNames.has('.github')) {
+    try {
+      const wf = await githubFetch(`/repos/${owner}/${repo}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`)
+      workflows = (Array.isArray(wf) ? wf : []).filter(i => i.type === 'file' && /\.ya?ml$/i.test(i.name || '')).map(i => i.name)
+    } catch { workflows = [] }
+  }
+
+  const plataforma = [androidDetected && 'Android', frameworks.includes('Capacitor') && 'Capacitor', frontendDetected && 'Web', backendDetected && 'Servidor'].filter(Boolean)
+  const stack = frameworks.length ? frameworks : [rootPkg ? 'Node.js' : pyprojectText ? 'Python' : composer ? 'PHP' : pomText ? 'Java' : null].filter(Boolean)
+  const qualidade = [rootNames.has('readme.md') && 'README', workflows.length && 'GitHub Actions', (rootNames.has('.env.example') || rootNames.has('.env.sample')) && '.env exemplo'].filter(Boolean)
 
   const data = {
-    produto, versao, tipo, deploy, qualidade, pastas: pastas.slice(0, 8),
-    resumo: `${produto ? `${produto}${versao ? ` ${versao}` : ''} · ` : ''}${tipo}${deploy.length ? ` · pronto para ${deploy.join(' / ')}` : ''}`,
+    produto, versao, versionSources, tipo, framework:frameworks[0] || null, frameworks, stack,
+    frontend:frontendDetected, backend:backendDetected, android:androidDetected,
+    plataforma, packageManager, deploy, workflows, hasCI:workflows.length > 0,
+    qualidade, pastas:dirs.slice(0,12), arquivosRaiz:files.slice(0,30),
+    resumo: `${produto ? `${produto}${versao ? ` · v${versao}` : ''} · ` : ''}${tipo}${frameworks.length ? ` · ${frameworks.join(' / ')}` : ''}`,
   }
   repoInsightCache.set(key, { at: Date.now(), data })
   return data
@@ -735,7 +827,7 @@ router.get('/repos', autenticar, async (req, res) => {
     let repos = await githubFetch(`/user/repos?sort=${sort}&per_page=${per_page}&page=${page}&affiliation=owner,collaborator,organization_member`)
     if (type === 'public') repos = repos.filter(r => !r.private)
     else if (type === 'private') repos = repos.filter(r => r.private)
-    const lista = repos.map(r => ({
+    let lista = repos.map(r => ({
       id: r.id, nome: r.name, nomeCompleto: r.full_name, descricao: r.description,
       privado: r.private, visibilidade: r.visibility || (r.private ? 'private' : 'public'),
       url: r.html_url, homepage: r.homepage || null, linguagem: r.language,
@@ -746,8 +838,16 @@ router.get('/repos', autenticar, async (req, res) => {
       temas: r.topics || [], arquivado: r.archived, fork: r.fork,
       licenca: r.license?.spdx_id || r.license?.name || null,
       permissoes: r.permissions || null,
+      ativo: !r.archived && Boolean(r.pushed_at) && (Date.now() - new Date(r.pushed_at).getTime()) <= 90 * 86400000,
     }))
-    res.json({ repos: lista, total: lista.length })
+    if (String(req.query.enrich || '') === '1') {
+      const enriquecidos = await Promise.allSettled(lista.map(async item => ({
+        ...item,
+        insight: await montarRepoInsight(item.nomeCompleto.split('/')[0], item.nome, item.branch || 'main'),
+      })))
+      lista = enriquecidos.map((r, i) => r.status === 'fulfilled' ? r.value : lista[i])
+    }
+    res.json({ repos: lista, total: lista.length, activeRuleDays: 90 })
   } catch (err) {
     if (err.message.includes('GITHUB_TOKEN')) return res.status(503).json({ erro: err.message, repos: [] })
     res.status(err.status || 500).json({ erro: err.message, repos: [] })
@@ -1483,67 +1583,35 @@ router.get('/repos/:owner/:repo/analysis', autenticar, async (req, res) => {
   const { owner, repo } = req.params
   if (!validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Nome inválido.' })
   try {
-    const [repoR, langR, commitR, contentsR] = await Promise.allSettled([
-      githubFetch(`/repos/${owner}/${repo}`),
-      githubFetch(`/repos/${owner}/${repo}/languages`),
-      githubFetch(`/repos/${owner}/${repo}/commits?per_page=30`),
-      githubFetch(`/repos/${owner}/${repo}/contents`),
+    const repoData = await githubFetch(`/repos/${owner}/${repo}`)
+    const branch = repoData.default_branch || 'main'
+    const [insight, langs, cms, tree] = await Promise.all([
+      montarRepoInsight(owner, repo, branch),
+      githubFetch(`/repos/${owner}/${repo}/languages`).catch(() => ({})),
+      githubFetch(`/repos/${owner}/${repo}/commits?per_page=30`).catch(() => []),
+      githubFetch(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`).catch(() => ({tree:[]})),
     ])
-    const r     = repoR.status === 'fulfilled' ? repoR.value : {}
-    const langs = langR.status === 'fulfilled' ? langR.value : {}
-    const cms   = commitR.status === 'fulfilled' ? commitR.value : []
-    const files = contentsR.status === 'fulfilled' ? (contentsR.value || []) : []
-    const fileNames = files.map(f => f.name?.toLowerCase() || '')
-    const langKeys  = Object.keys(langs)
-
-    const stack = []
-    if (langKeys.includes('JavaScript') || langKeys.includes('TypeScript')) {
-      if (fileNames.includes('package.json')) {
-        if (fileNames.some(f => f.includes('vite') || f === 'vite.config.js' || f === 'vite.config.ts')) stack.push('React/Vite')
-        else if (fileNames.includes('next.config.js') || fileNames.includes('next.config.mjs')) stack.push('Next.js')
-        else stack.push(langKeys.includes('TypeScript') ? 'TypeScript/Node' : 'Node.js')
-      }
-    }
-    if (langKeys.includes('Python')) stack.push(fileNames.includes('manage.py') ? 'Django' : 'Python')
-    if (langKeys.includes('Kotlin')) stack.push(fileNames.some(f => f.includes('androidmanifest')) ? 'Android/Kotlin' : 'Kotlin')
-    if (langKeys.includes('Java'))   stack.push(fileNames.some(f => f.includes('androidmanifest')) ? 'Android/Java' : 'Java')
-    if (langKeys.includes('Dart'))   stack.push('Flutter')
-    if (langKeys.includes('Swift'))  stack.push('iOS/Swift')
-    if (langKeys.includes('PHP'))    stack.push('PHP')
-    if (langKeys.includes('Go'))     stack.push('Go')
-    if (langKeys.includes('Rust'))   stack.push('Rust')
-    if (stack.length === 0 && langKeys.length > 0) stack.push(langKeys[0])
-
-    let deps = []
-    try {
-      const pkgFile = files.find(f => f.name === 'package.json')
-      if (pkgFile?.download_url) {
-        const pkgRes = await fetch(pkgFile.download_url)
-        const pkg = await pkgRes.json()
-        deps = Object.keys({ ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }).slice(0, 12)
-      }
-    } catch { /* opcional */ }
-
-    const diasSemAtividade = r.updated_at
-      ? Math.floor((Date.now() - new Date(r.updated_at).getTime()) / 86400000) : 9999
-    const maturidade = diasSemAtividade < 30 ? 'ativo' : diasSemAtividade < 180 ? 'moderado' : diasSemAtividade < 365 ? 'inativo' : 'abandonado'
-    const freqCommits = Array.isArray(cms) ? cms.length : 0
-    const frequencia  = freqCommits >= 20 ? 'alta' : freqCommits >= 8 ? 'média' : freqCommits >= 2 ? 'baixa' : 'inativa'
-    const totalLinhas = Object.values(langs).reduce((a, b) => a + b, 0)
-    const complexidade = totalLinhas > 100000 ? 'alta' : totalLinhas > 20000 ? 'média' : totalLinhas > 3000 ? 'baixa' : 'mínima'
-
+    const diasSemAtividade = repoData.pushed_at ? Math.max(0, Math.floor((Date.now() - new Date(repoData.pushed_at).getTime()) / 86400000)) : null
+    const maturidade = diasSemAtividade === null ? 'desconhecido' : diasSemAtividade <= 90 ? 'ativo' : diasSemAtividade <= 180 ? 'moderado' : diasSemAtividade <= 365 ? 'inativo' : 'sem atividade recente'
+    const commitCount = Array.isArray(cms) ? cms.length : 0
+    const frequencia = commitCount >= 20 ? 'alta' : commitCount >= 8 ? 'média' : commitCount >= 2 ? 'baixa' : 'inativa'
+    const treeItems = Array.isArray(tree?.tree) ? tree.tree : []
+    const blobs = treeItems.filter(i => i.type === 'blob')
+    const totalBytes = blobs.reduce((n,i)=>n+Number(i.size||0),0)
     res.json({
-      stack, linguagens: langs, maturidade, frequenciaCommits: frequencia,
-      diasSemAtividade, complexidade, dependencias: deps,
-      totalArquivos: files.length,
-      hasCI:     fileNames.includes('.github') || fileNames.some(f => f.includes('ci')),
-      hasDocker: fileNames.includes('dockerfile') || fileNames.includes('docker-compose.yml'),
-      hasTestes: fileNames.some(f => ['test','spec','jest','vitest','__tests__'].some(k => f.includes(k))),
-      temLicense: fileNames.some(f => f.startsWith('license')),
+      ...insight,
+      linguagens: langs,
+      linguagemPrincipal: repoData.language || Object.keys(langs)[0] || null,
+      maturidade, diasSemAtividade, frequenciaCommits:frequencia, commitsAmostra:commitCount,
+      totalArquivos:blobs.length, tamanhoBytes:totalBytes, tamanhoGitHubKb:repoData.size || 0,
+      branch, ultimoPush:repoData.pushed_at || null, ultimaAtualizacao:repoData.updated_at || null,
+      privado:Boolean(repoData.private), arquivado:Boolean(repoData.archived),
+      acesso: repoData.permissions?.admin || repoData.permissions?.maintain || repoData.permissions?.push ? 'Leitura e escrita' : 'Somente leitura',
+      hasDocker: insight.arquivosRaiz?.some(f=>/^dockerfile$/i.test(f)||/^docker-compose\.ya?ml$/i.test(f)) || false,
+      hasTestes: treeItems.some(i => /(^|\/)(__tests__|tests?|specs?)(\/|$)|\.(test|spec)\.[^.]+$/i.test(i.path || '')),
+      temLicense: Boolean(repoData.license),
     })
-  } catch (err) {
-    res.status(err.status || 500).json({ erro: err.message })
-  }
+  } catch (err) { res.status(err.status || 500).json({ erro: err.message }) }
 })
 
 /* GET /api/github/meta/:repoId */
@@ -2422,15 +2490,15 @@ async function resolveRepoZipMeta(owner, repo, requestedRef = '') {
   let pkg = { name:'', version:'' }
   try { pkg = await readRepoPackageInfo(owner, repo, ref) } catch { /* versão é opcional */ }
   let version = String(pkg.version || '').trim()
-  if (!version) {
-    try {
-      const insight = await montarRepoInsight(owner, repo, repoData?.default_branch || ref)
-      version = String(insight?.versao || '').trim()
-    } catch { /* fallback abaixo */ }
-  }
-  const project = safeDownloadBase(repo).toLowerCase()
+  let projectName = String(pkg.name || '').trim()
+  try {
+    const insight = await montarRepoInsight(owner, repo, repoData?.default_branch || ref)
+    if (!version) version = String(insight?.versao || '').trim()
+    projectName = String(insight?.produto || projectName || repo).trim()
+  } catch { /* nome/versão detectados são opcionais */ }
+  const project = safeDownloadBase(projectName || repo).toLowerCase()
   const filename = `${project}${version ? `-${safeDownloadBase(version)}` : '-source'}.zip`
-  return { ref, version, filename }
+  return { ref, version, projectName: projectName || repo, filename }
 }
 
 /* POST /api/github/repos/:owner/:repo/download-ticket
