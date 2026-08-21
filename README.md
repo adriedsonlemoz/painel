@@ -1,5 +1,9 @@
 # ⚙️ AL Sistemas — Painel de Gerenciamento
 
+## 🎨 Ícone AL e splash — 1.0.154
+
+A identidade do aplicativo usa o novo monograma **AL** aprovado. O arquivo original é mantido como fonte em `frontend/public/icons/al-sistemas-source.png`; todos os tamanhos de launcher, PWA e splash são derivados desse mesmo PNG apenas por redimensionamento proporcional. O Android recebe `ic_launcher`, `roundIcon` e Adaptive Icon por densidade, enquanto a splash mantém a imagem centralizada e inteira, sem esticar ou recortar a marca. O Service Worker `alsistemas-v5` invalida os ícones anteriores após o deploy.
+
 Sistema completo de gerenciamento de conteúdo, projetos, infraestrutura e integrações.  
 Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB + Cloudinary** (backend)
 

@@ -1,3 +1,11 @@
+## 1.0.154 — Ícone AL e splash
+
+- Novo ícone AL aprovado integrado como fonte única da identidade.
+- Launcher/roundIcon/Adaptive Icon atualizados para Android.
+- Splash Android e abertura web usam a mesma imagem integral, sem deformação.
+- PWA e Apple Touch Icon atualizados.
+- Cache estático elevado para `alsistemas-v5`.
+
 # Correções para execução local
 
 ## 1.0.153 — UX de atualização e cold start administrativo

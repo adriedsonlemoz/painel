@@ -1,8 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.153",
+  "version": "1.0.154",
   "packageFormat": 2,
   "changelog": [
+    "Novo ícone AL aprovado integrado diretamente ao projeto, sem recriação: o PNG original gerado é preservado como fonte da identidade.",
+    "Launcher Android, roundIcon, Adaptive Icon, instalador e superfícies do sistema passam a usar o novo monograma AL com margens mais adequadas ao quadrado arredondado.",
+    "Splash nativa e tela de abertura web passam a usar a mesma imagem integral, sempre em proporção 1:1 e com redimensionamento proporcional, sem crop ou stretch.",
+    "Assets Android por densidade e ícones PWA/Apple foram derivados do mesmo arquivo aprovado apenas por redimensionamento de alta qualidade.",
+    "Service Worker passa para alsistemas-v5 para invalidar o cache dos ícones anteriores e entregar a nova identidade imediatamente após a atualização.",
     "Fluxo de Atualizações foi unificado visualmente: revisão, proteção R2, GitHub e produção usam a mesma linguagem de navegação, espaçamento, cores e cabeçalhos.",
     "A revisão para produção ganha separação correta dos cards e troca textos como item(ns) por contagens naturais de alterações.",
     "A etapa GitHub passa a integrar o mesmo assistente de cinco etapas, com destino de produção mais compacto, verificação de GitHub/Vercel/Render e ações coerentes com o tema.",

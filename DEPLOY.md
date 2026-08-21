@@ -1,3 +1,7 @@
+## Identidade do APK — 1.0.154+
+
+O build Android deve executar `frontend/scripts/configure-android-branding.mjs` após `npx cap sync android`. O script copia os assets por densidade derivados do PNG aprovado e configura `ic_launcher`, `roundIcon`, Adaptive Icon e splash nativa. Não aplique `stretch`, crop ou recomposição ao arquivo de origem. Para clientes web/PWA, o cache `alsistemas-v5` força a troca dos ícones antigos após o deploy.
+
 # 🚀 Deploy — Render (Backend) + Vercel (Frontend)
 
 

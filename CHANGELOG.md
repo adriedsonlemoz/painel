@@ -1,3 +1,13 @@
+# 1.0.154 — Novo ícone AL integrado ao APK e splash
+
+- Substitui a identidade anterior pelo novo ícone AL aprovado, sem gerar outra arte.
+- O PNG aprovado é preservado integralmente em `frontend/public/icons/al-sistemas-source.png`.
+- Launcher, `roundIcon`, Adaptive Icon, instalador/gerenciador do Android, PWA, Apple Touch Icon e abertura administrativa usam a mesma identidade.
+- Splash Android e abertura web exibem a imagem em `contain`/centralizada, mantendo proporção 1:1, sem crop, stretch ou deformação.
+- Assets por densidade são apenas redimensionamentos de alta qualidade do arquivo aprovado.
+- Cache estático atualizado para `alsistemas-v5` para remover a identidade anterior dos clientes já instalados.
+- Versão sincronizada em **1.0.154** no frontend, backend, manifesto e exemplos de ambiente.
+
 # 1.0.153 — Atualização guiada, progresso real e abertura administrativa
 
 - Unifica visualmente as etapas **Pacote → Revisão → R2 → GitHub → Produção**, mantendo cabeçalho, stepper, espaçamentos, cores e ações consistentes no Android e no navegador.

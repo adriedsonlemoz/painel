@@ -1,3 +1,19 @@
+# Relatório de implementação — 1.0.154
+
+## Identidade visual
+
+- O novo PNG AL aprovado foi integrado sem recriação e preservado integralmente como `frontend/public/icons/al-sistemas-source.png`.
+- Foram geradas somente cópias redimensionadas para os tamanhos exigidos por Android, PWA e Apple, mantendo aspecto 1:1 e sem crop/stretch.
+- Android utiliza a nova imagem em launcher normal, `roundIcon`, Adaptive Icon e splash por densidade.
+- A abertura administrativa do frontend continua apontando para `/icons/icon-512.png`, portanto passa automaticamente a exibir a mesma nova identidade.
+- O Service Worker foi atualizado para `alsistemas-v5` para invalidar o cache visual anterior.
+
+## Versão
+
+Frontend, backend, manifesto e exemplo de ambiente sincronizados em **1.0.154**.
+
+---
+
 # Relatório de implementação — 1.0.153
 
 ## Atualizações, produção cloud e bootstrap administrativo

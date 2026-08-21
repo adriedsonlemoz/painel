@@ -63,8 +63,9 @@ const approvedSize = ensureSquarePng(sourceIcon, 'Ícone aprovado')
 ensureDir(androidAssets, 'Assets Android')
 
 // Os assets Android são derivados do mesmo PNG aprovado e já vêm em proporção 1:1.
-// O script apenas os copia para o projeto Capacitor recém-gerado; não redimensiona nem
-// estica a imagem durante o build, evitando ícone/splash amassado ou desfocado.
+// O arquivo original fica preservado em public/icons/al-sistemas-source.png. O script
+// apenas copia as derivações prontas para o projeto Capacitor recém-gerado; não recorta,
+// estica ou recompõe a arte durante o build.
 const resourceDirs = [
   'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi',
   'drawable-mdpi', 'drawable-hdpi', 'drawable-xhdpi', 'drawable-xxhdpi', 'drawable-xxxhdpi',
@@ -141,7 +142,7 @@ styles = upsertStyleItem(styles, 'AppTheme.NoActionBarLaunch', 'android:windowBa
 styles = upsertStyleItem(styles, 'AppTheme.NoActionBarLaunch', 'android:background', '@drawable/al_sistemas_launch_background')
 fs.writeFileSync(stylesPath, styles)
 
-console.log(`✓ Ícone aprovado ${approvedSize.width}x${approvedSize.height} integrado sem deformação`)
+console.log(`✓ Ícone aprovado ${approvedSize.width}x${approvedSize.height} integrado integralmente, sem deformação`)
 console.log('✓ Launcher Android: mipmaps por densidade + Adaptive Icon + roundIcon')
 console.log('✓ Splash Android: marca centralizada, sem stretch, com fallback pré-Android 12')
 console.log(`✓ Barras do Android alinhadas ao painel: ${appSurface}`)
