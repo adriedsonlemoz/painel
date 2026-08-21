@@ -1,3 +1,20 @@
+# 1.0.153 — Atualização guiada, progresso real e abertura administrativa
+
+- Unifica visualmente as etapas **Pacote → Revisão → R2 → GitHub → Produção**, mantendo cabeçalho, stepper, espaçamentos, cores e ações consistentes no Android e no navegador.
+- Corrige o bloco **Revisão para produção**, que agora possui separação própria dos cards superiores e não encavala o resumo do pacote.
+- A etapa GitHub deixa o layout isolado “R2 → GitHub → Produção” e passa a fazer parte do mesmo assistente guiado, com destino real de produção, repositório/branch, verificação e publicação organizados no mesmo padrão.
+- O progresso geral cloud passa a usar somente sinais confirmáveis: **20% pelo pacote no R2, até 30% pelo progresso real do job GitHub e 25% por plataforma somente quando Vercel/Render confirmam produção**.
+- Remove porcentagens estimadas de Vercel e Render. Enquanto as APIs não devolvem percentual interno, a interface mostra estados reais como **Na fila, Construindo, Implantando, No ar e Falhou** com barra indeterminada quando apropriado.
+- Durante a produção, Vercel e Render aparecem lado a lado para deixar claro que frontend e backend podem concluir em momentos diferentes.
+- Compacta a tela **Atualização concluída**, remove repetições de 100%/checks e oculta o log de arquivos depois da confirmação, eliminando o estado incoerente `0/39 · 0%` em uma publicação já finalizada.
+- Adiciona **Aplicar atualização agora**: verifica o Service Worker, descarta o cache estático `alsistemas-v*` e recarrega a rota atual com parâmetro técnico temporário, sem apagar a sessão administrativa.
+- O botão de fechar recebe área de toque de 44 px e permanece como ação secundária; a ação principal da conclusão passa a ser aplicar a versão recém-publicada.
+- A abertura de `/admin` deixa o spinner genérico e mostra etapas reais de **Hospedagem/API → Configuração e sessão → Abrindo Administração**, explicando o possível cold start da Render, exibindo tempo decorrido e detalhes técnicos.
+- Após espera prolongada, a inicialização oferece **Tentar novamente** e **Ver status dos serviços** sem inventar uma porcentagem de cold start.
+- Caminhos longos de objetos no R2 são compactados visualmente para não aumentar desnecessariamente os cards.
+- Service Worker passa para `alsistemas-v4`; versão sincronizada em **1.0.153** no frontend, backend, `.env.example`, exportação de integrações e manifesto de atualização.
+- Nenhuma imagem, logo ou ícone foi criado ou alterado nesta versão.
+
 # 1.0.152 — Nova identidade Android, launcher e splash
 
 - Substitui o ícone anterior pela nova marca **AL** aprovada, sem engrenagem, preservando a proporção original **1:1** e os cantos arredondados.

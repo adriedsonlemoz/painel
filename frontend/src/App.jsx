@@ -16,7 +16,7 @@ import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import GlobalMeta from './components/GlobalMeta'
 import { setupService } from './services/api'
-import { isBackendReady, waitForBackendLive } from './services/backendWake'
+import { getBackendWakeState, isBackendReady, startBackendWake, waitForBackendLive } from './services/backendWake'
 import { startPublicPortalSync } from './services/publicSync'
 
 // ── Autenticação (carregadas no bundle principal — pequenas, sempre necessárias)
@@ -168,6 +168,14 @@ function FirstRunGuard({ children }) {
   const [probeStartedAt, setProbeStartedAt] = useState(() => performance.now())
   const [probeElapsed, setProbeElapsed] = useState(null)
   const [showProbe, setShowProbe] = useState(false)
+  const [wakeState, setWakeState] = useState(() => getBackendWakeState())
+
+  useEffect(() => {
+    const syncWake = (event) => setWakeState(event?.detail || getBackendWakeState())
+    window.addEventListener('alsistemas:backend-wake', syncWake)
+    setWakeState(getBackendWakeState())
+    return () => window.removeEventListener('alsistemas:backend-wake', syncWake)
+  }, [])
 
   useEffect(() => {
     if (!rotaProtegida) {
@@ -189,6 +197,12 @@ function FirstRunGuard({ children }) {
 
     const run = async () => {
       try {
+        // Em rotas administrativas o wake roda em paralelo para informar ao
+        // usuário se a Render está acordando, viva ou preparando banco/sessão.
+        if (rotaBloqueante && !isBackendReady()) {
+          void startBackendWake({ maxWaitMs: 90_000 })
+        }
+
         // No login a interface aparece imediatamente. O Render é acordado em
         // segundo plano e só depois consultamos o estado de instalação.
         if (rotaLogin) {
@@ -230,16 +244,31 @@ function FirstRunGuard({ children }) {
     }
   }, [state.retry, rotaProtegida, rotaBloqueante, rotaLogin])
 
+  const wakePhase = String(wakeState?.phase || 'idle')
+  const wakeStatus = String(wakeState?.status || 'idle')
+  const backendDone = wakeStatus === 'ready' || Boolean(wakeState?.readyAt)
+  const backendLive = backendDone || Boolean(wakeState?.liveAt)
+  const backendDetail = backendDone
+    ? 'API, banco e bootstrap prontos'
+    : backendLive || wakePhase === 'data'
+      ? 'Servidor respondeu; preparando banco, sessão e dados administrativos'
+      : wakeStatus === 'waking'
+        ? 'A hospedagem pode estar saindo do modo de repouso da Render'
+        : 'Iniciando conexão com a API'
+
   const probeStages = [
     { label: 'Aplicativo carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android' : 'navegador'}` },
     state.error
-      ? { label: 'Servidor / configuração', status: 'error', elapsed: probeElapsed, detail: state.error?.message || 'Falha ao consultar o estado do servidor' }
-      : state.checked
-        ? { label: 'Servidor / configuração', status: 'done', elapsed: probeElapsed, detail: state.needed ? 'Instalação nova detectada' : 'Instalação existente detectada' }
-        : { label: 'Servidor / configuração', status: 'running', startedAt: probeStartedAt, detail: 'Aguardando resposta do servidor' },
-    state.checked && state.needed
-      ? { label: 'Preparando próxima tela', status: rotaSetup ? 'done' : 'running', startedAt: performance.now(), detail: rotaSetup ? 'Assistente aberto' : 'Preparando assistente de configuração' }
-      : { label: 'Preparando próxima tela', status: 'pending', detail: 'Aguardando a verificação do servidor' },
+      ? { label: 'Hospedagem / API', status: 'error', elapsed: probeElapsed, detail: state.error?.message || wakeState?.lastError || 'Falha ao consultar o servidor' }
+      : { label: 'Hospedagem / API', status: backendDone ? 'done' : 'running', startedAt: probeStartedAt, detail: backendDetail },
+    state.checked
+      ? { label: 'Configuração e sessão', status: 'done', elapsed: probeElapsed, detail: state.needed ? 'Instalação nova detectada' : 'Instalação existente e sessão verificadas' }
+      : { label: 'Configuração e sessão', status: state.error ? 'error' : 'running', startedAt: probeStartedAt, detail: backendLive ? 'Validando instalação, permissões e sessão administrativa' : 'Aguardando o servidor para validar a instalação' },
+    state.checked && !state.needed
+      ? { label: 'Abrindo Administração', status: 'running', startedAt: performance.now(), detail: 'Carregando módulos e permissões do painel' }
+      : state.checked && state.needed
+        ? { label: 'Preparando próxima tela', status: rotaSetup ? 'done' : 'running', startedAt: performance.now(), detail: rotaSetup ? 'Assistente aberto' : 'Preparando assistente de configuração' }
+        : { label: 'Abrindo Administração', status: 'pending', detail: 'Será liberada assim que as verificações terminarem' },
   ]
 
   if (state.checked && state.needed && !rotaSetup) {
@@ -249,18 +278,19 @@ function FirstRunGuard({ children }) {
   if (state.checked && !state.needed && rotaSetup) return <Navigate to="/login" replace />
 
   if ((rotaBloqueante && !rotaSetup && state.loading) || (rotaBloqueante && showProbe && !state.checked)) {
-    // Em instalação nova/diagnóstico lento, mostrar a etapa real em vez de um
-    // spinner genérico. Quando já instalado, desaparece automaticamente após a resposta.
-    if (!state.checked || state.needed || state.error) {
-      return (
-        <div style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, #f1f8f4 0%, #f8faf9 42%, #f6f8f7 100%)', padding: '24px 16px' }}>
-          <SetupStartupDiagnostics startedAt={probeStartedAt} stages={probeStages} />
-        </div>
-      )
-    }
+    return (
+      <div style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, #f1f8f4 0%, #f8faf9 42%, #f6f8f7 100%)', padding: '24px 16px' }}>
+        <SetupStartupDiagnostics
+          title="Etapas para abrir a Administração"
+          startedAt={probeStartedAt}
+          stages={probeStages}
+          onRetry={() => { void startBackendWake({ maxWaitMs: 90_000 }); setState(prev => ({ ...prev, retry: prev.retry + 1 })) }}
+          statusHref="/status/"
+        />
+      </div>
+    )
   }
 
-  if (rotaBloqueante && !rotaSetup && state.loading) return <LoadingSpinner texto="Verificando configuração inicial..." />
   if (rotaBloqueante && !rotaSetup && state.error) {
     return (
       <AppErrorScreen

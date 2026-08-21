@@ -1,5 +1,13 @@
 # Correções para execução local
 
+## 1.0.153 — UX de atualização e cold start administrativo
+
+- Fluxo guiado de atualização padronizado do pacote à produção.
+- Percentual GitHub usa progresso real; Vercel/Render usam estados reais e confirmação final.
+- Tela concluída compacta e com ação **Aplicar atualização agora**.
+- Administração informa cold start/servidor, sessão e abertura do painel em vez de spinner vazio.
+- Nenhum asset de imagem foi alterado.
+
 - Frontend configurado para `http://127.0.0.1:3001/api`.
 - Backend aceita frontend em `127.0.0.1` e `localhost`.
 - Cliente HTTP possui timeout de 10 segundos e mensagens claras de conexão.

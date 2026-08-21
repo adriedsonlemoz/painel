@@ -1,5 +1,12 @@
 # 🚀 Deploy — Render (Backend) + Vercel (Frontend)
 
+
+## Atualizações 1.0.153 — aplicar versão no navegador
+
+Depois que GitHub, Vercel e Render confirmarem a publicação, a Central oferece **Aplicar atualização agora**. A ação executa `registration.update()` nos Service Workers, envia `SKIP_WAITING` quando houver worker aguardando, remove apenas caches estáticos `alsistemas-v*` e recarrega a rota atual. O token/sessão administrativa não é apagado.
+
+O acompanhamento de Vercel e Render é baseado nos estados reais devolvidos pelas APIs. Não interprete a ausência de percentual nessas plataformas como falha: a interface mostra uma barra indeterminada enquanto o provedor estiver em fila/build/deploy e só contabiliza o bloco correspondente quando a produção for confirmada.
+
 ## Arquitetura
 
 ```

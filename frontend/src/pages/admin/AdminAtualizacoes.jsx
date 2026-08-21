@@ -22,6 +22,38 @@ const releaseNotes=raw=>String(raw||'')
   .filter(x=>x&&!/^#{1,6}\s/.test(x))
   .map(x=>x.replace(/^[-*•]\s*/,''))
 
+const compactObjectKey=value=>{
+  const raw=String(value||'')
+  if(raw.length<=52)return raw
+  const parts=raw.split('/')
+  if(parts.length>=3)return `${parts.slice(0,2).join('/')}/…/${parts.at(-1)}`
+  return `${raw.slice(0,24)}…${raw.slice(-22)}`
+}
+
+async function applyPublishedVersion(){
+  const toastId=toast.loading('Buscando a versão publicada…')
+  try{
+    if('serviceWorker' in navigator){
+      const regs=await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map(async reg=>{
+        try{await reg.update()}catch{/* reload continua sendo seguro */}
+        if(reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'})
+      }))
+    }
+    if('caches' in window){
+      const keys=await caches.keys()
+      await Promise.all(keys.filter(key=>/^alsistemas-v/i.test(key)).map(key=>caches.delete(key)))
+    }
+    toast.success('Versão nova pronta. Recarregando…',{id:toastId,duration:1400})
+    const target=new URL(window.location.href)
+    target.searchParams.set('__als_update',String(Date.now()))
+    window.setTimeout(()=>window.location.replace(target.toString()),260)
+  }catch(error){
+    toast.error(error?.message||'Não foi possível atualizar o cache. Recarregando a página.',{id:toastId})
+    window.setTimeout(()=>window.location.reload(),400)
+  }
+}
+
 const versionParts=v=>String(v||'').split('-')[0].split('.').map(n=>Number(n)||0)
 const compareVersions=(a,b)=>{const A=versionParts(a),B=versionParts(b);for(let i=0;i<3;i++){if((A[i]||0)!==(B[i]||0))return (A[i]||0)>(B[i]||0)?1:-1}return 0}
 async function inspectUpdatePackage(file){
@@ -177,7 +209,7 @@ export default function AdminAtualizacoes(){
           localStorage.removeItem('als:last-update-job')
           await load({silent:true})
           if(r.job.status==='completed'&&r.job.type!=='github-publish'){
-            toast.success('Atualização concluída. Confira o resumo e toque em Fechar.',{duration:3000})
+            toast.success('Atualização concluída. Aplique a versão publicada quando estiver pronto.',{duration:3000})
           }else if(r.job.status==='completed'&&r.job.type==='github-publish'){
           }
           return
@@ -542,8 +574,8 @@ export default function AdminAtualizacoes(){
       <div><span>Mongoose</span><b>{data?.runtime?.stack?.mongoose?.version||'—'}</b></div>
     </div>
 
-    {job&&!['github-publish','cloud-release'].includes(job.type)&&<UpdateProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status)){const reload=job.status==='completed';setJob(null);if(reload)window.location.reload()}}}/>}
-    {job&&['github-publish','cloud-release'].includes(job.type)&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','attention','restart-required','rolled-back'].includes(job.status))setJob(null)}} onReconcile={reconcileCloudRelease} onRetry={retryCloudRelease} onRepublish={republishCloudRelease} onInterrupt={interruptCloudRelease}/>}
+    {job&&!['github-publish','cloud-release'].includes(job.type)&&<UpdateProgressModal job={job} onClose={()=>{if(['completed','failed','restart-required','rolled-back'].includes(job.status))setJob(null)}} onApply={applyPublishedVersion}/>}
+    {job&&['github-publish','cloud-release'].includes(job.type)&&<PublishProgressModal job={job} onClose={()=>{if(['completed','failed','attention','restart-required','rolled-back'].includes(job.status))setJob(null)}} onApply={applyPublishedVersion} onReconcile={reconcileCloudRelease} onRetry={retryCloudRelease} onRepublish={republishCloudRelease} onInterrupt={interruptCloudRelease}/>}
 
     {uiPanel==='upload'&&<PanelModal kicker="ATUALIZAÇÃO GUIADA" title={wizardStep===0?'Selecionar pacote':wizardStep===1?'Revisar atualização':'Proteção e instalação'} onClose={resetUpdateWizard} wide>
       <UpdateWizardSteps step={wizardStep} managed={managedHost}/>
@@ -580,10 +612,10 @@ export default function AdminAtualizacoes(){
         </div>
         {!managedHost&&wizardPreflight&&<PreflightSummary data={wizardPreflight} compact/>}
         {managedHost&&<div className="updates-managed-review">
-          <b>Revisão de produção</b><span>O pacote foi validado sem substituir a instância atual. A próxima etapa confirma a cópia persistente no R2 antes de abrir o envio ao GitHub.</span>
+          <b>Revisão para produção</b><span>O pacote está validado. Na próxima etapa confirmamos a cópia persistente no R2 antes de liberar a publicação no GitHub.</span>
           {!!packagePreview?.modules?.length&&<div className="updates-module-pills">{packagePreview.modules.map(x=><span key={x}>{x}</span>)}</div>}
         </div>}
-        {!!packagePreview?.changelog?.length&&<details className="updates-wizard-notes"><summary>O que mudou · {packagePreview.changelog.length} item(ns)</summary><ul>{packagePreview.changelog.slice(0,10).map((x,i)=><li key={i}>{x}</li>)}</ul></details>}
+        {!!packagePreview?.changelog?.length&&<details className="updates-wizard-notes"><summary>O que mudou · {packagePreview.changelog.length} alterações</summary><ul>{packagePreview.changelog.slice(0,10).map((x,i)=><li key={i}>{x}</li>)}</ul></details>}
         <div className="updates-wizard-footer"><button onClick={()=>setWizardStep(0)} disabled={wizardBusy}>Voltar</button><span>2 de 5 · revisão</span><button className="updates-primary-action" disabled={wizardBusy||(!managedHost&&(!wizardPreflight?.ok||wizardPreflight?.repair?.noChanges))} onClick={advanceWizard}>Avançar</button></div>
       </>}
       {wizardStep===2&&<>
@@ -592,7 +624,7 @@ export default function AdminAtualizacoes(){
           <div><small>{managedHost?'SNAPSHOT R2':'SNAPSHOT DE SEGURANÇA'}</small><h3>{managedHost?'Pacote preservado antes da publicação':'Backup automático antes de alterar arquivos'}</h3><p>{managedHost?'O ZIP validado fica no R2 e pode ser republicado mesmo que navegador, Render ou Vercel reiniciem.':'O worker cria e verifica um snapshot da instalação atual. Se uma etapa crítica falhar, o rollback automático usa este ponto de retorno.'}</p></div>
         </div>
         <div className="updates-wizard-mini-grid">
-          {managedHost?<><MiniStat label="Bucket" value={wizardStage?.bucket||data?.cloudStorage?.bucket||'—'}/><MiniStat label="Objeto" value={wizardStage?.objectKey||'armazenado no R2'}/></>:<><MiniStat label="Backup estimado" value={bytes(wizardPreflight?.disk?.estimatedBackupBytes)}/><MiniStat label="Espaço livre" value={bytes(wizardPreflight?.disk?.freeBytes)}/></>}
+          {managedHost?<><MiniStat label="Bucket" value={wizardStage?.bucket||data?.cloudStorage?.bucket||'—'}/><MiniStat label="Objeto" value={compactObjectKey(wizardStage?.objectKey||'armazenado no R2')}/></>:<><MiniStat label="Backup estimado" value={bytes(wizardPreflight?.disk?.estimatedBackupBytes)}/><MiniStat label="Espaço livre" value={bytes(wizardPreflight?.disk?.freeBytes)}/></>}
         </div>
         {!managedHost&&wizardPreflight?.repair?.sameVersion&&<div className="updates-repair-note"><b>↻ Reparo da mesma versão</b><span>{wizardPreflight.files.operations} operação(ões) de arquivo foram identificadas. A versão só será reaplicada nesses pontos; arquivos iguais não serão regravados.</span></div>}
         <div className="updates-wizard-footer"><button onClick={()=>setWizardStep(1)} disabled={wizardBusy}>Voltar</button><span>3 de 5 · proteção</span><button className="updates-primary-action" disabled={wizardBusy} onClick={advanceWizard}>{managedHost?'Avançar para GitHub':'Criar snapshot e instalar'}</button></div>
@@ -687,21 +719,26 @@ export default function AdminAtualizacoes(){
 
     {githubPublish&&<div className="updates-modal-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setGithubPublish(null)}}>
       <div className="updates-modal updates-github-modal" role="dialog" aria-modal="true" aria-labelledby="github-publish-title">
-        <div style={{fontSize:12,fontWeight:800,color:C.muted,letterSpacing:'.04em'}}>MÓDULO DE PUBLICAÇÃO · {githubPublish.sourceType==='installed'?'INSTALAÇÃO ATUAL':'PACOTE PREPARADO'}</div>
-        <h2 id="github-publish-title" style={{margin:'7px 0 4px',color:C.text,fontSize:20}}>{managedHost?'R2 → GitHub → Produção':'GitHub / Deploy'}</h2>
-        <p style={{margin:'0 0 16px',color:C.muted,fontSize:13,lineHeight:1.55}}>O AL Sistemas publica {githubPublish.sourceType==='installed'?<><b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>o pacote como <b>commit no GitHub</b>.</>} {managedHost?'O ZIP validado fica persistido no R2 e não depende mais do navegador. Em produção, o GitHub vira a origem do código e a Central acompanha Vercel + Render. ':''}A publicação reutiliza as credenciais de Integrações e APIs.</p>
-        {githubPublish.loading?<div style={{padding:'16px 0',color:C.muted}}>Consultando repositórios autorizados…</div>:<>
-          {githubPublish.error&&<div style={{padding:11,borderRadius:9,border:`1px solid ${C.red}`,color:C.red,background:'var(--adm-surface2)',fontSize:12,marginBottom:12}}>{githubPublish.error}</div>}
+        <div className="updates-modal-titlebar updates-github-titlebar">
+          <div><div className="updates-modal-kicker">{managedHost?'ATUALIZAÇÃO GUIADA':'MÓDULO DE PUBLICAÇÃO'}</div><h2 id="github-publish-title">{managedHost?'Publicar no GitHub':'GitHub / Deploy'}</h2></div>
+          <button className="updates-modal-x" onClick={()=>setGithubPublish(null)} aria-label="Fechar">×</button>
+        </div>
+        {managedHost&&<UpdateWizardSteps managed step={3}/>} 
+        <p className="updates-panel-copy">{managedHost?<>O pacote já está protegido no R2. Agora o AL Sistemas prepara o <b>commit no GitHub</b> e, em seguida, acompanha Vercel e Render até a produção.</>:githubPublish.sourceType==='installed'?<>O AL Sistemas publica <b>a instalação atual</b> diretamente como commit no GitHub, sem ZIP.</>:<>O AL Sistemas publica o pacote como <b>commit no GitHub</b>.</>} A publicação reutiliza as credenciais de Integrações e APIs.</p>
+        {githubPublish.loading?<div className="updates-loading-panel">Consultando repositórios autorizados…</div>:<>
+          {githubPublish.error&&<div className="updates-wizard-error">{githubPublish.error}</div>}
           {(githubPublish.repositories||[]).length>0&&<>
-            {managedHost&&githubPublish.productionTarget?.repository&&<div className="updates-target-lock"><b>Destino de produção detectado</b><span>{githubPublish.productionTarget.repository} @ {githubPublish.productionTarget.branch||'main'}</span><small>O atualizador não usa mais o repositório padrão global do GitHub. Ele publica somente no repositório realmente ligado à Vercel/Render.</small></div>}
-            <label className="updates-modal-field">Repositório<select disabled={Boolean(githubPublish.targetLocked)} value={githubPublish.repository} onChange={e=>{const repo=(githubPublish.repositories||[]).find(r=>r.fullName===e.target.value);setGithubPublish(g=>({...g,repository:e.target.value,branch:repo?.defaultBranch||'main',deploymentCheck:null}))}}>{(githubPublish.repositories||[]).map(r=><option key={r.id} value={r.fullName}>{r.fullName}{r.private?' • privado':''}</option>)}</select></label>
-            <label className="updates-modal-field">Branch<input disabled={Boolean(githubPublish.targetLocked)} value={githubPublish.branch} onChange={e=>setGithubPublish(g=>({...g,branch:e.target.value,deploymentCheck:null}))} placeholder="main"/></label>
-            <div className="updates-panel-actions"><button onClick={()=>checkDeployment(true)} disabled={githubPublish.checking}>{githubPublish.checking?'Verificando…':'Verificar GitHub / Vercel'}</button>{githubPublish.deploymentCheck&&<span className={githubPublish.deploymentCheck.ok?'good':'bad-text'}>{githubPublish.deploymentCheck.ok?'✓ GitHub pronto':'⚠ GitHub precisa de atenção'}</span>}</div>
+            {managedHost&&githubPublish.productionTarget?.repository&&<div className="updates-target-lock"><b>Destino de produção detectado</b><span>{githubPublish.productionTarget.repository} @ {githubPublish.productionTarget.branch||'main'}</span><small>Este é o repositório realmente ligado à Vercel/Render. O destino fica bloqueado para evitar publicação no projeto errado.</small></div>}
+            <div className="updates-github-fields">
+              <label className="updates-modal-field">Repositório<select disabled={Boolean(githubPublish.targetLocked)} value={githubPublish.repository} onChange={e=>{const repo=(githubPublish.repositories||[]).find(r=>r.fullName===e.target.value);setGithubPublish(g=>({...g,repository:e.target.value,branch:repo?.defaultBranch||'main',deploymentCheck:null}))}}>{(githubPublish.repositories||[]).map(r=><option key={r.id} value={r.fullName}>{r.fullName}{r.private?' • privado':''}</option>)}</select></label>
+              <label className="updates-modal-field">Branch<input disabled={Boolean(githubPublish.targetLocked)} value={githubPublish.branch} onChange={e=>setGithubPublish(g=>({...g,branch:e.target.value,deploymentCheck:null}))} placeholder="main"/></label>
+            </div>
+            <div className="updates-github-check-row"><button onClick={()=>checkDeployment(true)} disabled={githubPublish.checking}>{githubPublish.checking?'Verificando destino…':'Verificar destino de produção'}</button>{githubPublish.deploymentCheck&&<span className={githubPublish.deploymentCheck.ok?'good':'bad-text'}>{githubPublish.deploymentCheck.ok?'✓ GitHub e produção conferidos':'⚠ Destino precisa de atenção'}</span>}</div>
             {githubPublish.deploymentCheck&&<div className="updates-deploy-check"><div><b>GitHub:</b> {githubPublish.deploymentCheck.github?.writable?'escrita autorizada':'sem permissão de escrita'} · branch {githubPublish.deploymentCheck.github?.branchExists?'encontrada':githubPublish.deploymentCheck.github?.branchWillBeCreated?'será criada':'indisponível'}.</div><div><b>Vercel:</b> {githubPublish.deploymentCheck.vercel?.configured?githubPublish.deploymentCheck.vercel.message:'não configurada; a publicação continuará somente no GitHub.'}</div>{githubPublish.deploymentCheck.vercel?.projects?.map(pr=><div key={pr.id}>▲ <b>{pr.name}</b>{pr.rootDirectory?` · raiz: ${pr.rootDirectory}`:''}{pr.productionBranch?` · produção: ${pr.productionBranch}`:''}</div>)}{managedHost&&<div><b>Render:</b> {githubPublish.deploymentCheck.render?.message||'serviços vinculados ainda não verificados.'}</div>}</div>}
-            <label className="updates-modal-field">{managedHost?'Publicação da versão':'Onde aplicar os arquivos do ZIP'}<select disabled={managedHost} value={managedHost?'project':githubPublish.publishMode} onChange={e=>setGithubPublish(g=>({...g,publishMode:e.target.value}))}><option value="project">Projeto completo — /backend + /frontend</option>{!managedHost&&<><option value="frontend-folder">Somente frontend — pasta /frontend</option><option value="frontend-root">Somente frontend — raiz do repositório (Vercel)</option><option value="backend-folder">Somente backend — pasta /backend</option></>}</select>{managedHost&&<small>Na produção cloud o AL mantém frontend e backend no mesmo commit para acompanhar Vercel e Render juntos.</small>}</label>
+            <label className="updates-modal-field updates-publish-mode">{managedHost?'Publicação da versão':'Onde aplicar os arquivos do ZIP'}<select disabled={managedHost} value={managedHost?'project':githubPublish.publishMode} onChange={e=>setGithubPublish(g=>({...g,publishMode:e.target.value}))}><option value="project">Projeto completo — /backend + /frontend</option>{!managedHost&&<><option value="frontend-folder">Somente frontend — pasta /frontend</option><option value="frontend-root">Somente frontend — raiz do repositório (Vercel)</option><option value="backend-folder">Somente backend — pasta /backend</option></>}</select>{managedHost&&<small>Frontend e backend permanecem no mesmo commit para o acompanhamento de produção.</small>}</label>
           </>}
         </>}
-        <div className="updates-modal-footer"><button onClick={()=>setGithubPublish(null)}>Cancelar</button><button className="primary-blue" disabled={githubPublish.loading||githubPublish.submitting||!githubPublish.repository} onClick={publishGithub}>{githubPublish.submitting?'Publicando…':githubPublish.sourceType==='installed'?'Publicar versão atual':'Publicar atualização'}</button></div>
+        <div className="updates-modal-footer updates-github-footer"><button onClick={()=>setGithubPublish(null)}>Cancelar</button><button className="primary-blue" disabled={githubPublish.loading||githubPublish.submitting||!githubPublish.repository} onClick={publishGithub}>{githubPublish.submitting?'Publicando…':githubPublish.sourceType==='installed'?'Publicar versão atual':'Publicar atualização'}</button></div>
       </div>
     </div>}
 
@@ -742,9 +779,21 @@ export default function AdminAtualizacoes(){
       .updates-protection-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:13px;align-items:start;padding:14px;border:1px solid var(--adm-border);border-radius:14px;background:var(--adm-surface2)}.updates-protection-icon{width:48px;height:48px;border-radius:14px;border:1px solid var(--adm-border);background:var(--adm-surface);display:grid;place-items:center;font-size:15px;font-weight:900;color:var(--adm-accent)}.updates-protection-card h3{margin:3px 0 5px;font-size:15px;color:var(--adm-text)}.updates-protection-card p{margin:0;font-size:10.5px;line-height:1.55;color:var(--adm-muted)}
       .updates-wizard-footer{position:sticky;bottom:-20px;z-index:4;margin:16px -20px -20px;padding:12px 20px;background:color-mix(in srgb,var(--adm-surface) 96%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--adm-border);display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.updates-wizard-footer>span{text-align:center;font-size:9px;font-weight:800;color:var(--adm-muted)}.updates-wizard-footer button{border:1px solid var(--adm-border);border-radius:10px;background:var(--adm-surface2);color:var(--adm-text);padding:10px 13px;font-weight:850;cursor:pointer}.updates-primary-action{background:var(--adm-accent)!important;border-color:var(--adm-accent)!important;color:var(--adm-accent-contrast,#fff)!important}.updates-wizard-footer button:disabled{opacity:.5;cursor:not-allowed}
       .updates-progress-stepper{padding:0 20px 4px}.updates-progress-stepper .updates-wizard-steps{margin-bottom:8px}.updates-live-log{margin:12px 0 2px;border:1px solid var(--adm-border);border-radius:12px;background:var(--adm-surface2);overflow:hidden}.updates-live-log-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:10px 11px}.updates-live-log-head>div{min-width:0;display:grid;gap:2px}.updates-live-log-head b{font-size:10.5px;color:var(--adm-text);overflow-wrap:anywhere}.updates-live-log-head>span{font-size:9px;font-weight:850;color:var(--adm-muted);white-space:nowrap}.updates-live-log-track{height:5px;background:var(--adm-surface);overflow:hidden}.updates-live-log-track i{display:block;height:100%;background:var(--adm-accent);transition:width .2s ease}.updates-live-log-current{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent)}.updates-live-log-current em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-current code{min-width:0;font-size:9px;color:var(--adm-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.updates-live-log-current strong{font-size:9px;color:var(--adm-text);font-variant-numeric:tabular-nums}.updates-live-log-list{max-height:180px;overflow:auto;padding:4px 0}.updates-live-log-list>div{display:grid;grid-template-columns:42px minmax(0,1fr) 16px;gap:7px;align-items:center;padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--adm-border) 65%,transparent);font-size:9px}.updates-live-log-list em{font-style:normal;font-size:8px;font-weight:900;color:var(--adm-accent)}.updates-live-log-list .act-add{color:var(--adm-success)}.updates-live-log-list .act-del{color:var(--adm-danger)}.updates-live-log-list .act-mod{color:var(--adm-warning)}.updates-live-log-list code{font-size:9px;color:var(--adm-muted);overflow-wrap:anywhere;white-space:normal}.updates-live-log-list>div>span{color:var(--adm-success)}.updates-live-log-list .current>span{color:var(--adm-accent)}.updates-cloud-filelog-wrap{margin:0 20px}.updates-failure-report{margin:14px 0 0;border:1px solid color-mix(in srgb,var(--adm-danger) 32%,var(--adm-border));border-radius:14px;background:color-mix(in srgb,var(--adm-danger) 3%,var(--adm-surface));overflow:hidden}.updates-failure-report-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:13px 14px;border-bottom:1px solid var(--adm-border)}.updates-failure-report-head>div:first-child{display:grid;gap:3px;min-width:0}.updates-failure-report-head small{font-size:8px;font-weight:900;letter-spacing:.09em;color:var(--adm-danger)}.updates-failure-report-head b{font-size:13px;color:var(--adm-text)}.updates-failure-report-head span{font-size:10px;line-height:1.4;color:var(--adm-muted)}.updates-failure-report-head>div:last-child{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.updates-failure-report-head button{border:1px solid var(--adm-border);background:var(--adm-surface);color:var(--adm-text);border-radius:8px;padding:7px 9px;font-size:9px;font-weight:800;cursor:pointer}.updates-failure-primary{display:grid;gap:4px;padding:10px 14px;background:color-mix(in srgb,var(--adm-danger) 7%,transparent);border-bottom:1px solid var(--adm-border)}.updates-failure-primary b{font-size:9px;color:var(--adm-danger);text-transform:uppercase;letter-spacing:.06em}.updates-failure-primary span{font-size:10px;line-height:1.45;color:var(--adm-text);overflow-wrap:anywhere}.updates-failure-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.updates-failure-grid section{min-width:0;border:1px solid var(--adm-border);background:var(--adm-surface);border-radius:11px;padding:10px}.updates-failure-grid section.bad{border-color:color-mix(in srgb,var(--adm-danger) 35%,var(--adm-border))}.updates-failure-grid header{display:flex;align-items:center;gap:7px}.updates-failure-grid header>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:var(--adm-surface2);font-size:10px;color:var(--adm-muted)}.updates-failure-grid section.bad header>span{color:var(--adm-danger);background:color-mix(in srgb,var(--adm-danger) 8%,var(--adm-surface))}.updates-failure-grid header>div{display:grid;gap:1px}.updates-failure-grid header b{font-size:10px;color:var(--adm-text)}.updates-failure-grid header small{font-size:8px;color:var(--adm-muted)}.updates-failure-grid p{margin:8px 0 0;font-size:10px;line-height:1.45;color:var(--adm-text);overflow-wrap:anywhere}.updates-failure-grid pre{margin:8px 0 0;max-height:190px;overflow:auto;background:var(--adm-bg);border:1px solid var(--adm-border);border-radius:8px;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:8.5px;line-height:1.45;color:var(--adm-muted)}.updates-failure-empty{margin-top:8px;font-size:9px;line-height:1.45;color:var(--adm-muted)}@media(max-width:700px){.updates-failure-report-head{display:grid}.updates-failure-report-head>div:last-child{justify-content:flex-start}.updates-failure-grid{grid-template-columns:1fr}}.updates-modal-overlay{background:var(--adm-overlay,rgba(15,23,42,.46))}
+      /* 1.0.153 — fluxo guiado visualmente unificado */
+      .updates-managed-review{margin-top:14px}.updates-wizard-notes{margin-top:12px}
+      .updates-modal-x,.updates-progress-close{width:44px;height:44px;border-radius:12px;font-size:22px;display:grid;place-items:center;line-height:1}
+      .updates-github-modal{width:min(100%,680px)}.updates-github-titlebar{margin-bottom:10px}.updates-github-titlebar h2{font-size:21px}.updates-github-fields{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px}.updates-github-fields .updates-modal-field{margin-bottom:4px}.updates-github-check-row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0}.updates-github-check-row button{border:1px solid var(--adm-border);border-radius:9px;padding:9px 12px;font-weight:800;background:var(--adm-surface2);color:var(--adm-text);cursor:pointer}.updates-github-check-row span{font-size:10px;font-weight:800}.updates-publish-mode{margin-top:10px}.updates-publish-mode small{display:block;margin-top:6px;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-github-footer{padding-top:14px;border-top:1px solid var(--adm-border)}
+      .updates-modal-footer .primary-blue,.primary-blue{background:var(--adm-accent);color:#fff;border-color:var(--adm-accent)}
+      .updates-cloud-summary>div{min-width:0}.updates-cloud-summary small{font-size:8.5px;line-height:1.35;color:var(--adm-muted);max-width:390px}.updates-cloud-summary strong{color:var(--adm-accent)}.updates-cloud-track i{background:var(--adm-accent)}
+      .updates-cloud-current .updates-cloud-stage{min-height:0;padding:14px;display:block}.updates-cloud-production-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.updates-cloud-production-grid .updates-cloud-stage{min-height:155px;display:flex;flex-direction:column;justify-content:flex-start}
+      .updates-stage-progress.indeterminate{position:relative}.updates-stage-progress.indeterminate i{position:absolute;width:34%!important;animation:updates-indeterminate 1.35s ease-in-out infinite}.updates-cloud-stage.run .updates-stage-progress.indeterminate i{background:var(--adm-accent)}@keyframes updates-indeterminate{0%{left:-35%}55%{left:52%}100%{left:105%}}
+      .updates-cloud-chain{gap:5px}.updates-cloud-chain>span.run{color:var(--adm-accent);border-color:color-mix(in srgb,var(--adm-accent) 42%,var(--adm-border));background:color-mix(in srgb,var(--adm-accent) 7%,var(--adm-surface2))}
+      .updates-cloud-wizard-done{padding-bottom:0}.updates-cloud-finish-compact{min-height:0;display:grid;grid-template-columns:42px minmax(0,1fr);justify-items:stretch;align-items:center;text-align:left;gap:10px 12px;padding:12px 0}.updates-cloud-finish-compact .updates-cloud-finish-icon{width:42px;height:42px;margin:0;border-radius:13px;font-size:21px}.updates-cloud-finish-copy{min-width:0}.updates-cloud-finish-copy small{display:block;font-size:8.5px;font-weight:900;letter-spacing:.11em;color:var(--adm-success);margin-bottom:2px}.updates-cloud-finish-compact h3{font-size:16px}.updates-cloud-finish-compact p{font-size:10px;max-width:none}.updates-cloud-finish-compact .updates-cloud-finish-list{grid-column:1/-1;justify-content:flex-start;margin-top:0}
+      .updates-cloud-progress-complete{width:min(650px,calc(100vw - 24px));max-height:86dvh!important}.updates-cloud-progress-complete .updates-progress-head{padding-bottom:10px}.updates-cloud-progress-complete .updates-progress-stepper{padding-bottom:0}.updates-cloud-progress-complete .updates-wizard-steps{margin-bottom:10px}
+      .updates-finished-modal{width:min(520px,calc(100vw - 28px));padding:20px!important;text-align:left}.updates-finished-head{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:start}.updates-finished-head .updates-finished-icon{width:44px;height:44px;margin:0;border-radius:13px;font-size:21px}.updates-finished-head small{display:block;font-size:8.5px;font-weight:900;letter-spacing:.11em;color:var(--adm-success);margin-top:2px}.updates-finished-head h2{font-size:18px;margin:2px 0 3px}.updates-finished-head p{font-size:10.5px;line-height:1.45;color:var(--adm-muted);margin:0}.updates-finished-version{margin-top:12px}.updates-finished-details{margin-top:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);border-radius:11px;padding:10px 12px}.updates-finished-details summary{font-size:10px;font-weight:800;color:var(--adm-text);cursor:pointer}.updates-finished-details ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}.updates-finished-details li{font-size:9.5px;line-height:1.4;color:var(--adm-muted)}.updates-finished-actions{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;margin-top:14px}.updates-finished-actions button{min-height:44px;border:1px solid var(--adm-border);border-radius:11px;padding:9px 13px;background:var(--adm-surface2);color:var(--adm-text);font-weight:850;cursor:pointer}.updates-finished-actions .updates-apply-now{background:var(--adm-accent);border-color:var(--adm-accent);color:#fff}.updates-cloud-finished-actions{margin:10px 20px 18px}
       @media(max-width:760px){.updates-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-status-pill{display:none}}
       .updates-cloud-wizard{max-width:560px;margin:0 auto;padding:0 20px 10px}.updates-cloud-wizard-dots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.updates-cloud-wizard-dots>span{min-width:0;display:grid;justify-items:center;gap:4px;color:var(--adm-muted)}.updates-cloud-wizard-dots i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--adm-border);background:var(--adm-surface2);font-style:normal;font-size:9px;font-weight:900}.updates-cloud-wizard-dots small{font-size:7px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.updates-cloud-wizard-dots .active i{border-color:var(--adm-accent);color:var(--adm-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--adm-accent) 12%,transparent)}.updates-cloud-wizard-dots .ok i{border-color:color-mix(in srgb,var(--adm-success) 38%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 7%,var(--adm-surface2))}.updates-cloud-wizard-dots .bad i{border-color:color-mix(in srgb,var(--adm-danger) 45%,var(--adm-border));color:var(--adm-danger)}.updates-cloud-current{display:grid;gap:10px;align-content:start}.updates-cloud-current .updates-cloud-stage{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:center}.updates-cloud-current-caption{text-align:center;font-size:9px;line-height:1.4;color:var(--adm-muted)}.updates-cloud-finish{min-height:250px;display:grid;justify-items:center;align-content:center;gap:8px;text-align:center;padding:20px}.updates-cloud-finish-icon{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--adm-success) 9%,var(--adm-surface2));color:var(--adm-success);font-size:28px;font-weight:900}.updates-cloud-finish h3{margin:0;color:var(--adm-text);font-size:18px}.updates-cloud-finish p{margin:0;max-width:390px;font-size:11px;line-height:1.5;color:var(--adm-muted)}.updates-cloud-finish-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:5px}.updates-cloud-finish-list span{font-size:8px;font-weight:850;padding:5px 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--adm-success) 30%,var(--adm-border));color:var(--adm-success);background:color-mix(in srgb,var(--adm-success) 6%,var(--adm-surface2))}.updates-progress-overlay{align-items:center!important;justify-content:center!important;padding:14px!important}.updates-cloud-progress-modal{max-height:88dvh!important}
-      @media(max-width:560px){.updates-hero h1{font-size:18px!important}.updates-command{padding:13px 12px;gap:10px}.updates-command-icon{width:38px;height:38px;font-size:18px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:12px;align-items:center;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px;border-bottom:1px solid var(--adm-border);padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-finished-modal{width:calc(100% - 28px)!important;border-radius:18px!important;padding:20px 16px!important;margin-bottom:14px}.updates-finished-modal h2{font-size:19px;margin-bottom:14px}.updates-finished-version strong{font-size:15px}.updates-finished-changes li,.updates-finished-changes p{font-size:10.5px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}.updates-recovery-actions{padding:0 10px 8px;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.updates-recovery-actions button{min-height:38px;padding:7px 6px;font-size:9px}.updates-wizard-mini-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-wizard-footer{bottom:-16px;margin:14px -16px -16px;padding:11px 16px}.updates-wizard-footer{grid-template-columns:auto minmax(0,1fr) auto}.updates-wizard-step span{font-size:7px}.updates-live-log-list{max-height:150px}}
+      @media(max-width:560px){.updates-github-fields{grid-template-columns:1fr}.updates-cloud-production-grid{grid-template-columns:1fr}.updates-cloud-production-grid .updates-cloud-stage{min-height:0}.updates-finished-actions{grid-template-columns:1fr}.updates-cloud-finished-actions{margin:10px 14px 14px}.updates-hero h1{font-size:18px!important}.updates-command{padding:13px 12px;gap:10px}.updates-command-icon{width:38px;height:38px;font-size:18px}.updates-check-grid{grid-template-columns:1fr}.updates-modal-overlay{padding:12px;align-items:center;justify-content:center}.updates-modal{width:100%;max-height:92dvh;border-radius:18px;border-bottom:1px solid var(--adm-border);padding:16px}.updates-package-picker{grid-template-columns:1fr}.updates-send-package{width:100%;min-height:44px}.updates-file-selected{align-items:flex-start;flex-direction:column}.updates-primary-action{width:100%}.updates-release-file{display:grid;gap:3px}.updates-release-file span{flex:auto}.updates-release-actions{display:grid;grid-template-columns:1fr}.updates-release-actions button{width:100%}.updates-progress-modal{width:min(100%,620px);max-height:92dvh;border-radius:18px}.updates-finished-modal{width:calc(100% - 28px)!important;border-radius:18px!important;padding:20px 16px!important;margin-bottom:14px}.updates-finished-modal h2{font-size:19px;margin-bottom:14px}.updates-finished-version strong{font-size:15px}.updates-finished-changes li,.updates-finished-changes p{font-size:10.5px}.updates-cloud-pipeline{margin:0 auto;padding:0 10px 8px}.updates-cloud-grid{grid-template-columns:1fr}.updates-cloud-stage{padding:10px}.updates-cloud-stage-status{max-width:105px}.updates-next-release-head{align-items:center}.updates-next-release-head strong{font-size:12px}.updates-progress-head{padding:16px 14px 12px}.updates-progress-embedded{margin:0 14px}.updates-progress-footer{padding:12px 14px 16px;flex-direction:column;align-items:stretch}.updates-progress-footer button{width:100%}.updates-row-actions{justify-content:flex-start}.updates-recovery-actions{padding:0 10px 8px;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.updates-recovery-actions button{min-height:38px;padding:7px 6px;font-size:9px}.updates-wizard-mini-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.updates-wizard-footer{bottom:-16px;margin:14px -16px -16px;padding:11px 16px}.updates-wizard-footer{grid-template-columns:auto minmax(0,1fr) auto}.updates-wizard-step span{font-size:7px}.updates-live-log-list{max-height:150px}}
       @media(max-width:390px){.updates-overview>div{padding:9px}.updates-recovery-actions{grid-template-columns:1fr}}
     `}</style>
   </div>
@@ -914,29 +963,28 @@ function PanelModal({kicker,title,onClose,wide=false,children}){
   </div>
 }
 
-function UpdateProgressModal({job,onClose}){
+function UpdateProgressModal({job,onClose,onApply}){
   const canClose=['completed','failed','restart-required','rolled-back'].includes(job.status)
   const success=['completed','restart-required'].includes(job.status)
   const notes=releaseNotes(job.changelog).slice(0,6)
   if(success)return <div className="updates-modal-overlay updates-progress-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose?.()}}>
     <div className="updates-modal updates-progress-modal updates-finished-modal" role="dialog" aria-modal="true" aria-labelledby="update-progress-title">
-      <div className="updates-finished-icon">✓</div>
-      <h2 id="update-progress-title">Atualização concluída</h2><UpdateWizardSteps step={4}/>
-      <div className="updates-finished-version"><small>VERSÃO</small><strong>{job.fromVersion||'—'} <span>→</span> {job.toVersion||'—'}</strong></div>
-      <div className="updates-finished-changes">
-        <small>O QUE MUDOU</small>
-        {notes.length?<ul>{notes.map((note,i)=><li key={i}>{note}</li>)}</ul>:<p>Atualização aplicada com sucesso.</p>}
+      <div className="updates-finished-head">
+        <div className="updates-finished-icon">✓</div>
+        <div><small>ATUALIZAÇÃO CONCLUÍDA</small><h2 id="update-progress-title">AL Sistemas {job.toVersion||''}</h2><p>Os arquivos foram aplicados e a nova versão está pronta para ser carregada nesta página.</p></div>
       </div>
-      <button className="updates-finished-close" onClick={onClose}>Fechar</button>
+      <div className="updates-finished-version"><small>VERSÃO</small><strong>{job.fromVersion||'—'} <span>→</span> {job.toVersion||'—'}</strong></div>
+      {notes.length>0&&<details className="updates-finished-details"><summary>Ver o que mudou · {notes.length} alterações</summary><ul>{notes.map((note,i)=><li key={i}>{note}</li>)}</ul></details>}
+      <div className="updates-finished-actions"><button onClick={onClose}>Fechar</button><button className="updates-apply-now" onClick={()=>void onApply?.()}>↻ Aplicar atualização agora</button></div>
     </div>
   </div>
   return <div className="updates-modal-overlay updates-progress-overlay" role="presentation" onMouseDown={e=>{if(canClose&&e.target===e.currentTarget)onClose?.()}}>
     <div className="updates-modal updates-progress-modal" role="dialog" aria-modal="true" aria-labelledby="update-progress-title">
-      <div className="updates-progress-head"><div><div style={{fontSize:10,fontWeight:900,color:C.muted,letterSpacing:'.12em'}}>ATUALIZAÇÃO EM EXECUÇÃO</div><h2 id="update-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>AL Sistemas</h2><div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>O progresso fica isolado neste painel. A página principal não precisa mais rolar até a caixa de porcentagem.</div></div>{canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}</div>
+      <div className="updates-progress-head"><div><div style={{fontSize:10,fontWeight:900,color:C.muted,letterSpacing:'.12em'}}>ATUALIZAÇÃO EM EXECUÇÃO</div><h2 id="update-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>AL Sistemas</h2><div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>Acompanhe a etapa atual sem sair desta tela.</div></div>{canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}</div>
       <div className="updates-progress-stepper"><UpdateWizardSteps step={jobWizardStep(job)}/></div>
       <UpdateProgress job={job} embedded/>
       {job.finalReport&&<div style={{margin:'14px 20px 0'}}><UpdateFinalReport report={job.finalReport}/></div>}
-      <div className="updates-progress-footer updates-progress-footer-clean"><span>{canClose?(job.status==='failed'?'A atualização terminou com erro. Use × no topo para fechar.':'Operação finalizada. Use × no topo para fechar.'):'Não feche esta aba durante a aplicação dos arquivos.'}</span></div>
+      <div className="updates-progress-footer updates-progress-footer-clean"><span>{canClose?(job.status==='failed'?'A atualização terminou com erro. Confira o relatório antes de fechar.':'Operação finalizada.'):'Não feche esta aba durante a aplicação dos arquivos.'}</span></div>
     </div>
   </div>
 }
@@ -947,35 +995,36 @@ function platformVisual(kind,status=''){
   const lower=raw.toLowerCase()
   if(kind==='vercel'){
     if(upper==='READY')return {tone:'ok',icon:'✓',label:'Disponível',detail:'Frontend publicado e disponível em produção.',progress:100}
-    if(upper==='ERROR'||/fail|cancel/.test(lower))return {tone:'bad',icon:'✕',label:'Falhou',detail:'O deployment da Vercel terminou com erro.',progress:100}
-    if(upper==='BUILDING')return {tone:'run',icon:'●',label:'Construindo',detail:'A Vercel está compilando o frontend deste commit.',progress:68}
-    if(upper==='INITIALIZING')return {tone:'run',icon:'●',label:'Iniciando',detail:'A Vercel reconheceu o commit e está preparando o ambiente.',progress:42}
-    if(upper==='QUEUED')return {tone:'run',icon:'●',label:'Na fila',detail:'O deployment está na fila da Vercel.',progress:24}
-    if(upper==='PENDING')return {tone:'run',icon:'●',label:'Aguardando',detail:'A Vercel está aguardando recursos para iniciar.',progress:15}
-    if(['NOT-LINKED','NOT-CONFIGURED'].includes(upper))return {tone:'warn',icon:'!',label:'Não vinculado',detail:'Selecione o projeto Vercel principal na Central de Plataformas.',progress:0}
-    return {tone:'wait',icon:'○',label:'Aguardando commit',detail:'Aguardando a Vercel reconhecer o novo commit.',progress:0}
+    if(upper==='ERROR'||/fail|cancel/.test(lower))return {tone:'bad',icon:'✕',label:'Falhou',detail:'O deployment da Vercel terminou com erro.',progress:null}
+    if(upper==='BUILDING')return {tone:'run',icon:'●',label:'Construindo',detail:'A Vercel está compilando o frontend deste commit.',progress:null,indeterminate:true}
+    if(upper==='INITIALIZING')return {tone:'run',icon:'●',label:'Iniciando',detail:'A Vercel reconheceu o commit e está preparando o ambiente.',progress:null,indeterminate:true}
+    if(upper==='QUEUED')return {tone:'run',icon:'●',label:'Na fila',detail:'O deployment está na fila da Vercel.',progress:null,indeterminate:true}
+    if(upper==='PENDING')return {tone:'run',icon:'●',label:'Aguardando',detail:'A Vercel está aguardando recursos para iniciar.',progress:null,indeterminate:true}
+    if(['NOT-LINKED','NOT-CONFIGURED'].includes(upper))return {tone:'warn',icon:'!',label:'Não vinculado',detail:'Selecione o projeto Vercel principal na Central de Plataformas.',progress:null}
+    return {tone:'wait',icon:'○',label:'Aguardando commit',detail:'Aguardando a Vercel reconhecer o novo commit.',progress:null}
   }
   if(['live','succeeded','deployed'].includes(lower))return {tone:'ok',icon:'✓',label:'No ar',detail:'Backend atualizado e ativo na Render.',progress:100}
-  if(/fail|error|cancel/.test(lower))return {tone:'bad',icon:'✕',label:'Falhou',detail:'O deployment da Render terminou com erro.',progress:100}
-  if(lower==='build_in_progress'||/build/.test(lower))return {tone:'run',icon:'●',label:'Compilando',detail:'A Render está construindo o backend deste commit.',progress:58}
-  if(lower==='update_in_progress'||/update/.test(lower))return {tone:'run',icon:'●',label:'Implantando',detail:'A compilação terminou e a Render está colocando o backend no ar.',progress:82}
-  if(/queued|pending/.test(lower))return {tone:'run',icon:'●',label:'Na fila',detail:'O deployment está aguardando para iniciar na Render.',progress:24}
-  if(/create|created/.test(lower))return {tone:'run',icon:'●',label:'Preparando',detail:'A Render reconheceu o novo commit.',progress:12}
-  if(['not-linked','not-configured'].includes(lower))return {tone:'warn',icon:'!',label:'Não vinculado',detail:'Selecione o serviço Render principal na Central de Plataformas.',progress:0}
-  return {tone:'wait',icon:'○',label:'Aguardando commit',detail:'Aguardando a Render reconhecer o novo commit.',progress:0}
+  if(/fail|error|cancel/.test(lower))return {tone:'bad',icon:'✕',label:'Falhou',detail:'O deployment da Render terminou com erro.',progress:null}
+  if(lower==='build_in_progress'||/build/.test(lower))return {tone:'run',icon:'●',label:'Compilando',detail:'A Render está construindo o backend deste commit.',progress:null,indeterminate:true}
+  if(lower==='update_in_progress'||/update/.test(lower))return {tone:'run',icon:'●',label:'Implantando',detail:'A compilação terminou e a Render está colocando o backend no ar.',progress:null,indeterminate:true}
+  if(/queued|pending/.test(lower))return {tone:'run',icon:'●',label:'Na fila',detail:'O deployment está aguardando para iniciar na Render.',progress:null,indeterminate:true}
+  if(/create|created/.test(lower))return {tone:'run',icon:'●',label:'Preparando',detail:'A Render reconheceu o novo commit.',progress:null,indeterminate:true}
+  if(['not-linked','not-configured'].includes(lower))return {tone:'warn',icon:'!',label:'Não vinculado',detail:'Selecione o serviço Render principal na Central de Plataformas.',progress:null}
+  return {tone:'wait',icon:'○',label:'Aguardando commit',detail:'Aguardando a Render reconhecer o novo commit.',progress:null}
 }
 
 function CloudStage({number,name,subtitle,state,meta,children}){
   const cls=`updates-cloud-stage ${state?.tone||'wait'}`
-  const progress=Math.max(0,Math.min(100,Number(state?.progress||0)))
+  const hasProgress=Number.isFinite(Number(state?.progress)) && state?.progress!==null
+  const progress=hasProgress?Math.max(0,Math.min(100,Number(state?.progress||0))):null
   return <div className={cls}>
     <div className="updates-cloud-stage-top">
       <span className="updates-cloud-stage-number">{state?.tone==='ok'?'✓':number}</span>
       <div><b>{name}</b><small>{subtitle}</small></div>
       <span className="updates-cloud-stage-status">{state?.label||'Aguardando'}</span>
     </div>
-    <div className="updates-stage-progress"><i style={{width:`${progress}%`}}/></div>
-    <div className="updates-stage-progress-label"><span>{state?.detail||'Aguardando esta etapa.'}</span><b>{progress}%</b></div>
+    {(hasProgress||state?.indeterminate)&&<div className={`updates-stage-progress ${state?.indeterminate?'indeterminate':''}`}><i style={hasProgress?{width:`${progress}%`}:undefined}/></div>}
+    <div className="updates-stage-progress-label"><span>{state?.detail||'Aguardando esta etapa.'}</span>{hasProgress&&<b>{progress}%</b>}</div>
     {meta&&<div className="updates-cloud-stage-meta">{meta}</div>}
     {children}
   </div>
@@ -1050,81 +1099,90 @@ function CloudPublishProgress({job}){
   let vercel=platformVisual('vercel',rel.vercel?.status)
   let render=platformVisual('render',rel.render?.status)
   if(rel.status==='deploy-stalled'){
-    if(vercel.tone!=='ok')vercel={tone:'warn',icon:'!',label:'Sem confirmação',detail:'A Vercel não confirmou este commit dentro do prazo. Reconsulte ou reinicie o deploy.',progress:vercel.progress||0}
-    if(render.tone!=='ok')render={tone:'warn',icon:'!',label:'Sem confirmação',detail:'A Render não confirmou este commit dentro do prazo. Reconsulte ou reinicie o deploy.',progress:render.progress||0}
+    if(vercel.tone!=='ok')vercel={tone:'warn',icon:'!',label:'Sem confirmação',detail:'A Vercel não confirmou este commit dentro do prazo. Reconsulte ou reinicie o deploy.',progress:null}
+    if(render.tone!=='ok')render={tone:'warn',icon:'!',label:'Sem confirmação',detail:'A Render não confirmou este commit dentro do prazo. Reconsulte ou reinicie o deploy.',progress:null}
   }
   if(rel.status==='deploy-blocked'){
-    if(vercel.tone!=='ok')vercel={tone:'warn',icon:'!',label:'Vínculo pendente',detail:'Revise o projeto de produção associado antes de continuar.',progress:0}
-    if(render.tone!=='ok')render={tone:'warn',icon:'!',label:'Vínculo pendente',detail:'Revise o serviço de produção associado antes de continuar.',progress:0}
+    if(vercel.tone!=='ok')vercel={tone:'warn',icon:'!',label:'Vínculo pendente',detail:'Revise o projeto de produção associado antes de continuar.',progress:null}
+    if(render.tone!=='ok')render={tone:'warn',icon:'!',label:'Vínculo pendente',detail:'Revise o serviço de produção associado antes de continuar.',progress:null}
   }
   const r2State=hasR2
-    ?{tone:'ok',icon:'✓',label:'Pacote preparado',detail:`AL Sistemas ${job.version||rel.version||''} validado e preservado no R2.`,progress:100}
-    :{tone:'run',icon:'●',label:'Preparando pacote',detail:'Validando a atualização e salvando o ZIP no armazenamento persistente.',progress:Math.min(95,Number(job.progress||0))}
+    ?{tone:'ok',icon:'✓',label:'Preservado',detail:`AL Sistemas ${job.version||rel.version||''} validado e preservado no R2.`,progress:100}
+    :{tone:'run',icon:'●',label:'Preparando',detail:'Validando a atualização e salvando o ZIP no armazenamento persistente.',progress:Math.min(95,Number(job.progress||0))}
   const persistentPublish=rel.publishJob||{}
-  const githubProgress=hasCommit?100:failed?100:Math.max(5,Math.min(98,Number(persistentPublish.progress||Math.round(((Number(job.progress||28)-20)/72)*100))))
+  const githubProgress=hasCommit?100:failed?Math.max(0,Number(persistentPublish.progress||0)):Math.max(0,Math.min(99,Number(persistentPublish.progress||0)))
   let ghState=hasCommit
-    ?{tone:'ok',icon:'✓',label:'Commit publicado',detail:'Código enviado ao GitHub. As plataformas já podem implantar este SHA.',progress:100}
-    :failed?{tone:'bad',icon:'✕',label:'Falhou',detail:'A publicação no GitHub não foi concluída.',progress:100}
+    ?{tone:'ok',icon:'✓',label:'Commit publicado',detail:'Código enviado ao GitHub. Vercel e Render já podem implantar este SHA.',progress:100}
+    :failed?{tone:'bad',icon:'✕',label:'Falhou',detail:'A publicação no GitHub não foi concluída.',progress:githubProgress}
     :{tone:'run',icon:'●',label:persistentPublish.status==='retry-wait'?'Retomando':'Publicando',detail:persistentPublish.phaseLabel||'Comparando a release, criando o commit e enviando a branch.',progress:githubProgress}
-  if(rel.status==='publish-stalled')ghState={tone:'warn',icon:'!',label:'Publicação interrompida',detail:'Nenhum commit foi confirmado. O ZIP continua salvo no R2 e pode ser publicado novamente.',progress:100}
-  if(rel.status==='deploy-target-mismatch')ghState={tone:'warn',icon:'!',label:'Destino incorreto',detail:'O commit existe, mas foi publicado em um repositório diferente do usado pela produção.',progress:100}
-  if(rel.status==='interrupted')ghState={tone:'warn',icon:'!',label:'Acompanhamento encerrado',detail:'O histórico foi preservado e não ficará mais preso em atualização.',progress:hasCommit?100:0}
+  if(rel.status==='publish-stalled')ghState={tone:'warn',icon:'!',label:'Publicação interrompida',detail:'Nenhum commit foi confirmado. O ZIP continua salvo no R2 e pode ser publicado novamente.',progress:githubProgress}
+  if(rel.status==='deploy-target-mismatch')ghState={tone:'warn',icon:'!',label:'Destino incorreto',detail:'O commit existe, mas foi publicado em um repositório diferente do usado pela produção.',progress:hasCommit?100:githubProgress}
+  if(rel.status==='interrupted')ghState={tone:'warn',icon:'!',label:'Acompanhamento encerrado',detail:'O histórico foi preservado e não ficará mais preso em atualização.',progress:hasCommit?100:githubProgress}
 
   const stages=[
-    {number:'1',name:'Atualização principal',subtitle:'Pacote e R2',state:r2State,meta:(job.objectKey||rel.objectKey)?<><span>{job.bucket||rel.bucket||'bucket'}</span><code>{job.objectKey||rel.objectKey}</code></>:null},
+    {number:'1',name:'R2',subtitle:'Pacote protegido',state:r2State,meta:(job.objectKey||rel.objectKey)?<><span>{job.bucket||rel.bucket||'bucket'}</span><code title={job.objectKey||rel.objectKey}>{compactObjectKey(job.objectKey||rel.objectKey)}</code></>:null},
     {number:'2',name:'GitHub',subtitle:'Repositório e commit',state:ghState,meta:hasCommit?<><code>{String(job.commitSha||rel.commitSha).slice(0,12)}</code>{(job.commitUrl||rel.commitUrl)&&<a href={job.commitUrl||rel.commitUrl} target="_blank" rel="noreferrer">Abrir commit ↗</a>}</>:rel.repository?<><span>{rel.repository}</span><code>{rel.branch||'main'}</code></>:null,children:!hasCommit&&Array.isArray(persistentPublish.timeline)&&persistentPublish.timeline.length>0?<div className="updates-cloud-mini-steps">{persistentPublish.timeline.slice(-3).map((x,i)=><span key={`${x.key}-${i}`}>{i===persistentPublish.timeline.slice(-3).length-1?'●':'✓'} {x.label||STEP_LABELS[x.key]||x.key}</span>)}</div>:null},
     {number:'3',name:'Vercel',subtitle:'Frontend',state:vercel,meta:<><span>{rel.vercel?.checkedAt?`Consultado às ${new Date(rel.vercel.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.vercel?.url&&<a href={rel.vercel.url} target="_blank" rel="noreferrer">Abrir produção ↗</a>}</>},
     {number:'4',name:'Render',subtitle:'Backend',state:render,meta:<><span>{rel.render?.checkedAt?`Consultado às ${new Date(rel.render.checkedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:'Aguardando primeira consulta'}</span>{rel.render?.url&&<a href={rel.render.url} target="_blank" rel="noreferrer">Abrir backend ↗</a>}</>},
   ]
-  const completedCount=stages.filter(s=>s.state.tone==='ok').length
-  const overall=done?100:Math.round(stages.reduce((sum,s)=>sum+Number(s.state.progress||0),0)/4)
-  let activeIndex=stages.findIndex(s=>s.state.tone!=='ok')
+  const completedCount=stages.filter(stage=>stage.state.tone==='ok').length
+  // Percentual confirmado: 20% R2 + 30% do progresso REAL retornado pelo job
+  // GitHub + 25% por plataforma somente depois da confirmação de produção.
+  const overall=done?100:Math.max(0,Math.min(100,
+    (hasR2?20:0)+Math.round((Math.max(0,Math.min(100,githubProgress))/100)*30)+(vercel.tone==='ok'?25:0)+(render.tone==='ok'?25:0)
+  ))
+  let activeIndex=stages.findIndex(stage=>stage.state.tone!=='ok')
   if(activeIndex<0)activeIndex=3
-  if(failed){const bad=stages.findIndex(s=>s.state.tone==='bad');if(bad>=0)activeIndex=bad}
-  if(attention){const warn=stages.findIndex(s=>s.state.tone==='warn');if(warn>=0)activeIndex=warn}
+  if(failed){const bad=stages.findIndex(stage=>stage.state.tone==='bad');if(bad>=0)activeIndex=bad}
+  if(attention){const warn=stages.findIndex(stage=>stage.state.tone==='warn');if(warn>=0)activeIndex=warn}
   const current=stages[activeIndex]
+  const productionPhase=hasCommit&&!done&&activeIndex>=2
+  const finishedAt=rel.completedAt||rel.lastCheckedAt||null
+
+  if(done)return <div className="updates-cloud-pipeline updates-cloud-wizard updates-cloud-wizard-done">
+    <div className="updates-cloud-finish updates-cloud-finish-compact">
+      <div className="updates-cloud-finish-icon">✓</div>
+      <div className="updates-cloud-finish-copy"><small>PRODUÇÃO CONFIRMADA</small><h3>AL Sistemas {job.version||rel.version||''} publicado</h3><p>{finishedAt?`Concluído às ${new Date(finishedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}. `:''}GitHub, Vercel e Render confirmaram esta versão.</p></div>
+      <div className="updates-cloud-finish-list">{stages.map(stage=><span key={stage.name}>✓ {stage.name}</span>)}</div>
+    </div>
+  </div>
 
   return <div className="updates-cloud-pipeline updates-cloud-wizard">
     <div className="updates-cloud-summary">
-      <div><span>{job.version||rel.version?`AL SISTEMAS ${job.version||rel.version}`:'ATUALIZAÇÃO EM PRODUÇÃO'}</span><b>{done?'Produção atualizada':failed?'Atualização com falha':attention?'Ação necessária':`Etapa ${activeIndex+1} de 4`}</b></div><strong>{overall}%</strong>
+      <div><span>PROGRESSO CONFIRMADO</span><b>{failed?'Atualização com falha':attention?'Ação necessária':current.state.label}</b><small>R2 + progresso real do GitHub + confirmação final das plataformas</small></div><strong>{overall}%</strong>
     </div>
     <div className="updates-cloud-track"><i style={{width:`${overall}%`}}/></div>
-    <div className="updates-cloud-wizard-dots">
-      {stages.map((stage,i)=><span key={stage.name} className={`${stage.state.tone==='ok'?'ok':''} ${i===activeIndex&&!done?'active':''} ${stage.state.tone==='bad'?'bad':''}`} title={`${stage.name}: ${stage.state.label}`}><i>{stage.state.tone==='ok'?'✓':i+1}</i><small>{stage.name}</small></span>)}
+    <div className="updates-cloud-chain" aria-label="Estado das etapas">
+      {stages.map(stage=><span key={stage.name} className={stage.state.tone==='ok'?'ok':stage.state.tone==='run'?'run':stage.state.tone==='bad'?'bad':stage.state.tone==='warn'?'warn':''}>{stage.state.tone==='ok'?'✓':stage.state.tone==='run'?'●':'○'} {stage.name}</span>)}
     </div>
-    {done ? <div className="updates-cloud-finish">
-      <div className="updates-cloud-finish-icon">✓</div>
-      <h3>Atualização concluída</h3>
-      <p>R2, GitHub, Vercel e Render confirmaram o fluxo desta versão.</p>
-      <div className="updates-cloud-finish-list">{stages.map(s=><span key={s.name}>✓ {s.name}</span>)}</div>
-    </div> : <div className="updates-cloud-current">
-      <CloudStage number={current.number} name={current.name} subtitle={current.subtitle} state={current.state} meta={current.meta}>{current.children}</CloudStage>
-      <div className="updates-cloud-current-caption">{completedCount} de 4 etapa(s) concluída(s). A próxima tela aparece automaticamente quando esta etapa terminar.</div>
-    </div>}
+    {productionPhase?<div className="updates-cloud-production-grid">
+      <CloudStage {...stages[2]}/><CloudStage {...stages[3]}/>
+    </div>:<div className="updates-cloud-current"><CloudStage {...current}/></div>}
+    <div className="updates-cloud-current-caption">{completedCount} de 4 etapas confirmadas. Vercel e Render mostram estados reais da plataforma; não estimamos porcentagens internas que as APIs não fornecem.</div>
     {job.error&&<div className="updates-cloud-error"><b>Falha da etapa:</b> {job.error}</div>}
     <CloudFailureReport job={job}/>
   </div>
 }
 
-function PublishProgressModal({job,onClose,onReconcile,onRetry,onRepublish,onInterrupt}){
+function PublishProgressModal({job,onClose,onApply,onReconcile,onRetry,onRepublish,onInterrupt}){
   const canClose=['completed','failed','attention','restart-required','rolled-back'].includes(job.status)
+  const done=job.status==='completed'
   const cloud=job.type==='cloud-release'
+  const step=done?5:(job.commitSha||job.cloudRelease?.commitSha)?4:job.releaseId?3:2
   return <div className="updates-modal-overlay updates-progress-overlay" role="presentation" onMouseDown={e=>{if(canClose&&e.target===e.currentTarget)onClose?.()}}>
-    <div className="updates-modal updates-progress-modal updates-cloud-progress-modal" role="dialog" aria-modal="true" aria-labelledby="publish-progress-title">
+    <div className={`updates-modal updates-progress-modal updates-cloud-progress-modal ${done?'updates-cloud-progress-complete':''}`} role="dialog" aria-modal="true" aria-labelledby="publish-progress-title">
       <div className="updates-progress-head">
         <div>
-          <div style={{fontSize:11,fontWeight:900,color:C.muted,letterSpacing:'.08em'}}>PUBLICAÇÃO CLOUD</div>
-          <h2 id="publish-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>{cloud?`Atualizando AL Sistemas${job.version?` ${job.version}`:''}`:'Publicação no GitHub'}</h2>
-          <div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>{cloud?'Acompanhe cada etapa separadamente: pacote, GitHub, frontend e backend.':'Acompanhe a criação e envio do commit.'}</div>
+          <div style={{fontSize:11,fontWeight:900,color:C.muted,letterSpacing:'.08em'}}>ATUALIZAÇÃO GUIADA</div>
+          <h2 id="publish-progress-title" style={{margin:'5px 0 3px',fontSize:20,color:C.text}}>{done?`AL Sistemas${job.version?` ${job.version}`:''} publicado`:cloud?`Publicando AL Sistemas${job.version?` ${job.version}`:''}`:'Publicação no GitHub'}</h2>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.45}}>{done?'A produção confirmou a nova versão. Você pode carregá-la nesta página agora.':cloud?'R2 protege o pacote; GitHub publica o código; Vercel e Render confirmam a produção.':'Acompanhe a criação e envio do commit.'}</div>
         </div>
         {canClose&&<button onClick={onClose} className="updates-progress-close" aria-label="Fechar">×</button>}
       </div>
-      <div className="updates-progress-stepper"><UpdateWizardSteps managed step={job.status==='completed'?4:(job.commitSha||job.cloudRelease?.commitSha)?4:job.releaseId?3:2}/></div>
-      {cloud?<><CloudPublishProgress job={job}/><div className="updates-cloud-filelog-wrap"><FileLiveLog job={job} cloud/></div></>:<UpdateProgress job={job} embedded/>}
+      {cloud&&<div className="updates-progress-stepper"><UpdateWizardSteps managed step={step}/></div>}
+      {cloud?<><CloudPublishProgress job={job}/>{!done&&!(job.commitSha||job.cloudRelease?.commitSha)&&<div className="updates-cloud-filelog-wrap"><FileLiveLog job={job} cloud/></div>}</>:<UpdateProgress job={job} embedded/>}
       {cloud&&['attention','failed'].includes(job.status)&&job.releaseId&&<div className="updates-recovery-actions"><button onClick={()=>onReconcile?.(job.releaseId)}>Reconsultar</button><button onClick={()=>onRetry?.(job.releaseId)}>Tentar deploy novamente</button><button className="primary-blue" onClick={()=>onRepublish?.(job.releaseId)}>Publicar novamente do R2</button><button className="updates-delete-action" onClick={()=>onInterrupt?.(job.releaseId)}>Encerrar acompanhamento</button></div>}
-      <div className="updates-progress-footer updates-progress-footer-clean">
-        <span>{!canClose?(cloud?'Você pode acompanhar Vercel e Render nesta mesma tela; os estados são atualizados pelas APIs das plataformas.':'Mantenha esta tela aberta enquanto o commit é preparado.'):job.status==='completed'?'Atualização concluída. Use × no topo para fechar.':job.status==='failed'?'A atualização terminou com erro. Confira o relatório e use as ações de recuperação acima para tentar novamente.':job.status==='attention'?'O acompanhamento foi interrompido com segurança. Escolha uma ação de recuperação acima ou feche esta janela.':'Operação finalizada.'}</span>
-      </div>
+      {done?<div className="updates-finished-actions updates-cloud-finished-actions"><button onClick={onClose}>Fechar</button><button className="updates-apply-now" onClick={()=>void onApply?.()}>↻ Aplicar atualização agora</button></div>:<div className="updates-progress-footer updates-progress-footer-clean"><span>{!canClose?(cloud?'Os estados vêm das APIs das plataformas e são atualizados automaticamente.':'Mantenha esta tela aberta enquanto o commit é preparado.'):job.status==='failed'?'A atualização terminou com erro. Confira o relatório e use as ações de recuperação acima.':job.status==='attention'?'O acompanhamento foi interrompido com segurança. Escolha uma ação de recuperação ou feche esta janela.':'Operação finalizada.'}</span></div>}
     </div>
   </div>
 }

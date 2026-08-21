@@ -5,6 +5,14 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## 🧭 Atualização guiada e abertura administrativa — 1.0.153
+
+O fluxo de publicação usa uma única linguagem visual em **Pacote → Revisão → R2 → GitHub → Produção**. O progresso do GitHub usa o percentual real do job persistente; Vercel e Render não recebem porcentagens artificiais quando as APIs fornecem apenas estados. Nessa fase, a interface mostra os dois provedores lado a lado e acompanha `Na fila`, `Construindo`, `Implantando`, `No ar` ou falha até a confirmação final.
+
+A conclusão foi compactada e ganhou **Aplicar atualização agora**, que força a verificação do Service Worker, remove o cache estático antigo do AL Sistemas e recarrega a rota atual sem limpar a sessão. O log de arquivo é ocultado depois da produção confirmada, evitando exibir progresso residual como `0/39` em uma versão já concluída.
+
+Ao entrar em **Administrar**, a espera do backend também ficou explicativa: o painel informa se está conectando à hospedagem, aguardando o possível cold start da Render, validando banco/sessão ou abrindo a Administração. Após uma espera longa aparecem ações para tentar novamente e consultar `/status/`.
+
 ## 📱 Identidade Android e splash — 1.0.152
 
 A marca **AL** aprovada passa a ser a fonte visual do PWA e do APK. O build Android não usa mais um único drawable genérico para o launcher: existem mipmaps próprios para `mdpi`, `hdpi`, `xhdpi`, `xxhdpi` e `xxxhdpi`, além de **Adaptive Icon** e `roundIcon`. Assim o ícone aparece corretamente no launcher, instalador e superfícies do sistema sem ficar amassado ou desfocado.

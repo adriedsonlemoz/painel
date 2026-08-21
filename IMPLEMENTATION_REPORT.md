@@ -1,3 +1,21 @@
+# Relatório de implementação — 1.0.153
+
+## Atualizações, produção cloud e bootstrap administrativo
+
+- Assistente de atualização visualmente unificado nas cinco etapas, incluindo a publicação GitHub que antes possuía apresentação isolada.
+- Espaçamento da revisão corrigido e caminhos R2 extensos compactados para mobile.
+- Progresso cloud recalculado a partir de sinais confirmáveis; o job GitHub conserva percentual real e Vercel/Render usam estados de plataforma em vez de números estimados.
+- Vercel e Render são exibidos lado a lado na fase de produção para permitir acompanhamento independente do frontend e backend.
+- Conclusão compacta elimina redundâncias e não renderiza mais o log de arquivos após `productionReady`.
+- Nova ação **Aplicar atualização agora** atualiza registros de Service Worker, solicita `SKIP_WAITING`, apaga caches estáticos `alsistemas-v*` e recarrega a rota sem remover autenticação.
+- `FirstRunGuard` passa a iniciar/acompanhar `backendWake` em rotas administrativas e usa `SetupStartupDiagnostics` desde o primeiro estado bloqueante, substituindo o spinner vazio.
+- Diagnóstico de abertura mostra hospedagem/API, preparação de banco/sessão e abertura do painel; após 12 s oferece nova tentativa e acesso ao Status.
+- `SetupStartupDiagnostics` ganhou ações opcionais de recuperação/status sem alterar seu uso no assistente de instalação.
+- Service Worker atualizado para `alsistemas-v4` e versões sincronizadas em 1.0.153.
+- Nenhuma imagem ou ícone foi criado ou modificado nesta entrega.
+- Validação final: 164 fontes frontend passaram no parser TypeScript, 136 arquivos backend passaram em `node --check`, 829 imports relativos reais foram resolvidos, checks de efeitos/temas passaram e o self-test do atualizador fechou 8/8. Assets de imagem foram comparados com a 1.0.152 e permaneceram byte a byte inalterados.
+- `node_modules` não acompanha o pacote recebido; por isso o build Vite completo permanece a cargo do CI/GitHub Actions.
+
 # Relatório de implementação — 1.0.152
 
 ## Identidade visual, launcher e splash Android

@@ -51,6 +51,9 @@ export default function SetupStartupDiagnostics({
   stages = [],
   visible = true,
   compact = false,
+  onRetry = null,
+  statusHref = '',
+  retryAfterMs = 12000,
 }) {
   const [now, setNow] = useState(() => performance.now())
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -131,6 +134,55 @@ export default function SetupStartupDiagnostics({
           </span>
         </div>
       </div>
+
+      {(total >= retryAfterMs && (onRetry || statusHref)) && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: onRetry && statusHref ? 'repeat(2,minmax(0,1fr))' : '1fr',
+          gap: 9,
+          marginTop: 16,
+        }}>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              style={{
+                minHeight: 42,
+                borderRadius: 11,
+                border: '1px solid #d8e4dc',
+                background: '#f6faf7',
+                color: '#245b38',
+                fontSize: 11.5,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Tentar novamente
+            </button>
+          )}
+          {statusHref && (
+            <a
+              href={statusHref}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                minHeight: 42,
+                borderRadius: 11,
+                border: '1px solid #e3e8e5',
+                background: '#fff',
+                color: '#536159',
+                fontSize: 11.5,
+                fontWeight: 800,
+                textDecoration: 'none',
+                display: 'grid',
+                placeItems: 'center',
+              }}
+            >
+              Ver status dos serviços
+            </a>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
