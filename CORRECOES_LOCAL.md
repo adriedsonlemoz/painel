@@ -31,4 +31,9 @@ O frontend será aberto somente quando o backend estiver disponível.
 - Cache local: 10 min de frescor e 24 h de retenção máxima por padrão.
 - Render acorda em segundo plano por até 90 s; login acompanha o tempo sem falso erro aos 3–6 s.
 - `/status/` diferencia aplicação Render iniciando de indisponibilidade real e mostra idade do snapshot.
+## 1.0.152 — ícone e splash Android
+- A nova marca AL substitui o asset anterior no PWA e no APK.
+- O launcher usa mipmaps por densidade, `roundIcon` e Adaptive Icon; não depende mais de um único drawable genérico.
+- A splash mantém proporção 1:1 e centraliza a imagem, evitando stretch e desfoque.
+- O script de branding valida o PNG aprovado antes de alterar o projeto Android gerado pelo Capacitor.
 

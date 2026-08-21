@@ -6,54 +6,145 @@ const resDir = path.join(root, 'android', 'app', 'src', 'main', 'res')
 const manifestPath = path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml')
 const stylesPath = path.join(resDir, 'values', 'styles.xml')
 const sourceIcon = path.join(root, 'public', 'icons', 'al-sistemas-source.png')
-const drawableDir = path.join(resDir, 'drawable-nodpi')
-const targetIcon = path.join(drawableDir, 'al_sistemas_icon.png')
+const androidAssets = path.join(root, 'android-assets')
 const appSurface = '#f0ede8'
+const launcherSurface = '#12181c'
 
 function ensureFile(file, label) {
   if (!fs.existsSync(file)) throw new Error(`${label} não encontrado: ${file}`)
 }
 
+function ensureDir(dir, label) {
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`${label} não encontrado: ${dir}`)
+}
+
+function pngDimensions(file) {
+  const data = fs.readFileSync(file)
+  if (data.length < 24 || data.toString('ascii', 1, 4) !== 'PNG') throw new Error(`Asset não é PNG válido: ${file}`)
+  return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+}
+
+function ensureSquarePng(file, label) {
+  ensureFile(file, label)
+  const { width, height } = pngDimensions(file)
+  if (width !== height) throw new Error(`${label} deve ser 1:1 para não ser deformado (${width}x${height}).`)
+  return { width, height }
+}
+
+function copyDir(source, target) {
+  fs.mkdirSync(target, { recursive: true })
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name)
+    const to = path.join(target, entry.name)
+    if (entry.isDirectory()) copyDir(from, to)
+    else fs.copyFileSync(from, to)
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function upsertStyleItem(xml, styleName, itemName, value) {
+  const styleRe = new RegExp(`(<style\\b[^>]*name=["']${escapeRegExp(styleName)}["'][^>]*>)([\\s\\S]*?)(<\\/style>)`)
+  const match = xml.match(styleRe)
+  if (!match) throw new Error(`Style Android não encontrado: ${styleName}`)
+  let body = match[2]
+  const itemRe = new RegExp(`<item\\s+name=["']${escapeRegExp(itemName)}["'][^>]*>[\\s\\S]*?<\\/item>`, 'g')
+  const item = `<item name="${itemName}">${value}</item>`
+  if (itemRe.test(body)) body = body.replace(itemRe, item)
+  else body = `${body.trimEnd()}\n        ${item}\n    `
+  return xml.replace(styleRe, `${match[1]}${body}${match[3]}`)
+}
+
 ensureFile(manifestPath, 'AndroidManifest.xml')
 ensureFile(stylesPath, 'styles.xml')
-ensureFile(sourceIcon, 'Ícone aprovado')
+const approvedSize = ensureSquarePng(sourceIcon, 'Ícone aprovado')
+ensureDir(androidAssets, 'Assets Android')
 
+// Os assets Android são derivados do mesmo PNG aprovado e já vêm em proporção 1:1.
+// O script apenas os copia para o projeto Capacitor recém-gerado; não redimensiona nem
+// estica a imagem durante o build, evitando ícone/splash amassado ou desfocado.
+const resourceDirs = [
+  'mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi',
+  'drawable-mdpi', 'drawable-hdpi', 'drawable-xhdpi', 'drawable-xxhdpi', 'drawable-xxxhdpi',
+]
+for (const dir of resourceDirs) {
+  const srcDir = path.join(androidAssets, dir)
+  ensureDir(srcDir, `Assets ${dir}`)
+  copyDir(srcDir, path.join(resDir, dir))
+}
+
+// Recursos do Adaptive Icon (Android 8+) e cores nativas.
+const valuesDir = path.join(resDir, 'values')
+const adaptiveDir = path.join(resDir, 'mipmap-anydpi-v26')
+const drawableDir = path.join(resDir, 'drawable')
+fs.mkdirSync(valuesDir, { recursive: true })
+fs.mkdirSync(adaptiveDir, { recursive: true })
 fs.mkdirSync(drawableDir, { recursive: true })
-fs.copyFileSync(sourceIcon, targetIcon)
+
+fs.writeFileSync(path.join(valuesDir, 'al_sistemas_branding.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="al_sistemas_icon_background">${launcherSurface}</color>
+    <color name="al_sistemas_splash_background">${appSurface}</color>
+</resources>
+`)
+
+const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/al_sistemas_icon_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
+`
+fs.writeFileSync(path.join(adaptiveDir, 'ic_launcher.xml'), adaptiveIconXml)
+fs.writeFileSync(path.join(adaptiveDir, 'ic_launcher_round.xml'), adaptiveIconXml)
+
+// Splash pré-Android 12: bitmap centralizado em tamanho físico equivalente por densidade.
+// Isso impede que a tela inteira estique o logo. No Android 12+, o sistema usa o novo
+// Adaptive Icon do aplicativo na splash nativa.
+fs.writeFileSync(path.join(drawableDir, 'al_sistemas_launch_background.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/al_sistemas_splash_background" />
+    <item>
+        <bitmap
+            android:src="@drawable/al_sistemas_splash_mark"
+            android:gravity="center"
+            android:filter="true" />
+    </item>
+</layer-list>
+`)
 
 let manifest = fs.readFileSync(manifestPath, 'utf8')
-manifest = manifest.replace(/android:icon="[^"]+"/, 'android:icon="@drawable/al_sistemas_icon"')
-if (/android:roundIcon="[^"]+"/.test(manifest)) {
-  manifest = manifest.replace(/android:roundIcon="[^"]+"/, 'android:roundIcon="@drawable/al_sistemas_icon"')
+if (/android:icon="[^"]+"/.test(manifest)) {
+  manifest = manifest.replace(/android:icon="[^"]+"/, 'android:icon="@mipmap/ic_launcher"')
 } else {
-  manifest = manifest.replace(/(<application\b[^>]*android:icon="@drawable\/al_sistemas_icon")/, '$1\n        android:roundIcon="@drawable/al_sistemas_icon"')
+  manifest = manifest.replace(/<application\b/, '<application android:icon="@mipmap/ic_launcher"')
+}
+if (/android:roundIcon="[^"]+"/.test(manifest)) {
+  manifest = manifest.replace(/android:roundIcon="[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"')
+} else {
+  manifest = manifest.replace(/(<application\b[^>]*android:icon="@mipmap\/ic_launcher")/, '$1\n        android:roundIcon="@mipmap/ic_launcher_round"')
 }
 fs.writeFileSync(manifestPath, manifest)
 
 let styles = fs.readFileSync(stylesPath, 'utf8')
-const items = [
-  ['android:statusBarColor', appSurface],
-  ['android:navigationBarColor', appSurface],
-  ['android:windowLightStatusBar', 'true'],
-  ['android:windowLightNavigationBar', 'true'],
-  ['android:windowBackground', appSurface],
-]
-
-styles = styles.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/g, (full, attrs, body) => {
-  let next = body
-  for (const [name, value] of items) {
-    const re = new RegExp(`<item\\s+name=["']${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>[\\s\\S]*?<\\/item>`, 'g')
-    const item = `\n        <item name="${name}">${value}</item>`
-    if (re.test(next)) next = next.replace(re, item.trimStart())
-    else next += item
-  }
-  return `<style${attrs}>${next}\n    </style>`
-})
+for (const styleName of ['AppTheme', 'AppTheme.NoActionBar', 'AppTheme.NoActionBarLaunch']) {
+  styles = upsertStyleItem(styles, styleName, 'android:statusBarColor', appSurface)
+  styles = upsertStyleItem(styles, styleName, 'android:navigationBarColor', appSurface)
+  styles = upsertStyleItem(styles, styleName, 'android:windowLightStatusBar', 'true')
+  styles = upsertStyleItem(styles, styleName, 'android:windowLightNavigationBar', 'true')
+}
+for (const styleName of ['AppTheme', 'AppTheme.NoActionBar']) {
+  styles = upsertStyleItem(styles, styleName, 'android:windowBackground', appSurface)
+}
+styles = upsertStyleItem(styles, 'AppTheme.NoActionBarLaunch', 'android:windowBackground', '@drawable/al_sistemas_launch_background')
+styles = upsertStyleItem(styles, 'AppTheme.NoActionBarLaunch', 'android:background', '@drawable/al_sistemas_launch_background')
 fs.writeFileSync(stylesPath, styles)
 
-console.log(`✓ Ícone AL Sistemas aplicado: ${path.relative(root, targetIcon)}`)
+console.log(`✓ Ícone aprovado ${approvedSize.width}x${approvedSize.height} integrado sem deformação`)
+console.log('✓ Launcher Android: mipmaps por densidade + Adaptive Icon + roundIcon')
+console.log('✓ Splash Android: marca centralizada, sem stretch, com fallback pré-Android 12')
 console.log(`✓ Barras do Android alinhadas ao painel: ${appSurface}`)
-
 
 // ── Gerenciador nativo de downloads ─────────────────────────────────────────
 // Não depende de navegador externo. Usa android.app.DownloadManager, mantém a

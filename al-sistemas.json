@@ -1,8 +1,13 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.151",
+  "version": "1.0.152",
   "packageFormat": 2,
   "changelog": [
+    "Nova identidade AL Sistemas integrada ao PWA e ao APK sem usar engrenagem, com ícone arredondado e assets 1:1 derivados do PNG aprovado.",
+    "Launcher Android passa a usar mipmaps por densidade, Adaptive Icon e roundIcon, garantindo presença no launcher, instalador, informações do app e superfícies do sistema.",
+    "Splash nativa do Android usa a nova marca centralizada sem stretch; versões anteriores ao Android 12 recebem bitmap por densidade e Android 12+ usa o Adaptive Icon do aplicativo.",
+    "Tela inicial administrativa do frontend também exibe o novo ícone com object-fit contain, evitando deformação durante a abertura.",
+    "Manifesto PWA ganha ícone maskable e apple-touch-icon dedicado; documentação do pipeline Android foi atualizada.",
     "Portal público passa a abrir em modo cache-first: a última cópia válida do navegador aparece imediatamente enquanto R2/Vercel e backend são revalidados em segundo plano.",
     "Cache público ganha frescor configurável de 10 minutos e expiração local rígida de 24 horas por padrão, com VITE_PUBLIC_CACHE_TTL_MS e VITE_PUBLIC_CACHE_MAX_AGE_MS.",
     "Render é acordado por um coordenador único de até 90 segundos; o portal continua navegável durante o cold start e atualiza os dados automaticamente quando a API volta.",

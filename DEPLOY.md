@@ -361,3 +361,15 @@ Com um API Token Cloudflare que possua acesso de leitura ao R2, abra **Cloudflar
 Depois de conectar Vercel e Render em **Integrações e APIs**, abra **Projetos e Deploys → Variáveis**. A central usa as APIs oficiais para criar, atualizar ou remover Environment Variables sem expor os tokens no frontend. Use **Salvar sem deploy** para apenas persistir a configuração ou **Salvar + deploy** para publicar imediatamente.
 
 Para o fallback do portal, **Cloudflare → R2** oferece **Aplicar na Vercel**, que define `CF_R2_PUBLIC_URL` no frontend principal e inicia um redeploy automaticamente.
+## Identidade do APK — 1.0.152+
+
+O workflow `Build Android APK` cria a plataforma com Capacitor e, depois de `cap sync`, executa `frontend/scripts/configure-android-branding.mjs`. Esse script aplica os recursos de `frontend/android-assets/` ao projeto Android temporário.
+
+- `mipmap-*`: ícones de launcher e `roundIcon` nas densidades Android.
+- `mipmap-anydpi-v26`: Adaptive Icon para Android 8+.
+- `drawable-*`: marca da splash em tamanho equivalente por densidade.
+- `drawable/al_sistemas_launch_background.xml`: fundo de abertura com imagem centralizada, sem stretch.
+- `public/icons/`: favicon/PWA/Apple Touch Icon e fonte visual aprovada.
+
+O PNG aprovado deve permanecer quadrado (1:1). O script interrompe o build se detectar outra proporção, para evitar ícone amassado. O diretório `frontend/android/` não precisa ser versionado: ele continua sendo gerado do zero no GitHub Actions.
+

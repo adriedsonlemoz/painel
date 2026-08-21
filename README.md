@@ -5,6 +5,14 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## 📱 Identidade Android e splash — 1.0.152
+
+A marca **AL** aprovada passa a ser a fonte visual do PWA e do APK. O build Android não usa mais um único drawable genérico para o launcher: existem mipmaps próprios para `mdpi`, `hdpi`, `xhdpi`, `xxhdpi` e `xxxhdpi`, além de **Adaptive Icon** e `roundIcon`. Assim o ícone aparece corretamente no launcher, instalador e superfícies do sistema sem ficar amassado ou desfocado.
+
+A splash nativa usa a mesma marca. Em Android anteriores ao 12, um bitmap 1:1 por densidade é centralizado sem stretch; no Android 12+ o sistema usa o Adaptive Icon do aplicativo. O bootstrap de login/admin no frontend também mostra o novo ícone com `object-fit: contain`.
+
+Os assets de origem ficam em `frontend/public/icons/` e os recursos nativos preparados para o workflow em `frontend/android-assets/`. O script `frontend/scripts/configure-android-branding.mjs` valida a proporção 1:1 antes de aplicar a identidade ao projeto Capacitor gerado no CI.
+
 ## ⚡ Portal instantâneo e cache público — 1.0.151
 
 O portal público não fica mais preso ao cold start do Render. Ele abre com a última cópia pública válida disponível no navegador, revalida o snapshot na Vercel/R2 em segundo plano e acorda a API principal sem bloquear a navegação. Quando o backend fica pronto, as telas abertas recebem os dados ao vivo automaticamente.

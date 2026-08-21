@@ -1,3 +1,15 @@
+# 1.0.152 — Nova identidade Android, launcher e splash
+
+- Substitui o ícone anterior pela nova marca **AL** aprovada, sem engrenagem, preservando a proporção original **1:1** e os cantos arredondados.
+- PWA recebe `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` e `apple-touch-icon.png` derivados do mesmo asset aprovado, sem esticar a imagem.
+- Build Android passa a copiar recursos específicos para **mdpi, hdpi, xhdpi, xxhdpi e xxxhdpi**, evitando depender do redimensionamento de um único bitmap em tempo de execução.
+- Manifesto nativo usa `@mipmap/ic_launcher` e `@mipmap/ic_launcher_round`; Android 8+ recebe **Adaptive Icon**, melhorando a exibição no launcher, instalador, informações do aplicativo e demais superfícies do sistema.
+- Splash nativa usa a nova marca centralizada. Em Android anteriores ao 12, o bitmap é escolhido por densidade e exibido com `gravity=center`, sem stretch; no Android 12+ o sistema usa o novo ícone adaptativo do app.
+- A tela de bootstrap do login/admin também exibe o novo ícone com `object-fit: contain`, garantindo abertura consistente mesmo depois que a WebView assume a interface.
+- `configure-android-branding.mjs` agora valida que o PNG aprovado é quadrado e falha o build caso a proporção deixe de ser 1:1, prevenindo regressões de ícone amassado.
+- Cache estático do Service Worker passa para `alsistemas-v3`, forçando a remoção dos PNGs antigos já armazenados no navegador/PWA após o deploy.
+- Versão sincronizada em **1.0.152** no frontend, backend e manifesto de atualização.
+
 # 1.0.151 — Portal cache-first, wake em segundo plano e Status
 
 - O portal público deixa de esperar o backend para renderizar. A ordem passa a ser **cache local → snapshot R2/Vercel → API ao vivo em segundo plano**, com atualização automática da interface quando dados mais novos chegam.

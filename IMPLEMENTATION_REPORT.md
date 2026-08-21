@@ -1,3 +1,15 @@
+# Relatório de implementação — 1.0.152
+
+## Identidade visual, launcher e splash Android
+
+- Nova marca AL aprovada aplicada ao PWA, favicon, Apple Touch Icon e abertura administrativa.
+- Assets Android derivados do mesmo PNG 1:1 em cinco densidades, sem redimensionamento destrutivo durante o workflow.
+- Launcher usa `mipmap` + `roundIcon` e Adaptive Icon para Android 8+, corrigindo a ausência/inconsistência do ícone em superfícies do sistema.
+- Splash pré-Android 12 centraliza a marca em tamanho físico equivalente por densidade; Android 12+ usa o novo ícone adaptativo do aplicativo.
+- `configure-android-branding.mjs` valida PNG quadrado e configura recursos/manifest/styles depois de `npx cap add android` e `npx cap sync android`.
+- A tela inicial de login/admin usa o mesmo asset com `object-fit: contain`, sem alterar a identidade pública do portal.
+- Versões do frontend, backend e pacote de atualização sincronizadas em 1.0.152.
+
 # Relatório de implementação — 1.0.151
 
 ## Portal cache-first, Render em segundo plano e monitor público
