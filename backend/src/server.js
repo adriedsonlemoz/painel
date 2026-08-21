@@ -256,6 +256,23 @@ app.get('/api/health/live', (_req, res) => res.json({
   uptime_s: Math.round(process.uptime()),
 }))
 
+// Readiness barato: confirma que as rotas reais já podem consultar Mongo e
+// validar sessões. O frontend usa este estágio depois do liveness para não
+// confundir “processo acordou” com “dados prontos”.
+app.get('/api/health/ready', (_req, res) => {
+  const mongoReady = mongoose.connection.readyState === 1
+  const ready = mongoReady && persistentBootstrapReady
+  if (!ready) res.setHeader('Retry-After', '1')
+  res.status(ready ? 200 : 503).json({
+    ok: ready,
+    ready,
+    processo: 'online',
+    mongodb: mongoose.connection.readyState,
+    bootstrap_persistente: persistentBootstrapReady,
+    uptime_s: Math.round(process.uptime()),
+  })
+})
+
 // ─── #16 / #17 — Sitemap e RSS (sem prefixo /api) ────────────
 app.use('/sitemap.xml', sitemapRoutes)
 app.use('/rss',         rssRoutes)

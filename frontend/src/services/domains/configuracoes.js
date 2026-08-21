@@ -1,7 +1,15 @@
 import { api } from './http.js'
-import { isPublicFallbackEligible, snapshotCollection } from '../publicFallback.js'
+import {
+  isPublicFallbackEligible,
+  isPublicPortalRoute,
+  markPrimaryApiAvailable,
+  snapshotCollection,
+} from '../publicFallback.js'
+import { shouldServeSnapshotFirst } from '../publicData.js'
+import { isBackendReady } from '../backendWake.js'
 
 let cache = null
+let cacheSource = ''
 let pending = null
 
 function emitBranding(config = null) {
@@ -9,49 +17,77 @@ function emitBranding(config = null) {
   window.dispatchEvent(new CustomEvent('alsistemas:branding-refresh', { detail: { config } }))
 }
 
+async function liveConfig() {
+  const data = await api('/configuracoes')
+  cache = data || {}
+  cacheSource = 'live'
+  if (isPublicPortalRoute()) markPrimaryApiAvailable()
+  return cache
+}
+
+async function snapshotConfig(markActive = false) {
+  const data = await snapshotCollection('configuracoes', {}, { markActive })
+  cache = data || {}
+  cacheSource = 'snapshot'
+  return cache
+}
+
 async function listar(force = false) {
-  if (!force && cache) return cache
-  if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG__) {
+  if (!force && cache && !(cacheSource === 'snapshot' && !shouldServeSnapshotFirst())) return cache
+
+  if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG__ && shouldServeSnapshotFirst()) {
     cache = window.__AL_PUBLIC_CONFIG__
+    cacheSource = 'snapshot'
     return cache
   }
+
   if (!force && pending) return pending
-  if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG_PROMISE__) {
-    pending = Promise.resolve(window.__AL_PUBLIC_CONFIG_PROMISE__)
-      .then(async data => {
+
+  pending = (async () => {
+    if (!force && shouldServeSnapshotFirst()) {
+      try { return await snapshotConfig(false) } catch { /* tenta live */ }
+    }
+
+    // O bootstrap HTML pode entregar a configuração pública antes do React.
+    // Em rotas administrativas um resultado nulo não bloqueia: consultamos a API.
+    if (!force && typeof window !== 'undefined' && window.__AL_PUBLIC_CONFIG_PROMISE__) {
+      try {
+        const data = await Promise.resolve(window.__AL_PUBLIC_CONFIG_PROMISE__)
         if (data && typeof data === 'object' && Object.keys(data).length) {
           cache = data
+          cacheSource = isPublicPortalRoute() ? 'snapshot' : 'bootstrap'
           return cache
         }
-        // Na Vercel, o bootstrap HTML usa /api/configuracoes same-origin e pode
-        // não encontrar uma Function com esse nome. Antes de recorrer ao snapshot,
-        // consulta a API real definida em VITE_API_URL.
-        try {
-          const live = await api('/configuracoes')
-          cache = live || {}
-          return cache
-        } catch (error) {
-          if (!isPublicFallbackEligible(error)) throw error
-          const fallback = await snapshotCollection('configuracoes', {}).catch(() => { throw error })
-          cache = fallback || {}
-          return cache
-        }
-      })
-      .finally(() => { pending = null })
-    return pending
-  }
-  pending = api('/configuracoes')
-    .then(data => { cache = data || {}; return cache })
-    .catch(error => {
-      if (!isPublicFallbackEligible(error)) throw error
-      return snapshotCollection('configuracoes', {}).catch(() => { throw error })
-    })
-    .finally(() => { pending = null })
+      } catch { /* continua para live */ }
+    }
+
+    // Login/reset não disparam uma segunda chamada pesada enquanto o coordenador
+    // de wake ainda está aguardando o Render. Branding pode usar a configuração
+    // pública/cacheada e é recarregado assim que o backend fica pronto.
+    if (!force && typeof window !== 'undefined') {
+      const path = window.location.pathname || ''
+      const authSurface = path === '/login' || path.startsWith('/esqueci-senha') || path.startsWith('/redefinir-senha')
+      if (authSurface && !isBackendReady()) {
+        cache = window.__AL_PUBLIC_CONFIG__ || cache || {}
+        cacheSource = cache && Object.keys(cache).length ? 'bootstrap' : 'deferred'
+        return cache
+      }
+    }
+
+    try {
+      return await liveConfig()
+    } catch (error) {
+      if (!isPublicPortalRoute() || !isPublicFallbackEligible(error)) throw error
+      return snapshotConfig(true).catch(() => { throw error })
+    }
+  })().finally(() => { pending = null })
+
   return pending
 }
 
 function sincronizarPublicConfig(data = {}) {
   cache = data || {}
+  cacheSource = 'snapshot'
   if (typeof window !== 'undefined') {
     window.__AL_PUBLIC_CONFIG__ = cache
     window.__AL_PUBLIC_CONFIG_PROMISE__ = Promise.resolve(cache)
@@ -60,7 +96,7 @@ function sincronizarPublicConfig(data = {}) {
   return cache
 }
 
-function invalidar() { cache = null }
+function invalidar() { cache = null; cacheSource = '' }
 
 export const configuracoesService = {
   listar,

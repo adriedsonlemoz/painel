@@ -16,6 +16,8 @@ import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import GlobalMeta from './components/GlobalMeta'
 import { setupService } from './services/api'
+import { isBackendReady, waitForBackendLive } from './services/backendWake'
+import { startPublicPortalSync } from './services/publicSync'
 
 // ── Autenticação (carregadas no bundle principal — pequenas, sempre necessárias)
 import Login          from './pages/Login'
@@ -90,20 +92,27 @@ function S({ children }) {
 function PublicMaintenanceGuard({children}){
   const [maintenance,setMaintenance]=useState(null)
   useEffect(()=>{
-    let alive=true, timer=null
+    let alive=true, timer=null, started=false
     const check=async()=>{
       try{
         const base=import.meta.env.VITE_API_URL||'/api'
-        const r=await fetch(`${base}/maintenance/status`,{cache:'no-store',signal:AbortSignal.timeout(1200)})
+        const r=await fetch(`${base}/maintenance/status`,{cache:'no-store',signal:AbortSignal.timeout(1800)})
         const d=await r.json()
         if(alive)setMaintenance(d?.active?d:null)
       }catch{
-        // Nunca bloquear o portal porque o endpoint de manutenção falhou.
+        // O portal nunca depende deste endpoint para abrir.
       }
     }
-    check()
-    timer=setInterval(check,5000)
-    return()=>{alive=false;clearInterval(timer)}
+    const startPolling=()=>{
+      if(started||!alive)return
+      started=true
+      check()
+      timer=setInterval(check,15000)
+    }
+    if(isBackendReady())startPolling()
+    const onReady=()=>startPolling()
+    window.addEventListener('alsistemas:backend-ready',onReady)
+    return()=>{alive=false;clearInterval(timer);window.removeEventListener('alsistemas:backend-ready',onReady)}
   },[])
   if(!maintenance)return children
   return <div style={{minHeight:'100vh',display:'grid',placeItems:'center',padding:20,background:'#f8fafc',color:'#172033'}}>
@@ -111,11 +120,10 @@ function PublicMaintenanceGuard({children}){
       <div style={{fontSize:11,fontWeight:800,letterSpacing:'.08em',color:'#64748b'}}>PORTAL EM MANUTENÇÃO</div>
       <h1 style={{fontSize:25,margin:'7px 0 8px'}}>Atualização em andamento</h1>
       <p style={{color:'#64748b',lineHeight:1.55,marginBottom:0}}>{maintenance.message||'Estamos aplicando uma atualização. O portal volta automaticamente em instantes.'}</p>
-      {maintenance.toVersion&&<div style={{marginTop:14,fontSize:12,color:'#94a3b8'}}>Atualizando para AL Sistemas {maintenance.toVersion}</div>}
+      {maintenance.toVersion&&<div style={{marginTop:14,fontSize:12,color:'#94a3b8'}}>Atualização {maintenance.toVersion}</div>}
     </div>
   </div>
 }
-
 
 function SetupRouteFallback() {
   const [startedAt] = useState(() => { const now = performance.now(); window.__AL_SETUP_CHUNK_STARTED__ = now; return now })
@@ -135,6 +143,10 @@ function SetupRouteFallback() {
 
 
 function PublicLayout({ children }) {
+  useEffect(() => {
+    const stop = startPublicPortalSync()
+    return () => { if (typeof stop === 'function') stop() }
+  }, [])
   return (
     <>
       <GlobalMeta />
@@ -149,47 +161,74 @@ function PublicLayout({ children }) {
 function FirstRunGuard({ children }) {
   const location = useLocation()
   const rotaSetup = location.pathname === '/admin/setup'
-  const rotaProtegida = location.pathname === '/login' || location.pathname.startsWith('/admin')
-  const [state, setState] = useState({ loading: rotaProtegida, checked: false, needed: false, error: null, retry: 0 })
+  const rotaLogin = location.pathname === '/login'
+  const rotaProtegida = rotaLogin || location.pathname.startsWith('/admin')
+  const rotaBloqueante = location.pathname.startsWith('/admin')
+  const [state, setState] = useState({ loading: rotaBloqueante, checked: false, needed: false, error: null, retry: 0 })
   const [probeStartedAt, setProbeStartedAt] = useState(() => performance.now())
   const [probeElapsed, setProbeElapsed] = useState(null)
   const [showProbe, setShowProbe] = useState(false)
 
   useEffect(() => {
+    if (!rotaProtegida) {
+      setState(prev => ({ ...prev, loading: false, checked: true, needed: false, error: null }))
+      setShowProbe(false)
+      return undefined
+    }
+
     let active = true
+    let retryTimer = null
     const started = performance.now()
     setProbeStartedAt(started)
     setProbeElapsed(null)
     setShowProbe(false)
-    const visualTimer = setTimeout(() => active && setShowProbe(true), 700)
-    // /api/setup/status usa o Mongo como autoridade em produção para reconhecer instalações existentes.
-    setState(prev => ({ ...prev, loading: rotaProtegida, error: null }))
-    setupService.status()
-      .then(data => {
+    const visualTimer = rotaBloqueante
+      ? setTimeout(() => active && setShowProbe(true), 700)
+      : null
+    setState(prev => ({ ...prev, loading: rotaBloqueante, error: null }))
+
+    const run = async () => {
+      try {
+        // No login a interface aparece imediatamente. O Render é acordado em
+        // segundo plano e só depois consultamos o estado de instalação.
+        if (rotaLogin) {
+          const ready = await waitForBackendLive({ maxWaitMs: 90_000 })
+          if (!active) return
+          if (!ready) {
+            setState(prev => ({ ...prev, loading: false, checked: false, error: null }))
+            return
+          }
+        }
+
+        const data = await setupService.status(rotaLogin ? 15_000 : 90_000)
         if (!active) return
         const elapsed = performance.now() - started
-        clearTimeout(visualTimer)
+        if (visualTimer) clearTimeout(visualTimer)
         setProbeElapsed(elapsed)
-        // Se demorou, mantenha o diagnóstico visível durante a transição para que
-        // seja possível enxergar/registrar o tempo responsável pelo atraso.
-        if (elapsed >= 700) setShowProbe(true)
+        if (rotaBloqueante && elapsed >= 700) setShowProbe(true)
         window.__AL_SETUP_BOOT__ = { status: data, elapsed, at: Date.now() }
         if (data.setup_pending) {
-          setState(prev => ({ ...prev, loading: true, checked: false, needed: false, error: null }))
-          window.setTimeout(() => active && setState(prev => ({ ...prev, retry: prev.retry + 1 })), 900)
+          setState(prev => ({ ...prev, loading: rotaBloqueante, checked: false, needed: false, error: null }))
+          retryTimer = window.setTimeout(() => active && setState(prev => ({ ...prev, retry: prev.retry + 1 })), 1200)
           return
         }
         setState(prev => ({ ...prev, loading: false, checked: true, needed: Boolean(data.setup_needed), error: null }))
-      })
-      .catch(error => {
+      } catch (error) {
         if (!active) return
-        clearTimeout(visualTimer)
+        if (visualTimer) clearTimeout(visualTimer)
         setProbeElapsed(performance.now() - started)
-        setShowProbe(true)
+        if (rotaBloqueante) setShowProbe(true)
         setState(prev => ({ ...prev, loading: false, checked: true, error, needed: false }))
-      })
-    return () => { active = false; clearTimeout(visualTimer) }
-  }, [state.retry])
+      }
+    }
+
+    void run()
+    return () => {
+      active = false
+      if (visualTimer) clearTimeout(visualTimer)
+      if (retryTimer) window.clearTimeout(retryTimer)
+    }
+  }, [state.retry, rotaProtegida, rotaBloqueante, rotaLogin])
 
   const probeStages = [
     { label: 'Aplicativo carregado', status: 'done', elapsed: 0, detail: `${location.pathname} • ${navigator.userAgent.includes('Android') ? 'Android' : 'navegador'}` },
@@ -209,7 +248,7 @@ function FirstRunGuard({ children }) {
 
   if (state.checked && !state.needed && rotaSetup) return <Navigate to="/login" replace />
 
-  if ((rotaProtegida && !rotaSetup && state.loading) || (showProbe && !state.checked)) {
+  if ((rotaBloqueante && !rotaSetup && state.loading) || (rotaBloqueante && showProbe && !state.checked)) {
     // Em instalação nova/diagnóstico lento, mostrar a etapa real em vez de um
     // spinner genérico. Quando já instalado, desaparece automaticamente após a resposta.
     if (!state.checked || state.needed || state.error) {
@@ -221,8 +260,8 @@ function FirstRunGuard({ children }) {
     }
   }
 
-  if (rotaProtegida && !rotaSetup && state.loading) return <LoadingSpinner texto="Verificando configuração inicial..." />
-  if (rotaProtegida && !rotaSetup && state.error) {
+  if (rotaBloqueante && !rotaSetup && state.loading) return <LoadingSpinner texto="Verificando configuração inicial..." />
+  if (rotaBloqueante && !rotaSetup && state.error) {
     return (
       <AppErrorScreen
         variant="network"

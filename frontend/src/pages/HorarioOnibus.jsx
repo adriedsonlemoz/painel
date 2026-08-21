@@ -186,16 +186,32 @@ export default function HorarioOnibus() {
 
   useEffect(() => { const id = setInterval(() => setAgora(new Date()), 30_000); return () => clearInterval(id) }, [])
 
-  const carregar = useCallback(async () => {
-    setLoading(true); setErro(false)
+  const aplicarLinhas = useCallback(lista => {
+    const linhasValidas = Array.isArray(lista) ? lista : []
+    setLinhas(linhasValidas)
+    setAtivoId(id => linhasValidas.some(l => (l.id || l._id) === id) ? id : (linhasValidas[0]?.id || linhasValidas[0]?._id || null))
+  }, [])
+  const carregar = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) { setLoading(true); setErro(false) }
     try {
       const data = await onibusService.listar()
-      const lista = Array.isArray(data) ? data : data?.linhas || []
-      setLinhas(lista)
-      setAtivoId(id => lista.some(l => (l.id || l._id) === id) ? id : (lista[0]?.id || lista[0]?._id || null))
-    } catch { setErro(true) } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { carregar() }, [carregar])
+      aplicarLinhas(Array.isArray(data) ? data : data?.linhas || [])
+    } catch { if (!silent) setErro(true) } finally { if (!silent) setLoading(false) }
+  }, [aplicarLinhas])
+  useEffect(() => { void carregar() }, [carregar])
+  useEffect(() => {
+    const refresh = () => { void carregar({ silent: true }) }
+    const onSnapshot = event => {
+      const data = event?.detail?.snapshot?.onibus
+      if (Array.isArray(data)) aplicarLinhas(data)
+    }
+    window.addEventListener('alsistemas:backend-ready', refresh)
+    window.addEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    return () => {
+      window.removeEventListener('alsistemas:backend-ready', refresh)
+      window.removeEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    }
+  }, [carregar, aplicarLinhas])
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLocaleLowerCase('pt-BR')

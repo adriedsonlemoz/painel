@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useBranding } from '../context/BrandingContext'
 import toast from 'react-hot-toast'
+import { getBackendWakeState, startBackendWake } from '../services/backendWake'
 
 const API_BASE    = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:3001/api' : '/api')
 const SERVER_ROOT = API_BASE.replace(/\/api\/?$/, '')
@@ -76,8 +77,6 @@ export default function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
-  useEffect(() => { ensureSession() }, [ensureSession])
-
   useEffect(() => {
     if (searchParams.get('motivo') === 'sessao') toast.error('Sua sessão expirou. Entre novamente.')
   }, [searchParams])
@@ -99,6 +98,8 @@ export default function Login() {
   const [diagOpen, setDiagOpen]       = useState(false)
   const [copied, setCopied]           = useState(false)
   const [apiOnline, setApiOnline]     = useState(null)
+  const [wakeState, setWakeState]     = useState(getBackendWakeState)
+  const [wakeElapsed, setWakeElapsed] = useState(() => getBackendWakeState().elapsedMs || 0)
 
   const logEndRef  = useRef(null)
   const ranRef     = useRef(false)
@@ -172,39 +173,38 @@ export default function Login() {
     if (appVer) add('→', `Versão do frontend: ${appVer}`, true)
 
     // ════════════════════════════════════════════════════════
-    // B. Servidor (raiz)
+    // B. Servidor (wake coordenado + raiz)
     // ════════════════════════════════════════════════════════
     sep('Servidor')
-    add('→', `GET ${SERVER_ROOT}/`)
+    const wakeBefore = getBackendWakeState()
+    if (wakeBefore.status === 'ready') {
+      add('✓', `Backend já estava pronto (${Math.round(wakeBefore.elapsedMs)}ms no último wake)`)
+    } else {
+      add('→', `Render ${wakeBefore.phase === 'data' ? 'já respondeu; aguardando banco/bootstrap' : 'pode estar hibernando'} — aguardando por até 90 s…`)
+    }
 
-    let serverUp = false
-    {
-      const { res, ms, timedOut, corsBlocked, errMsg } = await fetchTimed(`${SERVER_ROOT}/`, {}, 8000)
-
-      if (timedOut) {
-        add('⚠', `Não respondeu em 8 s — servidor hibernando (Render free tier)`)
-        add('→', 'Aguardando wake-up — nova tentativa em até 15 s…')
-        const retry = await fetchTimed(`${SERVER_ROOT}/`, {}, 15000)
-        if (retry.res) {
-          serverUp = true
-          setApiOnline(true)
-          add('✓', `Servidor acordou (${retry.res.status}) após ${retry.ms}ms`)
-        } else {
-          setApiOnline(false)
-          add('✕', `Servidor não respondeu após ~23 s — pode estar offline ou com erro`)
-        }
-      } else if (corsBlocked) {
-        setApiOnline(false)
-        add('✕', `CORS bloqueou GET ${SERVER_ROOT}/`)
-        add('⚠', `A origem ${window.location.origin} não foi aceita pelo backend. Confira Ambientes/Plataformas e a configuração Vercel ↔ Render.`, true)
+    let serverUp = await startBackendWake({ maxWaitMs: 90_000 })
+    if (!serverUp) {
+      setApiOnline(false)
+      const stateNow = getBackendWakeState()
+      add('✕', `Backend não ficou pronto em ${(stateNow.elapsedMs / 1000).toFixed(1)} s`)
+      if (stateNow.lastError) add('⚠', stateNow.lastError, true)
+    } else {
+      setApiOnline(true)
+      const stateNow = getBackendWakeState()
+      add('✓', `Backend pronto em ${(stateNow.elapsedMs / 1000).toFixed(1)} s`)
+      add('→', `GET ${SERVER_ROOT}/`)
+      const { res, ms, corsBlocked } = await fetchTimed(`${SERVER_ROOT}/`, {}, 8000)
+      if (corsBlocked) {
+        add('⚠', `CORS bloqueou a leitura da raiz ${SERVER_ROOT}/`, true)
       } else if (res) {
-        serverUp = true
-        setApiOnline(true)
         let versao = ''
         try { const j = await res.clone().json(); versao = j.versao || j.version || '' } catch { /* ok */ }
         const corsHeader = res.headers.get('access-control-allow-origin') || '(não enviado)'
-        add('✓', `Servidor respondeu (${res.status}) em ${ms}ms${versao ? ` — versão: ${versao}` : ''}`)
+        add('✓', `Raiz respondeu (${res.status}) em ${ms}ms${versao ? ` — versão: ${versao}` : ''}`)
         add('→', `CORS allow-origin: ${corsHeader}`, true)
+      } else {
+        add('⚠', 'Backend ficou pronto, mas a leitura complementar da raiz falhou.', true)
       }
     }
 
@@ -386,19 +386,43 @@ export default function Login() {
     setDiagDone(true)
   }, [])
 
-  // Diagnóstico completo é sob demanda. Um probe leve roda no login para
-  // indicar rapidamente se a API está acessível sem competir com o carregamento.
+  // O formulário aparece imediatamente. O Render acorda em segundo plano por até
+  // 90 s e o estado compacto abaixo acompanha o tempo sem transformar cold start
+  // em erro. A sessão só é consultada quando o health confirmar que a API acordou.
   useEffect(() => {
     ranRef.current = false
     let alive = true
-    const timer = window.setTimeout(async () => {
-      const probe = await fetchTimed(`${API_BASE}/health/live`, {}, 3000)
+
+    const syncWake = (detail = null) => {
       if (!alive) return
-      if (probe.res) setApiOnline(probe.res.ok)
-      else if (probe.timedOut || probe.corsBlocked || probe.networkError) setApiOnline(false)
-    }, 350)
-    return () => { alive = false; window.clearTimeout(timer) }
-  }, [])
+      const next = detail || getBackendWakeState()
+      setWakeState(next)
+      setWakeElapsed(next.elapsedMs || 0)
+      if (next.status === 'ready') setApiOnline(true)
+      if (next.status === 'unavailable') setApiOnline(false)
+    }
+
+    const onWake = (event) => syncWake(event?.detail)
+    window.addEventListener('alsistemas:backend-wake', onWake)
+    syncWake()
+
+    const ticker = window.setInterval(() => {
+      const current = getBackendWakeState()
+      if (current.status === 'waking') syncWake(current)
+    }, 100)
+
+    startBackendWake({ maxWaitMs: 90_000 }).then((ready) => {
+      if (!alive) return
+      syncWake()
+      if (ready) void ensureSession()
+    })
+
+    return () => {
+      alive = false
+      window.removeEventListener('alsistemas:backend-wake', onWake)
+      window.clearInterval(ticker)
+    }
+  }, [ensureSession])
 
   function handleRerun() {
     ranRef.current = false
@@ -430,6 +454,8 @@ export default function Login() {
     if (!email || !senha) { toast.error('Preencha email e senha'); return }
     try {
       setLoading(true)
+      const ready = await startBackendWake({ maxWaitMs: 90_000 })
+      if (!ready) throw new Error('O servidor ainda não respondeu. Tente novamente em alguns instantes.')
       await login(email, senha, manterConectado)
       navigate('/admin')
     } catch (err) {
@@ -438,6 +464,17 @@ export default function Login() {
       setLoading(false)
     }
   }
+
+  const wakeSeconds = (wakeElapsed / 1000).toFixed(1)
+  const compactStatus = diagRunning
+    ? { kind: 'running', label: 'Diagnosticando' }
+    : wakeState.status === 'waking'
+      ? { kind: 'waking', label: `${wakeState.phase === 'data' ? 'Preparando dados' : 'Despertando'} · ${wakeSeconds} s` }
+      : wakeState.status === 'ready' || apiOnline === true
+        ? { kind: 'ok', label: 'Online' }
+        : wakeState.status === 'unavailable' || apiOnline === false
+          ? { kind: 'error', label: 'Indisponível' }
+          : { kind: 'waking', label: 'Conectando' }
 
   return (
     <div className="auth-shell">
@@ -514,15 +551,13 @@ export default function Login() {
         <section className="auth-diag" aria-label="Diagnóstico de conexão">
           <button type="button" className="auth-diag__bar" onClick={() => setDiagOpen(v => !v)} aria-expanded={diagOpen}>
             <span className="auth-diag__title">
-              {diagRunning && <RefreshCw size={14} className="animate-spin" />}
-              {!diagRunning && apiOnline === true && <Wifi size={14} className="auth-diag__symbol--ok" />}
-              {!diagRunning && apiOnline === false && <WifiOff size={14} className="auth-diag__symbol--error" />}
-              <span>Diagnóstico de conexão</span>
-              {!diagRunning && apiOnline !== null && (
-                <span className={`auth-diag__status ${apiOnline ? 'auth-diag__status--ok' : 'auth-diag__status--error'}`}>
-                  {apiOnline ? 'Online' : 'Atenção'}
-                </span>
-              )}
+              {(diagRunning || compactStatus.kind === 'waking') && <RefreshCw size={14} className="animate-spin" />}
+              {!diagRunning && compactStatus.kind === 'ok' && <Wifi size={14} className="auth-diag__symbol--ok" />}
+              {!diagRunning && compactStatus.kind === 'error' && <WifiOff size={14} className="auth-diag__symbol--error" />}
+              <span>Conexão do servidor</span>
+              <span className={`auth-diag__status auth-diag__status--${compactStatus.kind}`}>
+                {compactStatus.label}
+              </span>
             </span>
             <span className="auth-diag__tools">
               {diagDone && (

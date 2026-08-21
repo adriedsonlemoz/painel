@@ -1,3 +1,16 @@
+# 1.0.151 — Portal cache-first, wake em segundo plano e Status
+
+- O portal público deixa de esperar o backend para renderizar. A ordem passa a ser **cache local → snapshot R2/Vercel → API ao vivo em segundo plano**, com atualização automática da interface quando dados mais novos chegam.
+- O cache público tem **frescor de 10 minutos** por padrão e é revalidado no máximo a cada minuto enquanto a página está visível. A cópia persistida no navegador tem **expiração rígida de 24 horas** por padrão; ambos os limites podem ser ajustados por `VITE_PUBLIC_CACHE_TTL_MS` e `VITE_PUBLIC_CACHE_MAX_AGE_MS`.
+- Um coordenador único de wake usa `/health/live` para acordar o processo do Render e `/health/ready` para esperar Mongo + bootstrap persistente, por até **90 segundos** no total. A primeira tentativa pode permanecer aberta por até 65 s e novas tentativas são espaçadas, evitando várias chamadas pesadas simultâneas durante cold start.
+- Home, notícias, categorias, módulos, tópicos, eventos e ônibus servem snapshot primeiro enquanto o backend dorme. Conteúdo que depende exclusivamente da API é solicitado somente depois do evento `alsistemas:backend-ready`.
+- O bootstrap HTML público não consulta mais `/api/setup/status` nem `/api/configuracoes` no Render. Nome, título e descrição podem vir do snapshot público antes do React; o console interno **AL Sistemas** fica restrito às superfícies de login/admin.
+- O formulário de login aparece imediatamente. Em vez de um probe de 3 s que podia marcar o Render como offline, a barra de conexão exibe **Despertando · X,X s** e, depois do processo HTTP subir, **Preparando dados · X,X s**. A restauração da sessão só ocorre quando `/health/ready` confirma banco/bootstrap prontos ou o limite total de 90 s é atingido.
+- O nome do portal no cabeçalho foi reduzido e passa a usar diretamente o `BrandingContext`, acompanhando atualizações do snapshot/configuração sem leitura duplicada.
+- `/status/` foi redesenhado: visão geral, contadores de online/iniciando/indisponível, latência, HTTP, autoatualização com contagem regressiva, idade/frescor do snapshot e status/incidentes oficiais do Render.
+- No monitor independente, timeout de um serviço hospedado no Render passa a ser **Iniciando**, não “offline”, pois cold start é uma causa comum e a próxima verificação pode confirmar o serviço online.
+- Nenhuma imagem, ícone ou asset visual foi criado ou editado nesta entrega.
+
 # 1.0.150 — Build Vercel, mobile, Plantão e sessão persistente
 
 - Corrige a falha de build da 1.0.149 em `AdminProjetoPlataforma.jsx`: o `await fetchValue(item)` é resolvido antes do callback de `setRevealed`, compatível com Vite/esbuild.

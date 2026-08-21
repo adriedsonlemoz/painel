@@ -1,7 +1,7 @@
 // AL Sistemas — Service Worker
 // HTML e chunks do Vite nunca são servidos de um cache antigo após deploy.
-const CACHE_NAME = 'alsistemas-v1'
-const API_CACHE_NAME = 'alsistemas-api-v1'
+const CACHE_NAME = 'alsistemas-v2'
+const API_CACHE_NAME = 'alsistemas-api-v2'
 const PRECACHE_URLS = ['/manifest.json']
 
 self.addEventListener('message', event => {
@@ -37,10 +37,10 @@ self.addEventListener('fetch', event => {
     // Sessão/admin nunca entram em cache. Isso evita reaproveitar 401/200 de
     // uma sessão antiga após deploy e também funciona quando a API está no
     // Render e o frontend na Vercel.
-    const sensitive = ['/api/status', '/api/auth/', '/api/admin/', '/api/github/', '/api/projetos/', '/api/analysis/', '/api/setup/', '/api/upload', '/api/erros']
+    const sensitive = ['/api/status', '/api/health', '/api/auth/', '/api/admin/', '/api/github/', '/api/projetos/', '/api/analysis/', '/api/setup/', '/api/upload', '/api/erros']
       .some(prefix => url.pathname.startsWith(prefix))
     if (url.pathname === '/api/news-fallback') {
-      event.respondWith(networkFirstFallbackSnapshot(request))
+      event.respondWith(networkOnlyFallbackSnapshot(request))
     } else {
       event.respondWith(sensitive ? fetch(request, { cache: 'no-store' }) : networkFirstAPI(request))
     }
@@ -93,21 +93,13 @@ async function networkFirstAPI(request) {
 }
 
 
-// O snapshot de contingência é deliberadamente diferente das demais APIs:
-// se Vercel/R2 responder 5xx, uma cópia 200 previamente salva continua útil.
-async function networkFirstFallbackSnapshot(request) {
-  const cache = await caches.open(API_CACHE_NAME)
+// O snapshot público já possui uma camada própria de cache/expiração no app.
+// Não mantemos uma segunda cópia indefinida no Cache Storage do Service Worker,
+// pois ela poderia ressuscitar conteúdo expirado e renovar artificialmente seu TTL.
+async function networkOnlyFallbackSnapshot(request) {
   try {
-    const response = await fetch(request, { cache: 'no-store' })
-    if (response.ok) {
-      await cache.put(request, response.clone())
-      return response
-    }
-    const cached = await cache.match(request)
-    return cached || response
+    return await fetch(request, { cache: 'no-store' })
   } catch {
-    const cached = await cache.match(request)
-    if (cached) return cached
     return new Response(JSON.stringify({ erro: 'Snapshot de contingência indisponível', offline: true }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },

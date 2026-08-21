@@ -1,8 +1,8 @@
 const DEFAULT_SERVICES = [
   {
-    id: 'al-sistemas-api',
-    name: 'AL Sistemas API',
-    url: 'https://al-sistemas-api.onrender.com/api/health/live',
+    id: 'portal-api',
+    name: 'API do portal',
+    url: 'https://al-sistemas-api.onrender.com/api/health/ready',
     provider: 'Render',
   },
   {
@@ -46,32 +46,49 @@ async function fetchWithTimeout(url, options = {}, ms = timeoutMs()) {
   }
 }
 
+function isRenderService(service) {
+  return String(service?.provider || '').toLowerCase().includes('render') || /\.onrender\.com\b/i.test(String(service?.url || ''))
+}
+
 async function checkService(service) {
   const started = Date.now()
   try {
     const response = await fetchWithTimeout(service.url, {
       redirect: 'follow',
       cache: 'no-store',
-      headers: { 'User-Agent': 'AL-Sistemas-Status/1.0' },
+      headers: { 'User-Agent': 'Portal-Status/1.1' },
     })
     const latencyMs = Date.now() - started
     const online = response.status >= 200 && response.status < 400
+    const readinessStarting = response.status === 503 && isRenderService(service) && /\/health\/ready\b/i.test(service.url)
     const reachable = response.status < 500
     return {
       ...service,
-      status: online ? 'online' : reachable ? 'reachable' : 'offline',
+      status: online ? 'online' : readinessStarting ? 'starting' : reachable ? 'reachable' : 'offline',
       httpStatus: response.status,
       latencyMs,
       checkedAt: new Date().toISOString(),
+      hint: online
+        ? ''
+        : readinessStarting
+          ? 'O processo já respondeu, mas banco e bootstrap ainda estão sendo preparados.'
+          : reachable
+            ? 'O serviço respondeu, mas não com um status HTTP de sucesso.'
+            : '',
     }
   } catch (error) {
+    const timedOut = error?.name === 'AbortError'
+    const renderSleeping = timedOut && isRenderService(service)
     return {
       ...service,
-      status: 'offline',
+      status: renderSleeping ? 'starting' : 'offline',
       httpStatus: null,
       latencyMs: Date.now() - started,
       checkedAt: new Date().toISOString(),
-      error: error?.name === 'AbortError' ? 'timeout' : 'network_error',
+      error: timedOut ? 'timeout' : 'network_error',
+      hint: renderSleeping
+        ? 'O Render pode estar iniciando a instância após um período sem uso. A próxima verificação costuma confirmar quando ela acordar.'
+        : 'Não foi possível alcançar o serviço nesta verificação.',
     }
   }
 }
@@ -108,16 +125,26 @@ async function renderStatus() {
   }
 }
 
+function snapshotFreshness(generatedAt) {
+  const generatedMs = new Date(generatedAt || 0).getTime()
+  if (!Number.isFinite(generatedMs) || generatedMs <= 0) return { ageSeconds: null, freshness: 'unknown' }
+  const ageSeconds = Math.max(0, Math.round((Date.now() - generatedMs) / 1000))
+  if (ageSeconds <= 15 * 60) return { ageSeconds, freshness: 'fresh' }
+  if (ageSeconds <= 2 * 60 * 60) return { ageSeconds, freshness: 'recent' }
+  return { ageSeconds, freshness: 'stale' }
+}
+
 async function fallbackStatus() {
   const publicBase = String(process.env.CF_R2_PUBLIC_URL || '').trim().replace(/\/+$/, '')
   const derived = publicBase ? `${publicBase}/alsistemas/fallback/public-snapshot-v1.json` : ''
   const url = String(process.env.NEWS_FALLBACK_URL || process.env.VITE_NEWS_FALLBACK_URL || derived || '').trim()
-  if (!/^https?:\/\//i.test(url)) return { configured: false, available: false }
+  if (!/^https?:\/\//i.test(url)) return { configured: false, available: false, freshness: 'unknown', ageSeconds: null }
   const started = Date.now()
   try {
     const response = await fetchWithTimeout(url, { cache: 'no-store' }, 6000)
-    if (!response.ok) return { configured: true, available: false, httpStatus: response.status, latencyMs: Date.now() - started }
+    if (!response.ok) return { configured: true, available: false, httpStatus: response.status, latencyMs: Date.now() - started, freshness: 'unknown', ageSeconds: null }
     const data = await response.json()
+    const freshness = snapshotFreshness(data?.generated_at)
     return {
       configured: true,
       available: data?.schema === 'alsistemas-public-snapshot-v1',
@@ -125,9 +152,17 @@ async function fallbackStatus() {
       latencyMs: Date.now() - started,
       generatedAt: data?.generated_at || null,
       newsCount: Array.isArray(data?.noticias) ? data.noticias.length : null,
+      ...freshness,
     }
   } catch (error) {
-    return { configured: true, available: false, latencyMs: Date.now() - started, error: error?.name === 'AbortError' ? 'timeout' : 'network_error' }
+    return {
+      configured: true,
+      available: false,
+      latencyMs: Date.now() - started,
+      error: error?.name === 'AbortError' ? 'timeout' : 'network_error',
+      freshness: 'unknown',
+      ageSeconds: null,
+    }
   }
 }
 
@@ -141,11 +176,22 @@ export default async function handler(_request, response) {
     fallbackStatus(),
   ])
   const online = checks.filter(item => item.status === 'online').length
+  const starting = checks.filter(item => item.status === 'starting').length
+  const reachable = checks.filter(item => item.status === 'reachable').length
+  const offline = checks.filter(item => item.status === 'offline').length
   response.status(200).json({
     ok: true,
     generatedAt: new Date().toISOString(),
     monitor: { provider: 'Vercel Functions', independentFromRenderBackend: true },
-    summary: { total: checks.length, online, unavailable: checks.length - online },
+    summary: {
+      total: checks.length,
+      online,
+      starting,
+      reachable,
+      offline,
+      unavailable: offline,
+      healthyOrStarting: online + starting,
+    },
     services: checks,
     render,
     fallback,

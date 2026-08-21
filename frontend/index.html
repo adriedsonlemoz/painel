@@ -45,7 +45,7 @@
       .al-core-ring:before{inset:8px;border:2px solid transparent;border-top-color:#16a34a;border-right-color:rgba(22,163,74,.30)}
       .al-core-ring:after{inset:20px;border:1px dashed rgba(22,163,74,.30);animation:al-spin-rev 8s linear infinite}
       .al-core-mark{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:#fff;border:1px solid rgba(22,163,74,.18);box-shadow:0 14px 40px rgba(16,88,51,.10);font-weight:900;font-size:19px;letter-spacing:-.06em;color:#15803d}
-      .al-boot-title{font-size:clamp(23px,7vw,30px);font-weight:780;letter-spacing:-.045em;margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .al-boot-title{font-size:clamp(20px,6vw,26px);font-weight:780;letter-spacing:-.045em;margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .al-boot-sub{margin-top:8px;font-size:13px;color:#66776e;min-height:20px}
       .al-boot-track{width:min(100%,310px);height:3px;margin-top:27px;border-radius:999px;background:rgba(20,35,27,.08);overflow:hidden}
       .al-boot-progress{height:100%;width:34%;border-radius:inherit;background:#16a34a;animation:al-scan 1.65s cubic-bezier(.4,0,.2,1) infinite}
@@ -58,22 +58,44 @@
     </style>
     <div id="als-native-guard">
       <div class="al-boot-console">
-        <div class="al-boot-kicker">AL Sistemas · núcleo</div>
-        <div class="al-core"><div class="al-core-ring"></div><div class="al-core-mark">AL</div></div>
+        <div id="als-native-guard-kicker" class="al-boot-kicker">Portal · conteúdo</div>
+        <div class="al-core"><div class="al-core-ring"></div><div id="als-native-guard-mark" class="al-core-mark">P</div></div>
         <h1 id="als-native-guard-title" class="al-boot-title">Portal de notícias</h1>
-        <div id="als-native-guard-message" class="al-boot-sub">Inicializando núcleo do portal…</div>
+        <div id="als-native-guard-message" class="al-boot-sub">Preparando a página…</div>
         <div class="al-boot-track"><div class="al-boot-progress"></div></div>
-        <div class="al-boot-sequence"><span class="active">Configuração</span><i></i><span>Serviços</span><i></i><span>Conteúdo</span><i></i><span>Online</span></div>
-        <div class="al-boot-code">SYSTEM BOOT · SECURE SESSION</div>
+        <div id="als-native-guard-sequence" class="al-boot-sequence"><span class="active">Conteúdo</span><i></i><span>Navegação</span><i></i><span>Atualização</span><i></i><span>Pronto</span></div>
+        <div id="als-native-guard-code" class="al-boot-code">CARREGAMENTO DO PORTAL</div>
       </div>
     </div>
     <script>
       (function(){
+        var path = location.pathname || '/';
+        var adminSurface = path === '/login' || path.indexOf('/admin') === 0 || path === '/esqueci-senha' || path === '/redefinir-senha';
+        window.__AL_ADMIN_SURFACE__ = adminSurface;
+
+        // O portal público nunca exibe o console interno de inicialização. O esqueleto
+        // do próprio portal fica visível enquanto React e o snapshot entram em cena.
+        if (!adminSurface) {
+          var publicGuard = document.getElementById('als-native-guard');
+          if (publicGuard) publicGuard.style.display = 'none';
+        } else {
+          var kicker = document.getElementById('als-native-guard-kicker');
+          var mark = document.getElementById('als-native-guard-mark');
+          var message = document.getElementById('als-native-guard-message');
+          var sequence = document.getElementById('als-native-guard-sequence');
+          var code = document.getElementById('als-native-guard-code');
+          if (kicker) kicker.textContent = 'AL Sistemas · administração';
+          if (mark) mark.textContent = 'AL';
+          if (message) message.textContent = 'Preparando o ambiente administrativo…';
+          if (sequence) sequence.innerHTML = '<span class="active">Interface</span><i></i><span>Sessão</span><i></i><span>Serviços</span><i></i><span>Pronto</span>';
+          if (code) code.textContent = 'ADMIN BOOT · SECURE SESSION';
+        }
+
         function showFatal(message){
           var guard=document.getElementById('als-native-guard');
           var text=document.getElementById('als-native-guard-message');
           if(guard) guard.style.display='grid';
-          if(text) text.textContent='Falha ao iniciar a interface: '+String(message||'erro desconhecido')+'. Recarregue a página. Se continuar, abra Administração → Erros.';
+          if(text) text.textContent='Falha ao iniciar a interface: '+String(message||'erro desconhecido')+'. Recarregue a página.';
         }
         window.__AL_NATIVE_GUARD_HIDE__=function(){ var g=document.getElementById('als-native-guard'); if(g) g.remove(); };
         window.addEventListener('error',function(e){ if(!document.getElementById('root')?.hasChildNodes()) showFatal(e.error?.message||e.message); });
@@ -87,41 +109,77 @@
     </script>
     <div id="root"><div id="boot-screen"><div class="boot-shell"><div class="boot-head"><div id="boot-portal-name" class="boot-brand">Portal de notícias</div><div class="boot-live">Atualizando a sua leitura</div></div><div class="boot-grid"><div class="boot-card"><div class="boot-image"></div><div class="boot-copy"><div class="boot-line lg"></div><div class="boot-line md"></div><div class="boot-line sm"></div></div></div><div class="boot-side"><div class="boot-card boot-mini"><div class="boot-line md"></div><div class="boot-line"></div><div class="boot-line sm"></div></div><div class="boot-card boot-mini"><div class="boot-line md"></div><div class="boot-line"></div><div class="boot-line sm"></div></div><div class="boot-card boot-mini"><div class="boot-line md"></div><div class="boot-line"></div><div class="boot-line sm"></div></div></div></div><div class="boot-note">Buscando as notícias mais recentes…</div></div></div></div>
     <script>
-      // Mostra a identidade pública já no primeiro carregamento, antes do React iniciar.
-      // Falhas de API não impedem o boot: uma identidade pública neutra permanece como fallback.
-      // Primeiro uso: o status é lido apenas do cofre local do backend, sem MongoDB.
-      // Isso permite redirecionar uma instalação nova mesmo quando a pessoa abre '/'.
-      window.__AL_SETUP_STATUS_PROMISE__ = fetch('/api/setup/status', { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : null })
-        .then(function (status) {
-          if (status && status.setup_needed && location.pathname !== '/admin/setup') {
-            location.replace('/admin/setup')
-          }
-          return status
-        })
-        .catch(function () { return null })
+      // Bootstrap cache-first: a identidade vem da última cópia pública disponível,
+      // sem depender do Render. A API principal é acordada depois pelo React.
+      (function () {
+        var CACHE_KEY = 'alsistemas:public-snapshot:v1'
 
-      window.__AL_PUBLIC_CONFIG_PROMISE__ = window.__AL_SETUP_STATUS_PROMISE__.then(function (status) {
-        if (status && status.setup_needed) return null
-        return fetch('/api/configuracoes', { credentials: 'same-origin' })
-      })
-        .then(function (r) { return r && r.ok ? r.json() : null })
-        .then(function (cfg) {
-          if (!cfg) return null
+        function snapshotFromStorage() {
+          try {
+            var parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
+            if (!parsed) return null
+            var snapshot = parsed.snapshot && typeof parsed.snapshot === 'object' ? parsed.snapshot : (parsed.schema === 'alsistemas-public-snapshot-v1' ? parsed : null)
+            if (!snapshot) return null
+            var rawCached = parsed.cached_at || parsed.cachedAt || snapshot.generated_at || 0
+            var cachedAt = Number(rawCached) || new Date(rawCached || 0).getTime()
+            if (cachedAt && Date.now() - cachedAt > 24 * 60 * 60 * 1000) { localStorage.removeItem(CACHE_KEY); return null }
+            return snapshot
+          } catch (_) {}
+          return null
+        }
+
+        function applyConfig(cfg) {
+          if (!cfg || typeof cfg !== 'object') return null
           window.__AL_PUBLIC_CONFIG__ = cfg
-          var nome = String(cfg.nome_site || '').trim()
+          var nome = String(cfg.nome_site || cfg.site_titulo || '').trim()
           if (nome) {
             var el = document.getElementById('boot-portal-name')
             if (el) el.textContent = nome
             var splashTitle = document.getElementById('als-native-guard-title')
             if (splashTitle) splashTitle.textContent = nome
-            var splashMsg = document.getElementById('als-native-guard-message')
-            if (splashMsg) splashMsg.textContent = 'Sincronizando identidade e conteúdo…'
-            document.title = cfg.site_titulo || nome
+            document.title = String(cfg.site_titulo || nome)
+          }
+          var description = String(cfg.site_descricao || '').trim()
+          if (description) {
+            var meta = document.querySelector('meta[name="description"]')
+            if (meta) meta.setAttribute('content', description)
           }
           return cfg
-        })
-        .catch(function () { return null })
+        }
+
+        function configFromSnapshot(snapshot) {
+          var cfg = snapshot && snapshot.configuracoes
+          return cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : null
+        }
+
+        // Setup deixa de fazer parte do boot público. Login/admin resolvem isso
+        // após o coordenador de wake confirmar que o backend respondeu.
+        window.__AL_SETUP_STATUS_PROMISE__ = Promise.resolve(null)
+
+        var localSnapshot = snapshotFromStorage()
+        var localConfig = applyConfig(configFromSnapshot(localSnapshot))
+        var remoteConfigPromise = fetch('/api/news-fallback', { cache: 'no-store', credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null })
+          .then(function (snapshot) {
+            if (!snapshot || snapshot.schema !== 'alsistemas-public-snapshot-v1') return localConfig
+            var localGenerated = new Date(localSnapshot && localSnapshot.generated_at || 0).getTime()
+            var remoteGenerated = new Date(snapshot.generated_at || 0).getTime()
+            if (localGenerated && remoteGenerated && remoteGenerated < localGenerated) return localConfig
+            try {
+              localStorage.setItem(CACHE_KEY, JSON.stringify({
+                snapshot: snapshot,
+                cached_at: Date.now(),
+                generated_at: snapshot.generated_at || null
+              }))
+            } catch (_) {}
+            return applyConfig(configFromSnapshot(snapshot)) || localConfig
+          })
+          .catch(function () { return localConfig })
+
+        // Quando existe cache local, o React recebe a identidade sem esperar rede.
+        // Sem cache, aguarda apenas o snapshot independente da Vercel/R2 — nunca o Render.
+        window.__AL_PUBLIC_CONFIG_PROMISE__ = localConfig ? Promise.resolve(localConfig) : remoteConfigPromise
+      })()
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

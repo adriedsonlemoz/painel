@@ -176,7 +176,22 @@ export default function NoticiaDetalhe() {
       navigate(noticia.redirecionar_para, { replace: true })
     }
   }, [noticia, navigate])
-  useEffect(() => { configuracoesService.listar().then(setCfg).catch(() => {}) }, [])
+  useEffect(() => {
+    let alive = true
+    configuracoesService.listar().then(data => alive && setCfg(data || {})).catch(() => {})
+    const onReady = () => { configuracoesService.listar(true).then(data => alive && setCfg(data || {})).catch(() => {}) }
+    const onSnapshot = event => {
+      const incoming = event?.detail?.snapshot?.configuracoes
+      if (alive && incoming && typeof incoming === 'object') setCfg(incoming)
+    }
+    window.addEventListener('alsistemas:backend-ready', onReady)
+    window.addEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    return () => {
+      alive = false
+      window.removeEventListener('alsistemas:backend-ready', onReady)
+      window.removeEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    }
+  }, [])
   useEffect(() => {
     const slug = noticia?.categoria_id?.slug
     if (!slug) { setRelacionadas([]); return }

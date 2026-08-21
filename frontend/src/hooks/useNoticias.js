@@ -9,26 +9,36 @@ export function useNoticias({ categoriaSlug, q, page = 1, limit = 9, dataInicio,
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       setError(null)
       const data = await noticiasService.listar({
         categoria: categoriaSlug, page, limit, q,
         dataInicio, dataFim, ordem,
-        status,  // #20 — repassa o filtro de status para a API
+        status,
       })
       setNoticias(data.noticias ?? [])
       setTotal(data.total    ?? 0)
       setPaginas(data.paginas ?? 1)
     } catch (err) {
-      setError(err.message)
+      if (!silent) setError(err.message)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [categoriaSlug, q, page, limit, dataInicio, dataFim, ordem, status])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => { void carregar() }, [carregar])
+
+  useEffect(() => {
+    const refresh = () => { void carregar({ silent: true }) }
+    window.addEventListener('alsistemas:backend-ready', refresh)
+    window.addEventListener('alsistemas:public-snapshot-updated', refresh)
+    return () => {
+      window.removeEventListener('alsistemas:backend-ready', refresh)
+      window.removeEventListener('alsistemas:public-snapshot-updated', refresh)
+    }
+  }, [carregar])
 
   return { noticias, total, paginas, loading, error, recarregar: carregar }
 }
@@ -38,21 +48,30 @@ export function useNoticia(id) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
 
-  useEffect(() => {
+  const carregar = useCallback(async ({ silent = false } = {}) => {
     if (!id) return
-    ;(async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const data = await noticiasService.buscarPorId(id)
-        setNoticia(data)
-      } catch (err) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    })()
+    try {
+      if (!silent) setLoading(true)
+      setError(null)
+      const data = await noticiasService.buscarPorId(id)
+      setNoticia(data)
+    } catch (err) {
+      if (!silent) setError(err.message)
+    } finally {
+      if (!silent) setLoading(false)
+    }
   }, [id])
+
+  useEffect(() => { void carregar() }, [carregar])
+  useEffect(() => {
+    const refresh = () => { void carregar({ silent: true }) }
+    window.addEventListener('alsistemas:backend-ready', refresh)
+    window.addEventListener('alsistemas:public-snapshot-updated', refresh)
+    return () => {
+      window.removeEventListener('alsistemas:backend-ready', refresh)
+      window.removeEventListener('alsistemas:public-snapshot-updated', refresh)
+    }
+  }, [carregar])
 
   return { noticia, loading, error }
 }
@@ -61,19 +80,36 @@ export function useCategorias() {
   const [categorias, setCategorias] = useState([])
   const [loading,    setLoading]    = useState(true)
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async ({ force = false, silent = false } = {}) => {
     try {
-      setLoading(true)
-      const data = await categoriasService.listar()
+      if (!silent) setLoading(true)
+      const data = await categoriasService.listar(force)
       setCategorias(data)
     } catch {
-      setCategorias([])
+      if (!silent) setCategorias([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => { void carregar() }, [carregar])
+
+  useEffect(() => {
+    const onReady = () => { void carregar({ force: true, silent: true }) }
+    const onSnapshot = event => {
+      const incoming = event?.detail?.snapshot?.categorias
+      if (Array.isArray(incoming)) {
+        categoriasService.invalidar()
+        setCategorias(incoming)
+      }
+    }
+    window.addEventListener('alsistemas:backend-ready', onReady)
+    window.addEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    return () => {
+      window.removeEventListener('alsistemas:backend-ready', onReady)
+      window.removeEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    }
+  }, [carregar])
 
   return { categorias, loading, recarregar: carregar }
 }

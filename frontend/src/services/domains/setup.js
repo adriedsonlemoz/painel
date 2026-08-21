@@ -1,7 +1,7 @@
 import { api } from './http.js'
 
 export const setupService = {
-  async status()                  { return api('/setup/status') },
+  async status(timeoutMs = 10000) { return api('/setup/status', { timeoutMs }) },
   async instalar(dados)           { return api('/setup', { method: 'POST', body: JSON.stringify(dados) }) },
   async seed({ nome_site = 'AL Sistemas', limpar_antes = false, dados_escolhidos } = {}) {
     return api('/setup/seed', { method: 'POST', body: JSON.stringify({ nome_site, limpar_antes, dados_escolhidos }) })

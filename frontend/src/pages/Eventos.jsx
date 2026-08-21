@@ -185,20 +185,33 @@ export default function Eventos() {
   const [erro, setErro] = useState('')
   const [modalEvento, setModalEvento] = useState(null)
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true)
-      setErro('')
+      if (!silent) setLoading(true)
+      if (!silent) setErro('')
       const dados = await eventosService.listar()
       setEventos(Array.isArray(dados) ? dados : (dados?.eventos || []))
     } catch (err) {
-      setErro(err?.message || 'Não foi possível carregar a agenda agora.')
+      if (!silent) setErro(err?.message || 'Não foi possível carregar a agenda agora.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => { void carregar() }, [carregar])
+  useEffect(() => {
+    const refresh = () => { void carregar({ silent: true }) }
+    window.addEventListener('alsistemas:backend-ready', refresh)
+    const onSnapshot = event => {
+      const dados = event?.detail?.snapshot?.eventos
+      if (Array.isArray(dados)) setEventos(dados)
+    }
+    window.addEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    return () => {
+      window.removeEventListener('alsistemas:backend-ready', refresh)
+      window.removeEventListener('alsistemas:public-snapshot-updated', onSnapshot)
+    }
+  }, [carregar])
   useEffect(() => {
     if (!eventos.length) return undefined
     const script=document.createElement('script');script.type='application/ld+json';script.id='eventos-jsonld'

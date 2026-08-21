@@ -1,12 +1,9 @@
 import { api } from './http.js'
-import { isPublicFallbackEligible, snapshotCollection } from '../publicFallback.js'
+import { readPublicCollection } from '../publicData.js'
+
 export const modulosService = {
   async listar() {
-    try { return await api('/modulos') }
-    catch (error) {
-      if (!isPublicFallbackEligible(error)) throw error
-      return snapshotCollection('modulos', []).catch(() => { throw error })
-    }
+    return readPublicCollection('modulos', [], () => api('/modulos'))
   },
   async atualizar(id, upd)   { return api(`/modulos/${id}`, { method: 'PUT', body: JSON.stringify(upd) }) },
   async listarCompositor()    { return api('/conteudo/home') },

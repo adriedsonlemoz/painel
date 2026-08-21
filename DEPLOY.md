@@ -37,6 +37,10 @@ GitHub ──push──► Render  → Backend Node.js  (api.seudominio.com)
 
 ---
 
+## Cache público e cold start (1.0.151+)
+
+O portal público é cache-first e não precisa esperar o Render para abrir. Os defaults são `VITE_PUBLIC_CACHE_TTL_MS=600000` (10 min de frescor) e `VITE_PUBLIC_CACHE_MAX_AGE_MS=86400000` (24 h de retenção local). Mesmo antes do TTL, o snapshot remoto é revalidado periodicamente enquanto a página está visível; a API principal acorda em segundo plano por até 90 s. `/api/health/live` confirma o processo HTTP e `/api/health/ready` só libera dados ao vivo quando Mongo + bootstrap persistente estiverem prontos.
+
 ## Sessão Vercel → Render (1.0.150+)
 
 Em navegadores que bloqueiam cookies cross-site, o AL Sistemas usa um Bearer de fallback. Com **Manter conectado**, esse token pode ser preservado no navegador; a senha não é salva. O backend mantém o JWT estável no bootstrap persistente do MongoDB e, após um cold start, responde 503 temporário até essa chave ser restaurada em vez de emitir um 401 falso.
@@ -140,7 +144,7 @@ Em **Settings → Environment Variables**:
 VITE_API_URL=https://alsistemas-backend.onrender.com/api
 VITE_APP_NAME=AL Sistemas
 VITE_APP_TAGLINE=Painel de Gerenciamento
-VITE_APP_VERSION=1.0.150
+VITE_APP_VERSION=1.0.151
 VITE_APP_ENV=production
 VITE_MODULE_PORTAL=true
 VITE_MODULE_GITHUB=true
@@ -334,10 +338,10 @@ Depois faça um novo deploy do frontend para a Function receber a variável. `NE
 
 ### 3. Serviços monitorados
 
-Sem configuração adicional, `/status/` testa AL Sistemas API e GuiaDoA. Para personalizar:
+Sem configuração adicional, `/status/` testa a API do portal e o GuiaDoA. Para personalizar:
 
 ```env
-STATUS_SERVICES_JSON=[{"id":"al-sistemas-api","name":"AL Sistemas API","url":"https://al-sistemas-api.onrender.com/api/health/live","provider":"Render"},{"id":"guiadoa","name":"GuiaDoA","url":"https://guiadoa-agrq.onrender.com/","provider":"Render"}]
+STATUS_SERVICES_JSON=[{"id":"portal-api","name":"API do portal","url":"https://al-sistemas-api.onrender.com/api/health/ready","provider":"Render"},{"id":"guiadoa","name":"GuiaDoA","url":"https://guiadoa-agrq.onrender.com/","provider":"Render"}]
 ```
 
 ### 4. Ordem de contingência do portal

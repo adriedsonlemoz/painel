@@ -1,11 +1,17 @@
 import { api } from './http.js'
+import { isBackendReady } from '../backendWake.js'
 import {
   listarNoticiasFallback,
   buscarNoticiaFallback,
   sugestoesNoticiasFallback,
   markPrimaryApiAvailable,
   isPublicFallbackEligible,
+  isPublicPortalRoute,
 } from '../publicFallback.js'
+
+function snapshotFirst() {
+  return isPublicPortalRoute() && !isBackendReady()
+}
 
 export const noticiasService = {
   async listar({ categoria, page = 1, limit = 9, q, cursor, dataInicio, dataFim, ordem, status, urgente } = {}) {
@@ -21,34 +27,50 @@ export const noticiasService = {
     if (status)            p.set('status', status)
     if (urgente)           p.set('urgente', 'true')
     const qs = p.toString()
+
+    // O snapshot só contém conteúdo público. Consultas administrativas com
+    // filtro de status continuam indo diretamente ao backend.
+    if (!status && snapshotFirst()) {
+      try {
+        return await listarNoticiasFallback(
+          { categoria, page, limit, q, cursor, dataInicio, dataFim, ordem, urgente },
+          { markActive: false },
+        )
+      } catch { /* sem snapshot: tenta API */ }
+    }
+
     try {
       const data = await api(`/noticias${qs ? `?${qs}` : ''}`)
-      markPrimaryApiAvailable()
+      if (isPublicPortalRoute()) markPrimaryApiAvailable()
       return data
     } catch (error) {
       if (!isPublicFallbackEligible(error)) throw error
-      // O snapshot contém somente conteúdo público. Em /admin a própria
-      // camada de fallback recusa a leitura para nunca mascarar falhas de escrita.
-      return listarNoticiasFallback({ categoria, page, limit, q, cursor, dataInicio, dataFim, ordem, urgente })
+      return listarNoticiasFallback({ categoria, page, limit, q, cursor, dataInicio, dataFim, ordem, urgente }, { markActive: true })
         .catch(() => { throw error })
     }
   },
   async buscarPorId(id) {
+    if (snapshotFirst()) {
+      try { return await buscarNoticiaFallback(id, { markActive: false }) } catch { /* tenta live */ }
+    }
     try {
       const data = await api(`/noticias/${id}`)
-      markPrimaryApiAvailable()
+      if (isPublicPortalRoute()) markPrimaryApiAvailable()
       return data
     } catch (error) {
       if (!isPublicFallbackEligible(error)) throw error
-      return buscarNoticiaFallback(id).catch(() => { throw error })
+      return buscarNoticiaFallback(id, { markActive: true }).catch(() => { throw error })
     }
   },
   async sugestoes(q) {
+    if (snapshotFirst()) {
+      try { return await sugestoesNoticiasFallback(q, { markActive: false }) } catch { /* tenta live */ }
+    }
     try {
       return await api(`/noticias/sugestoes?q=${encodeURIComponent(q || '')}`)
     } catch (error) {
       if (!isPublicFallbackEligible(error)) throw error
-      return sugestoesNoticiasFallback(q).catch(() => { throw error })
+      return sugestoesNoticiasFallback(q, { markActive: true }).catch(() => { throw error })
     }
   },
   async criar(dados)          { return api('/noticias', { method: 'POST', body: JSON.stringify(dados) }) },

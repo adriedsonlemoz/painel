@@ -46,10 +46,17 @@ export function BrandingProvider({ children }) {
       if (incoming && typeof incoming === 'object') { setConfig(incoming); setLoading(false); return }
       load()
     }
+    const onBackendReady = () => {
+      void configuracoesService.listar(true).then(data => {
+        if (alive && data && typeof data === 'object') setConfig(data)
+      }).catch(() => {})
+    }
     window.addEventListener('alsistemas:branding-refresh', onRefresh)
+    window.addEventListener('alsistemas:backend-ready', onBackendReady)
     return () => {
       alive = false
       window.removeEventListener('alsistemas:branding-refresh', onRefresh)
+      window.removeEventListener('alsistemas:backend-ready', onBackendReady)
     }
   }, [])
 

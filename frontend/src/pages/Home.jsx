@@ -9,6 +9,7 @@ import {
   Church, ExternalLink, Bus, CalendarDays,
   Search, ChevronLeft, ChevronRight, Mail,
 } from 'lucide-react'
+import { isBackendReady } from '../services/backendWake'
 import {
   configuracoesService,
   modulosService,
@@ -583,27 +584,28 @@ export default function Home() {
   const [portalContent,  setPortalContent] = useState({ weather:null, football:null, rssWorld:{items:[]}, horoscope:null })
 
   useEffect(() => {
-    configuracoesService.listar().then(setCfg).catch(() => {})
-    modulosService.listar().then(list => {
-      const map = {}
-      list.forEach(m => { map[m.chave] = m })
-      setModulos(map)
-    }).catch(() => {})
-    topicosService.listar().then(setTopicos).catch(() => {})
-    noticiasExternasService.listar().then(setExternas).catch(() => {})
-    noticiasService.listar({ urgente: true, limit: 1 }).then(r => setPlantao(r.noticias?.[0] || null)).catch(() => {})
-    portalContentService.home().then(setPortalContent).catch(() => {})
+    let alive = true
 
-    eventosService.listar().then(evs => {
+    const aplicarModulos = list => {
+      if (!alive) return
+      const map = {}
+      ;(Array.isArray(list) ? list : []).forEach(m => { map[m.chave] = m })
+      setModulos(map)
+    }
+
+    const aplicarEventos = evs => {
+      if (!alive) return
       const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-      const proximo = evs
+      const proximo = (Array.isArray(evs) ? evs : [])
         .filter(e => new Date(e.data) >= hoje)
         .sort((a, b) => new Date(a.data) - new Date(b.data))[0]
-      if (proximo) setProximoEvento(proximo.data)
-    }).catch(() => {})
+      setProximoEvento(proximo?.data || null)
+    }
 
-    onibusService.listar().then(linhas => {
-      if (!linhas.length) return
+    const aplicarOnibus = linhas => {
+      if (!alive) return
+      setProximoOnibus(null)
+      if (!Array.isArray(linhas) || !linhas.length) return
       const diasMap  = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']
       const diaAtual = diasMap[new Date().getDay()]
       const minAgora = new Date().getHours() * 60 + new Date().getMinutes()
@@ -621,7 +623,54 @@ export default function Home() {
           break
         }
       }
-    }).catch(() => {})
+    }
+
+    const carregarPublico = () => {
+      configuracoesService.listar().then(data => alive && setCfg(data || {})).catch(() => {})
+      modulosService.listar().then(aplicarModulos).catch(() => {})
+      topicosService.listar().then(data => alive && setTopicos(Array.isArray(data) ? data : [])).catch(() => {})
+      noticiasExternasService.listar().then(data => alive && setExternas(Array.isArray(data) ? data : [])).catch(() => {})
+      noticiasService.listar({ urgente: true, limit: 1 }).then(r => alive && setPlantao(r.noticias?.[0] || null)).catch(() => {})
+      eventosService.listar().then(aplicarEventos).catch(() => {})
+      onibusService.listar().then(aplicarOnibus).catch(() => {})
+    }
+
+    const carregarConteudoAoVivo = () => {
+      if (!isBackendReady()) return
+      portalContentService.home().then(data => alive && setPortalContent(data)).catch(() => {})
+    }
+
+    const aplicarSnapshot = event => {
+      const snapshot = event?.detail?.snapshot
+      if (!snapshot || !alive) return
+      if (snapshot.configuracoes && typeof snapshot.configuracoes === 'object') setCfg(snapshot.configuracoes)
+      aplicarModulos(snapshot.modulos)
+      if (Array.isArray(snapshot.topicos)) setTopicos(snapshot.topicos)
+      if (Array.isArray(snapshot.noticias_externas)) setExternas(snapshot.noticias_externas)
+      aplicarEventos(snapshot.eventos)
+      aplicarOnibus(snapshot.onibus)
+      if (Array.isArray(snapshot.noticias)) {
+        const urgente = snapshot.noticias
+          .filter(n => n.urgente && (!n.urgente_ate || new Date(n.urgente_ate).getTime() > Date.now()))
+          .sort((a,b) => new Date(b.criado_em || b.publicado_em) - new Date(a.criado_em || a.publicado_em))[0]
+        setPlantao(urgente || null)
+      }
+    }
+
+    carregarPublico()
+    carregarConteudoAoVivo()
+
+    const onReady = () => {
+      carregarPublico()
+      carregarConteudoAoVivo()
+    }
+    window.addEventListener('alsistemas:backend-ready', onReady)
+    window.addEventListener('alsistemas:public-snapshot-updated', aplicarSnapshot)
+    return () => {
+      alive = false
+      window.removeEventListener('alsistemas:backend-ready', onReady)
+      window.removeEventListener('alsistemas:public-snapshot-updated', aplicarSnapshot)
+    }
   }, [])
 
   const noticiasUnicas = noticiasSemRepeticao(noticias)

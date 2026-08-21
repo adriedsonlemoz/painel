@@ -3,7 +3,8 @@ import { Link, useLocation, useSearchParams, useNavigate } from 'react-router-do
 import { Menu, X, ChevronDown, Search, ChevronRight, LogOut, LayoutDashboard, Newspaper, CalendarDays, Compass, ShieldCheck } from 'lucide-react'
 import { useCategorias } from '../hooks/useNoticias'
 import { useAuth } from '../context/AuthContext'
-import { configuracoesService, noticiasService } from '../services/api'
+import { useBranding } from '../context/BrandingContext'
+import { noticiasService } from '../services/api'
 
 const MAX_CATEGORIAS_VISIVEIS = 7
 
@@ -49,13 +50,13 @@ function MobileCategoriasExtras({ categorias, catAtual }) {
 export default function Navbar() {
   const { categorias = [] } = useCategorias() || {}
   const { user, logout, podeAcessarAdmin } = useAuth()
+  const { siteName: portalName } = useBranding()
   const [open,         setOpen]         = useState(false)
   const [catOpen,      setCatOpen]      = useState(false)
   const [maisOpen,     setMaisOpen]     = useState(false)
   const [searchOpen,   setSearchOpen]   = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [query,        setQuery]        = useState('')
-  const [portalName,   setPortalName]   = useState('Portal de notícias')
   const [sugestoes,    setSugestoes]    = useState([])
   const { pathname }   = useLocation()
   const [searchParams] = useSearchParams()
@@ -66,15 +67,6 @@ export default function Navbar() {
   const dropBtnRef  = useRef(null)
   const userMenuRef = useRef(null)
 
-
-  useEffect(() => {
-    configuracoesService.listar()
-      .then(cfg => {
-        const nome = String(cfg?.nome_site || '').trim()
-        if (nome) setPortalName(nome)
-      })
-      .catch(() => {})
-  }, [])
 
   const categoriasVisiveis = categorias.slice(0, MAX_CATEGORIAS_VISIVEIS)
   const categoriasMais     = categorias.slice(MAX_CATEGORIAS_VISIVEIS)
@@ -143,7 +135,7 @@ export default function Navbar() {
             aria-label={`${portalName} — Página inicial`}>
             <span className="flex-shrink-0 scale-[.9] sm:scale-100 origin-left"><LogoIcon size={40} /></span>
             <div className="min-w-0 leading-tight" aria-hidden="true">
-              <span className="block max-w-full truncate font-display font-bold text-[15px] sm:text-lg text-gray-900 leading-none" title={portalName}>{portalName}</span>
+              <span className="block max-w-full truncate font-display font-bold text-[13px] sm:text-base text-gray-900 leading-none" title={portalName}>{portalName}</span>
               <span className="block max-w-full truncate font-grotesk text-[11px] sm:text-xs font-semibold text-brand-500 leading-none mt-0.5">Notícias de Iguatama</span>
             </div>
           </Link>

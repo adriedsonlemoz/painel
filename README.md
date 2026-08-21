@@ -5,6 +5,12 @@ Stack: **React + Vite + Tailwind** (frontend) · **Node.js + Express + MongoDB +
 
 ---
 
+## ⚡ Portal instantâneo e cache público — 1.0.151
+
+O portal público não fica mais preso ao cold start do Render. Ele abre com a última cópia pública válida disponível no navegador, revalida o snapshot na Vercel/R2 em segundo plano e acorda a API principal sem bloquear a navegação. Quando o backend fica pronto, as telas abertas recebem os dados ao vivo automaticamente.
+
+Por padrão, o cache local é considerado fresco por **10 minutos**, é revalidado em segundo plano no máximo a cada minuto e é removido do navegador após **24 horas**. Os limites podem ser configurados com `VITE_PUBLIC_CACHE_TTL_MS` e `VITE_PUBLIC_CACHE_MAX_AGE_MS`. O login acompanha o wake por até 90 s com contador, enquanto `/status/` diferencia cold start (**Iniciando**) de indisponibilidade real.
+
 ## 📱 Estabilidade mobile e sessão — 1.0.150
 
 O cabeçalho público foi ajustado para nomes longos de portal no Android, sem estouro horizontal. O aviso de conteúdo de contingência aparece somente no rodapé, com a data da última cópia disponível. Plantões têm prazo de 6 horas por padrão e limite máximo de 24 horas, incluindo snapshots antigos e páginas que permanecem abertas.

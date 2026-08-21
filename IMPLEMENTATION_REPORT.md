@@ -1,3 +1,17 @@
+# Relatório de implementação — 1.0.151
+
+## Portal cache-first, Render em segundo plano e monitor público
+
+- Fluxo público invertido para cache/snapshot primeiro e API ao vivo depois, sem tela de wake bloqueando visitantes.
+- Snapshot local revalidado em segundo plano, com 10 min de frescor e descarte persistente após 24 h por padrão.
+- Coordenador único de wake do Render por até 90 s: `/health/live` acorda/confirma o processo HTTP e `/health/ready` libera leituras ao vivo somente após Mongo + bootstrap persistente estarem prontos.
+- Home e serviços públicos evitam rajadas de chamadas ao backend durante cold start e se atualizam silenciosamente após o wake.
+- Bootstrap HTML não expõe AL Sistemas no portal público e usa a configuração pública do snapshot para identidade visual.
+- Login mostra contador de despertar/preparação e só restaura a sessão depois da readiness real responder.
+- Navbar usa BrandingContext e título público menor.
+- Página `/status/` redesenhada e monitor aprimorado para diferenciar `starting` de `offline`, além de informar frescor/idade do snapshot.
+- Nenhuma imagem/ícone foi alterado.
+
 # Relatório de implementação — 1.0.150
 
 ## Build, portal mobile, contingência, Plantão e autenticação
@@ -59,7 +73,7 @@ Cada erro possui botão **Copiar** ao lado das ações da linha. A cópia inclui
 
 ## Status independente na Vercel
 
-Foi adicionada uma página estática em `/status/` e a Vercel Function `/api/status`. A página não depende do backend principal: testa os serviços configurados diretamente, consulta a API oficial do Statuspage do Render e informa HTTP, latência e incidentes não resolvidos. Os defaults incluem AL Sistemas API e GuiaDoA; `STATUS_SERVICES_JSON` permite substituir ou acrescentar serviços sem alterar o código.
+Foi adicionada uma página estática em `/status/` e a Vercel Function `/api/status`. A página não depende do backend principal: testa os serviços configurados diretamente, consulta a API oficial do Statuspage do Render e informa HTTP, latência e incidentes não resolvidos. Os defaults incluem API do portal e GuiaDoA; `STATUS_SERVICES_JSON` permite substituir ou acrescentar serviços sem alterar o código.
 
 ## Contingência pública do portal
 

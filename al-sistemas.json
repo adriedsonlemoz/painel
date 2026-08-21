@@ -1,8 +1,17 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.150",
+  "version": "1.0.151",
   "packageFormat": 2,
   "changelog": [
+    "Portal público passa a abrir em modo cache-first: a última cópia válida do navegador aparece imediatamente enquanto R2/Vercel e backend são revalidados em segundo plano.",
+    "Cache público ganha frescor configurável de 10 minutos e expiração local rígida de 24 horas por padrão, com VITE_PUBLIC_CACHE_TTL_MS e VITE_PUBLIC_CACHE_MAX_AGE_MS.",
+    "Render é acordado por um coordenador único de até 90 segundos; o portal continua navegável durante o cold start e atualiza os dados automaticamente quando a API volta.",
+    "Login deixa de fazer probe curto que marcava cold start como erro e passa a mostrar Despertando com contador decimal até o servidor ficar online ou atingir o limite.",
+    "Bootstrap público deixa de consultar setup/configuração no backend e não exibe mais a identidade interna AL Sistemas; a identidade do portal vem do snapshot/configuração pública.",
+    "Nome do portal no cabeçalho fica menor e passa a acompanhar diretamente o BrandingContext, atualizando quando a configuração pública é revalidada.",
+    "Página /status foi reformulada com resumo geral, estados Online/Iniciando/Indisponível, latência, autoatualização, idade/frescor do snapshot e incidentes oficiais do Render.",
+    "Timeout de aplicações Render no monitor independente passa a ser classificado como Iniciando em vez de falha definitiva, reduzindo falsos alarmes causados por cold start.",
+    "Nenhuma imagem ou ícone foi criado, editado ou substituído nesta versão.",
     "Corrige o build Vite/Vercel em AdminProjetoPlataforma: o valor da variável é aguardado antes de atualizar o estado React, eliminando o await dentro de callback não assíncrono.",
     "Cabeçalho público fica responsivo no Android: nome longo do portal respeita a largura disponível, usa truncamento e não empurra os botões para fora da tela.",
     "Aviso de contingência deixa o topo do portal e passa para o rodapé, em formato discreto, com data da última cópia pública disponível e atalho para Status.",
