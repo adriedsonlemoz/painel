@@ -1405,6 +1405,18 @@ function packageDisplayName(name = '', fallback = 'app') {
   return raw.split(/[\s_-]+/).filter(Boolean).map(part => part.length <= 2 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)).join('-') || 'App'
 }
 
+function downloadProjectBase(name = '', fallback = 'app', version = '', buildType = '') {
+  let value = packageDisplayName(name, fallback).replace(/\.apk$/i, '')
+  const escapedVersion = String(version || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const escapedBuild = String(buildType || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (escapedBuild) value = value.replace(new RegExp(`[-_.]+${escapedBuild}$`, 'i'), '')
+  if (escapedVersion) value = value.replace(new RegExp(`[-_.]+v?${escapedVersion}$`, 'i'), '')
+  // Alguns nomes antigos já traziam "versão-debug.apk" no próprio nome do projeto.
+  // Remove somente sufixos redundantes antes de reconstruir o nome final.
+  value = value.replace(/[-_.]+(?:debug|release)$/i, '').replace(/\.apk$/i, '')
+  return value || packageDisplayName(fallback, 'App')
+}
+
 async function readRepoPackageInfo(owner, repo, ref = '') {
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : ''
   for (const pkgPath of ['frontend/package.json', 'package.json']) {
@@ -1447,7 +1459,8 @@ async function buildArtifactDownloadMeta(owner, repo, artifact) {
   const version = item.versao || pkg.version || ''
   const projectName = packageDisplayName(pkg.name, repo)
   const buildType = item.buildType === 'apk' ? '' : item.buildType
-  const pieces = [projectName, version, buildType].filter(Boolean)
+  const projectFileBase = downloadProjectBase(pkg.name, repo, version, buildType)
+  const pieces = [projectFileBase, version, buildType].filter(Boolean)
   const apkFileName = `${safeDownloadBase(pieces.join('-'))}.apk`
   const zipFileName = `${safeDownloadBase(item.nome || `${repo}-artifact-${item.id}`)}.zip`
   return { ...item, version, projectName, apkFileName, zipFileName }
@@ -1458,7 +1471,8 @@ async function buildReleaseApkMeta(owner, repo, release, asset) {
   try { pkg = await readRepoPackageInfo(owner, repo, release?.target_commitish || '') } catch { /* opcional */ }
   const version = extractSemver(release?.tag_name || '') || extractSemver(asset?.name || '') || pkg.version || ''
   const projectName = packageDisplayName(pkg.name, repo)
-  const pieces = [projectName, version, 'release'].filter(Boolean)
+  const projectFileBase = downloadProjectBase(pkg.name, repo, version, 'release')
+  const pieces = [projectFileBase, version, 'release'].filter(Boolean)
   return {
     id: asset.id,
     nome: asset.name || `${repo}-release.apk`,
@@ -2314,6 +2328,107 @@ router.post('/artifacts/:artifactId/download-ticket', autenticar, async (req, re
     })
   } catch (err) {
     res.status(err.status || 500).json({ erro: err.message })
+  }
+})
+
+/* POST /api/github/artifacts/:artifactId/download-diagnostic
+   Diagnóstico sob demanda usado pela interface quando o DownloadManager falha.
+   Não devolve token GitHub nem ticket temporário. Em APKs, inspeciona o ZIP do
+   Actions e informa se realmente existe um .apk dentro do artefato. */
+router.post('/artifacts/:artifactId/download-diagnostic', autenticar, async (req, res) => {
+  const { artifactId } = req.params
+  const { owner, repo } = req.body || {}
+  const preferApk = req.body?.preferApk === true
+  if (!/^\d+$/.test(String(artifactId || ''))) return res.status(400).json({ erro: 'Artefato inválido.' })
+  if (!owner || !repo || !validarNome(owner) || !validarNome(repo)) return res.status(400).json({ erro: 'Parâmetros owner e repo obrigatórios.' })
+
+  const checkedAt = new Date().toISOString()
+  try {
+    const artifact = await githubFetch(`/repos/${owner}/${repo}/actions/artifacts/${artifactId}`)
+    if (!artifact) return res.status(404).json({ erro: 'Artefato não encontrado.' })
+    const meta = await buildArtifactDownloadMeta(owner, repo, artifact)
+    if (artifact.expired || meta.expirado) {
+      return res.json({
+        ok: false, code: 'ARTIFACT_EXPIRED', checkedAt,
+        message: 'O artefato expirou no GitHub Actions e não pode mais ser baixado.',
+        recommendedAction: 'Gere uma nova execução do workflow para criar outro artefato.',
+        artifact: { id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId, expirado: true },
+      })
+    }
+
+    if (!preferApk) {
+      return res.json({
+        ok: true, code: 'ARTIFACT_AVAILABLE', checkedAt,
+        message: 'O artefato está disponível no GitHub e pode ser entregue como ZIP.',
+        artifact: { id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId, tamanho: meta.tamanho, expirado: false },
+      })
+    }
+
+    const { value: token } = await getCredential('github', 'GITHUB_TOKEN')
+    if (!token) return res.status(503).json({ erro: 'GITHUB_TOKEN não configurado.' })
+    const resp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'AL-Sistemas' },
+      redirect: 'follow',
+    })
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      return res.json({
+        ok: false, code: 'GITHUB_ARTIFACT_HTTP_ERROR', checkedAt,
+        httpStatus: resp.status,
+        message: `O GitHub recusou o download do artefato (HTTP ${resp.status}).`,
+        detail: body ? body.slice(0, 500) : '',
+        recommendedAction: 'Confira se o artefato ainda existe e se a integração GitHub possui acesso ao repositório.',
+        artifact: { id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId },
+      })
+    }
+
+    const archiveLength = Number(resp.headers.get('content-length') || 0)
+    if (archiveLength && archiveLength > APK_MAX_ARCHIVE_BYTES) {
+      return res.json({
+        ok: false, code: 'ARTIFACT_TOO_LARGE', checkedAt,
+        message: `O pacote do Actions tem ${Math.round(archiveLength / 1024 / 1024)} MB e excede o limite de extração segura.`,
+        recommendedAction: 'Reduza o conteúdo enviado pelo workflow ou aumente AL_GITHUB_APK_MAX_ARCHIVE_BYTES de forma consciente.',
+        archive: { bytes: archiveLength },
+        artifact: { id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId },
+      })
+    }
+
+    const bytes = Buffer.from(await resp.arrayBuffer())
+    if (bytes.length > APK_MAX_ARCHIVE_BYTES) {
+      return res.json({
+        ok: false, code: 'ARTIFACT_TOO_LARGE', checkedAt,
+        message: 'O pacote do Actions excede o limite de extração segura do servidor.',
+        recommendedAction: 'Reduza o conteúdo enviado pelo workflow antes de tentar novamente.',
+        archive: { bytes: bytes.length },
+        artifact: { id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId },
+      })
+    }
+
+    const zip = await JSZip.loadAsync(bytes)
+    const files = Object.values(zip.files).filter(entry => !entry.dir)
+    const apkFiles = files.filter(entry => /\.apk$/i.test(entry.name)).map(entry => entry.name)
+    const sampleFiles = files.slice(0, 30).map(entry => entry.name)
+    const ok = apkFiles.length > 0
+    return res.json({
+      ok,
+      code: ok ? 'APK_FOUND' : 'APK_NOT_FOUND_IN_ARTIFACT',
+      checkedAt,
+      message: ok
+        ? `O pacote contém ${apkFiles.length} arquivo(s) APK e está estruturalmente pronto para extração.`
+        : 'O ZIP do artefato foi baixado com sucesso, mas não contém nenhum arquivo .apk.',
+      recommendedAction: ok
+        ? 'Se o Android ainda falhar, consulte no log o código HTTP/DownloadManager e as permissões de instalação.'
+        : 'Revise a etapa actions/upload-artifact do workflow e confirme que o path enviado aponta para o APK gerado em app/build/outputs/apk/.../*.apk.',
+      artifact: {
+        id: String(artifactId), nome: meta.nome, workflowRunId: meta.workflowRunId,
+        tamanho: meta.tamanho, buildType: meta.buildType, filename: meta.apkFileName,
+      },
+      archive: { bytes: bytes.length, files: files.length, apkCount: apkFiles.length },
+      apkFiles: apkFiles.slice(0, 20),
+      sampleFiles,
+    })
+  } catch (err) {
+    res.status(err?.status || 500).json({ erro: err?.message || 'Falha ao diagnosticar o artefato.' })
   }
 })
 

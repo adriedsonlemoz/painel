@@ -49,8 +49,11 @@ async function baixarComGerenciador(url, filename = 'download', mime = 'applicat
           : status === 'pending' ? 'queued' : 'progress'
         onStatus?.(visual, { ...state, id, filename, progress })
       }
-      if (status === 'successful') return { ok:true, mode:'android-download-manager', id, filename, progress:100, uri:state?.uri || '', total:state?.total || 0 }
-      if (status === 'failed') throw Object.assign(new Error(state?.message || 'O Android não conseguiu concluir o download.'), { downloadId:id, code:'ANDROID_DOWNLOAD_FAILED' })
+      if (status === 'successful') return { ok:true, mode:'android-download-manager', id, filename, progress:100, uri:state?.uri || '', total:state?.total || 0, nativeState:state }
+      if (status === 'failed') throw Object.assign(
+        new Error(state?.message || 'O Android não conseguiu concluir o download.'),
+        { downloadId:id, code:'ANDROID_DOWNLOAD_FAILED', downloadState:{ ...state, id, filename, progress } },
+      )
       if (status === 'cancelled') throw Object.assign(new Error('Download cancelado.'), { downloadId:id, code:'ANDROID_DOWNLOAD_CANCELLED' })
       await sleep(650)
     }
@@ -204,6 +207,12 @@ export const githubService = {
       body: JSON.stringify({ owner, repo, preferApk }),
       timeoutMs: 20000,
     }),
+  diagnosticarDownloadArtifact: (artifactId, owner, repo, { preferApk = false } = {}) =>
+    api(`/github/artifacts/${artifactId}/download-diagnostic`, {
+      method: 'POST',
+      body: JSON.stringify({ owner, repo, preferApk }),
+      timeoutMs: 60000,
+    }),
   prepararDownloadReleaseAsset: (assetId, owner, repo) =>
     api(`/github/release-assets/${assetId}/download-ticket`, {
       method: 'POST',
@@ -248,7 +257,7 @@ export const githubService = {
   },
   openDownload: async (id) => {
     const downloadId = normalizarDownloadId(id)
-    if (!downloadId || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ALDownloadManager')) return { ok:false }
+    if (!downloadId || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ALDownloadManager')) return { ok:false, unavailable:true }
     return NativeDownloadManager.open({ id:downloadId })
   },
   async baixarZip(owner, repo, ref = '', options = {}) {

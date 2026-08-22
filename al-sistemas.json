@@ -1,8 +1,17 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.157",
+  "version": "1.0.158",
   "packageFormat": 2,
   "changelog": [
+    "Central de Artefatos do GitHub ganha botão Log por download para diagnosticar falhas no Android sem exibir apenas o código HTTP genérico.",
+    "Quando o DownloadManager falha, o painel registra motivo nativo, código HTTP, bytes recebidos e consulta sob demanda o backend para inspecionar o conteúdo real do artefato.",
+    "O diagnóstico de APK informa se o ZIP do GitHub Actions contém arquivo .apk, lista amostras seguras do pacote e sugere o próximo passo quando o workflow enviou o conteúdo errado.",
+    "O aviso flutuante genérico de falha HTTP deixa de aparecer nos cards de artefatos; a falha permanece inline e o detalhe técnico fica disponível no Log.",
+    "Rodapé dos cards de artefatos foi reorganizado para não sobrepor os botões no Android, com ações separadas para Tentar novamente, Instalar / abrir e Log.",
+    "A abertura de APK no Android passa a verificar a permissão de instalação de apps desconhecidos, abrir a tela correta de autorização quando necessário e retornar ao fluxo pelo botão Instalar / abrir.",
+    "O gerador Android passa a declarar REQUEST_INSTALL_PACKAGES e o plugin nativo diferencia erros de armazenamento, rede, redirecionamento e respostas HTTP.",
+    "Nomes de APK baixados deixam de duplicar sufixos como .apk-debug.apk quando o nome do projeto já contém versão ou tipo de build.",
+    "Nenhuma imagem, ícone ou splash foi criado ou alterado nesta versão.",
     "Corrige uploads autenticados via XMLHttpRequest para enviar X-CSRF-Token em operações POST, eliminando o erro Token CSRF ausente ou inválido.",
     "Centraliza os headers de autenticação e CSRF dos uploads com progresso em applyXhrAuthHeaders, mantendo o mesmo comportamento de api/authFetch.",
     "Aplica a correção aos fluxos GitHub, Cloudflare R2, Storage, Projetos e preparo de Atualizações, incluindo XHRs diretos das telas administrativas.",

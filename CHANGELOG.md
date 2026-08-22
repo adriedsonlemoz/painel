@@ -1,3 +1,14 @@
+# 1.0.158 — Logs e abertura de artefatos no Android
+
+- Adiciona **Log** por artefato na Central GitHub, com motivo do DownloadManager, HTTP, bytes recebidos e diagnóstico do backend.
+- O diagnóstico sob demanda inspeciona o ZIP real do GitHub Actions e informa quando não existe `.apk` dentro do pacote, incluindo próximos passos e amostra dos arquivos encontrados.
+- Remove o toast genérico de falha do download (`HTTP 422`, etc.) e mantém o erro de forma inline, com acesso ao detalhe pelo botão **Log**.
+- Reorganiza o rodapé dos cards para **Tentar novamente**, **Instalar / abrir** e **Log** sem sobreposição no Android.
+- Corrige **Abrir** de APK: o plugin verifica `REQUEST_INSTALL_PACKAGES`, direciona para a autorização de apps desconhecidos quando necessário e abre o instalador após a permissão.
+- Mapeia motivos nativos do `DownloadManager` para mensagens úteis e preserva o código técnico no log.
+- Evita nomes duplicados de APK, como `.apk-debug.apk`.
+- Nenhuma imagem, ícone ou splash foi alterado.
+
 # 1.0.157 — Correção global de CSRF nos uploads
 
 - Corrige a publicação de pacotes no GitHub que falhava em 0% com `Token CSRF ausente ou inválido`.

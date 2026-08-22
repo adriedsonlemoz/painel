@@ -169,11 +169,15 @@ const pluginPath = path.join(path.dirname(mainActivityPath), 'ALDownloadManagerP
 const pluginJava = `package ${packageName};
 
 import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
+import android.provider.Settings;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -199,6 +203,33 @@ public class ALDownloadManagerPlugin extends Plugin {
 
   private DownloadManager manager() {
     return (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+  }
+
+  private String reasonCode(int reason) {
+    if (reason >= 400 && reason <= 599) return "HTTP_" + reason;
+    if (reason == DownloadManager.ERROR_CANNOT_RESUME) return "CANNOT_RESUME";
+    if (reason == DownloadManager.ERROR_DEVICE_NOT_FOUND) return "DEVICE_NOT_FOUND";
+    if (reason == DownloadManager.ERROR_FILE_ALREADY_EXISTS) return "FILE_ALREADY_EXISTS";
+    if (reason == DownloadManager.ERROR_FILE_ERROR) return "FILE_ERROR";
+    if (reason == DownloadManager.ERROR_HTTP_DATA_ERROR) return "HTTP_DATA_ERROR";
+    if (reason == DownloadManager.ERROR_INSUFFICIENT_SPACE) return "INSUFFICIENT_SPACE";
+    if (reason == DownloadManager.ERROR_TOO_MANY_REDIRECTS) return "TOO_MANY_REDIRECTS";
+    if (reason == DownloadManager.ERROR_UNHANDLED_HTTP_CODE) return "UNHANDLED_HTTP_CODE";
+    if (reason == DownloadManager.ERROR_UNKNOWN) return "UNKNOWN";
+    return "ANDROID_" + reason;
+  }
+
+  private String reasonMessage(int reason) {
+    if (reason >= 400 && reason <= 599) return "O servidor recusou o download (HTTP " + reason + "). Abra o Log para ver o diagnóstico do artefato.";
+    if (reason == DownloadManager.ERROR_CANNOT_RESUME) return "O Android não conseguiu retomar a transferência.";
+    if (reason == DownloadManager.ERROR_DEVICE_NOT_FOUND) return "O destino de armazenamento não está disponível.";
+    if (reason == DownloadManager.ERROR_FILE_ALREADY_EXISTS) return "Já existe um arquivo com esse nome no destino.";
+    if (reason == DownloadManager.ERROR_FILE_ERROR) return "O Android encontrou um erro ao gravar o arquivo.";
+    if (reason == DownloadManager.ERROR_HTTP_DATA_ERROR) return "A conexão HTTP foi interrompida durante a transferência.";
+    if (reason == DownloadManager.ERROR_INSUFFICIENT_SPACE) return "Não há espaço de armazenamento suficiente para concluir o download.";
+    if (reason == DownloadManager.ERROR_TOO_MANY_REDIRECTS) return "O servidor respondeu com redirecionamentos demais.";
+    if (reason == DownloadManager.ERROR_UNHANDLED_HTTP_CODE) return "O servidor respondeu com um código HTTP que o DownloadManager não conseguiu tratar.";
+    return "O Android não informou uma causa específica para a falha.";
   }
 
   @PluginMethod
@@ -240,6 +271,9 @@ public class ALDownloadManagerPlugin extends Plugin {
       long downloaded = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
       long total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
       int reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+      String mediaType = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE));
+      String title = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE));
+      long lastModified = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP));
       Uri contentUri = manager().getUriForDownloadedFile(id);
       String label = "pending";
       if (status == DownloadManager.STATUS_RUNNING) label = "running";
@@ -250,8 +284,15 @@ public class ALDownloadManagerPlugin extends Plugin {
       JSObject ret = new JSObject();
       ret.put("id", String.valueOf(id)); ret.put("status", label); ret.put("progress", progress);
       ret.put("downloaded", downloaded); ret.put("total", total); ret.put("reason", reason);
+      if (status == DownloadManager.STATUS_FAILED) {
+        ret.put("reasonCode", reasonCode(reason)); ret.put("reasonMessage", reasonMessage(reason));
+        if (reason >= 400 && reason <= 599) ret.put("httpStatus", reason);
+      }
+      ret.put("mime", mediaType == null ? "" : mediaType); ret.put("title", title == null ? "" : title);
+      ret.put("lastModified", lastModified);
       ret.put("uri", contentUri == null ? "" : contentUri.toString());
-      if (status == DownloadManager.STATUS_FAILED) ret.put("message", "Download falhou no Android (código " + reason + ").");
+      ret.put("canOpen", status == DownloadManager.STATUS_SUCCESSFUL && contentUri != null);
+      if (status == DownloadManager.STATUS_FAILED) ret.put("message", reasonMessage(reason));
       call.resolve(ret);
     } catch (Exception e) { call.reject("Falha ao consultar download: " + e.getMessage(), e); }
   }
@@ -273,17 +314,45 @@ public class ALDownloadManagerPlugin extends Plugin {
       if (uri == null) { call.reject("Arquivo concluído não encontrado."); return; }
       DownloadManager.Query q = new DownloadManager.Query().setFilterById(id);
       String mime = "application/octet-stream";
+      String title = "";
+      int status = DownloadManager.STATUS_PENDING;
       try (Cursor c = manager().query(q)) {
         if (c != null && c.moveToFirst()) {
+          status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
           String found = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE));
           if (found != null && !found.isEmpty()) mime = found;
+          String foundTitle = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE));
+          if (foundTitle != null) title = foundTitle;
         }
       }
+      if (status != DownloadManager.STATUS_SUCCESSFUL) { call.reject("O arquivo ainda não terminou de baixar."); return; }
+      boolean isApk = "application/vnd.android.package-archive".equalsIgnoreCase(mime) || title.toLowerCase().endsWith(".apk");
+      if (isApk) mime = "application/vnd.android.package-archive";
+
+      if (isApk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getContext().getPackageManager().canRequestPackageInstalls()) {
+        Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getContext().getPackageName()));
+        settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(settings);
+        JSObject ret = new JSObject();
+        ret.put("ok", false); ret.put("id", String.valueOf(id)); ret.put("needsInstallPermission", true);
+        ret.put("message", "Autorize o AL Sistemas a instalar apps desconhecidos e depois toque em Abrir novamente.");
+        call.resolve(ret); return;
+      }
+
       Intent intent = new Intent(Intent.ACTION_VIEW);
       intent.setDataAndType(uri, mime);
       intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+      PackageManager pm = getContext().getPackageManager();
+      if (intent.resolveActivity(pm) == null) {
+        call.reject(isApk ? "O instalador de pacotes do Android não está disponível." : "Nenhum aplicativo instalado consegue abrir este tipo de arquivo.");
+        return;
+      }
       getContext().startActivity(intent);
-      JSObject ret = new JSObject(); ret.put("ok", true); ret.put("id", String.valueOf(id)); ret.put("uri", uri.toString()); call.resolve(ret);
+      JSObject ret = new JSObject();
+      ret.put("ok", true); ret.put("id", String.valueOf(id)); ret.put("uri", uri.toString()); ret.put("mime", mime);
+      call.resolve(ret);
+    } catch (ActivityNotFoundException e) {
+      call.reject("Nenhum aplicativo compatível foi encontrado para abrir o arquivo.", e);
     } catch (Exception e) { call.reject("Não foi possível abrir o arquivo: " + e.getMessage(), e); }
   }
 }
@@ -305,9 +374,12 @@ if (!mainJava.includes('registerPlugin(ALDownloadManagerPlugin.class)')) {
 manifest = fs.readFileSync(manifestPath, 'utf8')
 if (!manifest.includes('android.permission.WRITE_EXTERNAL_STORAGE')) {
   manifest = manifest.replace(/<manifest([^>]*)>/, '<manifest$1>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />')
-  fs.writeFileSync(manifestPath, manifest)
 }
-console.log('✓ Gerenciador Android integrado: Downloads/AL-Sistemas + progresso nativo')
+if (!manifest.includes('android.permission.REQUEST_INSTALL_PACKAGES')) {
+  manifest = manifest.replace(/<manifest([^>]*)>/, '<manifest$1>\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />')
+}
+fs.writeFileSync(manifestPath, manifest)
+console.log('✓ Gerenciador Android integrado: Downloads/AL-Sistemas + progresso nativo + abertura segura de APK')
 
 // ── Sessão nativa protegida ────────────────────────────────────────────────
 // Guarda apenas o token de sessão persistente do APK usando Android Keystore

@@ -1,3 +1,12 @@
+## 1.0.158 — Artefatos GitHub / Android
+
+- Log detalhado por tentativa de download.
+- Diagnóstico backend para distinguir erro Android de artefato sem APK.
+- Remoção do toast genérico com código HTTP no card.
+- Botões do card reorganizados no celular.
+- Fluxo Instalar / abrir com autorização de apps desconhecidos no Android.
+- Mapeamento dos códigos `DownloadManager` e correção de nomes duplicados de APK.
+
 ## 1.0.157 — CSRF em uploads com progresso
 
 - Todos os `XMLHttpRequest` POST autenticados agora recebem `X-CSRF-Token` por `applyXhrAuthHeaders()`.

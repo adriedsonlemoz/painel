@@ -1,5 +1,12 @@
 # ⚙️ AL Sistemas — Painel de Gerenciamento
 
+## 📦 Artefatos GitHub no Android — 1.0.158
+
+A versão **1.0.158** melhora o fluxo **Código → Artefatos**. Falhas do `DownloadManager` deixam de aparecer apenas como um código HTTP genérico: cada tentativa pode abrir um **Log** com estado nativo, HTTP, bytes recebidos e diagnóstico sob demanda do backend. Para APKs, o backend verifica o conteúdo real do ZIP do GitHub Actions e informa se existe um `.apk` utilizável.
+
+O botão **Instalar / abrir** também passa a tratar a permissão Android para instalação de apps desconhecidos, abrindo a tela de autorização quando necessário e permitindo tentar novamente depois. Os botões do rodapé foram reorganizados para telas pequenas sem sobreposição.
+
+
 ## 🔐 Correção de uploads autenticados — 1.0.157
 
 A versão **1.0.157** corrige uma regressão da proteção CSRF introduzida na 1.0.156: uploads que usavam `XMLHttpRequest` para exibir progresso não informavam explicitamente o método ao montar os headers e, em sessões por cookie, podiam ser bloqueados com **“Token CSRF ausente ou inválido”** antes de o job ser criado.
