@@ -1,8 +1,11 @@
 {
   "product": "AL Sistemas",
-  "version": "1.0.156",
+  "version": "1.0.157",
   "packageFormat": 2,
   "changelog": [
+    "Corrige uploads autenticados via XMLHttpRequest para enviar X-CSRF-Token em operações POST, eliminando o erro Token CSRF ausente ou inválido.",
+    "Centraliza os headers de autenticação e CSRF dos uploads com progresso em applyXhrAuthHeaders, mantendo o mesmo comportamento de api/authFetch.",
+    "Aplica a correção aos fluxos GitHub, Cloudflare R2, Storage, Projetos e preparo de Atualizações, incluindo XHRs diretos das telas administrativas.",
     "Confirmação step-up passa a usar modal próprio do painel, sem prompts nativos do navegador.",
     "Contas com MFA obrigatório têm autoatendimento de 2FA e códigos de recuperação aceitam formatação flexível.",
     "Webhooks de segurança exigem HTTPS e rejeitam destinos locais/privados literais; Swagger pode ser protegido ou desativado em produção.",

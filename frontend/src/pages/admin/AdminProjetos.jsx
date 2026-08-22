@@ -17,7 +17,7 @@ import { useProjetos }                    from '../../modules/projetos/useProjet
 import { useProjetosGridFS }              from '../../hooks/useProjetosGridFS.js'
 import { useProjetosR2 }                  from '../../hooks/useProjetosR2.js'
 import { projetosService }                from '../../services/domains/projetos.js'
-import { BASE_URL, authFetch }            from '../../services/domains/http.js'
+import { BASE_URL, authFetch, applyXhrAuthHeaders } from '../../services/domains/http.js'
 import { T as C, SPACE, RADIUS, FONT }   from '../../themes/tokens'
 import {
   DSPageHeader,
@@ -474,6 +474,7 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
         const xhr = new XMLHttpRequest()
         xhr.open('POST', `${BASE_URL}/projetos/upload-gridfs`)
         xhr.withCredentials = true
+        applyXhrAuthHeaders(xhr, 'POST')
         xhr.upload.addEventListener('progress', e => {
           if (e.lengthComputable) {
             const p = Math.round(e.loaded / e.total * 100)
@@ -1331,6 +1332,7 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
         const xhr = new XMLHttpRequest()
         xhr.open('POST', `${BASE_URL}/projetos/upload-r2`)
         xhr.withCredentials = true
+        applyXhrAuthHeaders(xhr, 'POST')
         xhr.upload.addEventListener('progress', e => {
           if (e.lengthComputable) {
             const p = Math.round(e.loaded / e.total * 100)

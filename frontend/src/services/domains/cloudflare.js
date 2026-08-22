@@ -1,7 +1,7 @@
 /**
  * cloudflare.js — Serviço de acesso à API Cloudflare (via backend proxy).
  */
-import { api, BASE_URL, withAuthHeaders } from './http.js'
+import { api, BASE_URL, applyXhrAuthHeaders } from './http.js'
 
 export const cloudflareService = {
   /** Verifica token e retorna info da conta */
@@ -174,8 +174,7 @@ export const cloudflareService = {
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BASE_URL}/admin/cloudflare/r2/buckets/${encodeURIComponent(bucket)}/upload`)
       xhr.withCredentials = true
-      const headers = withAuthHeaders()
-      headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+      applyXhrAuthHeaders(xhr, 'POST')
       xhr.upload.onprogress = ev => {
         if (!ev.lengthComputable || typeof onProgress !== 'function') return
         onProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)))

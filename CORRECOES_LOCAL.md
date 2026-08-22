@@ -1,3 +1,9 @@
+## 1.0.157 — CSRF em uploads com progresso
+
+- Todos os `XMLHttpRequest` POST autenticados agora recebem `X-CSRF-Token` por `applyXhrAuthHeaders()`.
+- Corrigidos GitHub, R2, Storage, Projetos e preparo de Atualizações.
+- XHRs diretos das telas administrativas também foram migrados para o helper central.
+
 ## 1.0.156 — Segurança
 
 - Central de Segurança refeita com score explicável, incidentes, sessões, auditoria e políticas.

@@ -134,6 +134,14 @@ export function withAuthHeaders(headers = {}, method = 'GET') {
   return result
 }
 
+/** Aplica ao XMLHttpRequest os mesmos headers de sessão/CSRF usados por api/authFetch. */
+export function applyXhrAuthHeaders(xhr, method = 'GET', headers = {}) {
+  if (!xhr || typeof xhr.setRequestHeader !== 'function') throw new TypeError('XMLHttpRequest inválido.')
+  const result = withAuthHeaders(headers, method)
+  result.forEach((value, key) => xhr.setRequestHeader(key, value))
+  return result
+}
+
 /** Fetch autenticado para uploads/downloads multipart e respostas não JSON. */
 export async function authFetch(input, options = {}) {
   const headers = withAuthHeaders(options.headers || {}, options.method || 'GET')

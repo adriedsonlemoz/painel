@@ -4,7 +4,7 @@
  * Sprint 3 — ADIÇÃO PURA.
  * Sprint 7 — GitHub Sync: vincular, desvincular, syncStatus, registrarSincronizacao.
  */
-import { api, BASE_URL, withAuthHeaders } from './http.js'
+import { api, BASE_URL, applyXhrAuthHeaders } from './http.js'
 
 async function uploadProjetoPersistente(destino, file, nomeProjeto, { substituir = false, onProgress } = {}) {
   if (!['gridfs','r2'].includes(destino)) throw new Error('Destino persistente inválido.')
@@ -17,7 +17,7 @@ async function uploadProjetoPersistente(destino, file, nomeProjeto, { substituir
     const xhr=new XMLHttpRequest()
     xhr.open('POST', `${BASE_URL}${endpoint}`)
     xhr.withCredentials=true
-    withAuthHeaders().forEach((value,key)=>xhr.setRequestHeader(key,value))
+    applyXhrAuthHeaders(xhr, 'POST')
     xhr.upload.onprogress=e=>{
       if(e.lengthComputable)onProgress?.({phase:'upload',percent:Math.min(82,Math.round((e.loaded/e.total)*82)),loaded:e.loaded,total:e.total})
     }

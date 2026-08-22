@@ -1,5 +1,12 @@
 # ⚙️ AL Sistemas — Painel de Gerenciamento
 
+## 🔐 Correção de uploads autenticados — 1.0.157
+
+A versão **1.0.157** corrige uma regressão da proteção CSRF introduzida na 1.0.156: uploads que usavam `XMLHttpRequest` para exibir progresso não informavam explicitamente o método ao montar os headers e, em sessões por cookie, podiam ser bloqueados com **“Token CSRF ausente ou inválido”** antes de o job ser criado.
+
+Os fluxos de **GitHub, Cloudflare R2, Storage, Projetos e Atualizações** agora usam um helper único, `applyXhrAuthHeaders()`, que aplica Bearer e `X-CSRF-Token` com a mesma regra de `api()` e `authFetch()`.
+
+
 ## 🛡️ Central de Segurança — 1.0.156
 
 O módulo **Segurança** foi reconstruído como uma central operacional com **Visão geral, Incidentes, Sessões, Auditoria e Políticas**. O score de 0–100 agora é composto por Identidade, Credenciais, Aplicação, Monitoramento e Dados, com recomendações que explicam exatamente onde há perda de pontos.

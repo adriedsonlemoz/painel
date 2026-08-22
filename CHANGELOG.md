@@ -1,3 +1,12 @@
+# 1.0.157 — Correção global de CSRF nos uploads
+
+- Corrige a publicação de pacotes no GitHub que falhava em 0% com `Token CSRF ausente ou inválido`.
+- Cria `applyXhrAuthHeaders()` para aplicar em `XMLHttpRequest` os mesmos headers de autenticação e CSRF usados por `api()`/`authFetch()`.
+- Corrige todos os uploads POST com progresso via XHR: GitHub, Cloudflare R2, Storage, Projetos GridFS/R2/local e preparo de Atualizações.
+- Corrige também os XHRs criados diretamente em `ProjetoPublicarModal` e `AdminProjetos`.
+- Mantém o token Bearer de fallback e passa explicitamente o método `POST`, garantindo o envio de `X-CSRF-Token` quando a sessão usa cookie.
+- Nenhuma imagem, ícone ou splash foi alterado nesta versão.
+
 # 1.0.156 — Central de Segurança completa
 
 - Reconstrói Segurança em cinco áreas: **Visão geral, Incidentes, Sessões, Auditoria e Políticas**.

@@ -1,4 +1,4 @@
-import { api, BASE_URL, authFetch, getSessionToken, clearSessionToken, clearPersistentSession } from './http.js'
+import { api, BASE_URL, authFetch, applyXhrAuthHeaders, clearSessionToken, clearPersistentSession } from './http.js'
 export const updatesService = {
   status(){ return api('/admin/updates', { timeoutMs: 20000 }) },
   selfTest(){ return api('/admin/updates/self-test',{method:'POST',timeoutMs:30000}) },
@@ -12,8 +12,7 @@ export const updatesService = {
       const xhr=new XMLHttpRequest()
       xhr.open('POST',`${BASE_URL}/admin/updates/prepare`,true)
       xhr.withCredentials=true
-      const token=getSessionToken()
-      if(token)xhr.setRequestHeader('Authorization',`Bearer ${token}`)
+      applyXhrAuthHeaders(xhr, 'POST')
       xhr.upload.onprogress=e=>{if(e.lengthComputable&&typeof onProgress==='function')onProgress(Math.max(0,Math.min(100,Math.round((e.loaded/e.total)*100))))}
       xhr.onerror=()=>reject(new Error(`Não foi possível conectar ao backend em ${BASE_URL}.`))
       xhr.onabort=()=>reject(new Error('Envio cancelado.'))

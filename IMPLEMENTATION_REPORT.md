@@ -1,3 +1,19 @@
+# Relatório de implementação — 1.0.157
+
+## Correção de CSRF em uploads
+
+- Adicionado `applyXhrAuthHeaders()` ao cliente HTTP compartilhado.
+- O helper reutiliza `withAuthHeaders(headers, method)` e aplica os headers resultantes ao `XMLHttpRequest`, evitando divergência entre `fetch` e XHR.
+- Todos os sete arquivos frontend que instanciam `XMLHttpRequest` foram auditados e passam `POST` explicitamente ao helper.
+- Publicação GitHub, uploads Cloudflare R2/Storage/Projetos e preparo de Atualizações voltam a funcionar em sessões autenticadas por cookie com CSRF vinculado ao JWT.
+- O fallback Bearer permanece compatível e nenhum asset visual foi alterado.
+
+## Versão
+
+Frontend, backend, manifesto, exemplo de ambiente e versão de exportação sincronizados em **1.0.157**.
+
+---
+
 # Relatório de implementação — 1.0.156
 
 ## Segurança, identidade e resposta a incidentes

@@ -1,4 +1,4 @@
-import { api, BASE_URL, authFetch, withAuthHeaders } from './http.js'
+import { api, BASE_URL, authFetch, applyXhrAuthHeaders } from './http.js'
 
 function validarImagem(file) {
   if (!file) throw new Error('Nenhum arquivo selecionado')
@@ -13,8 +13,7 @@ function uploadComProgresso(url, field, file, onProgress) {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
     xhr.withCredentials = true
-    const headers = withAuthHeaders()
-    headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+    applyXhrAuthHeaders(xhr, 'POST')
     xhr.upload.onprogress = ev => {
       if (ev.lengthComputable) onProgress?.(Math.min(99, Math.round((ev.loaded / ev.total) * 100)))
     }

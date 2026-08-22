@@ -18,7 +18,7 @@ import { githubService }   from '../../services/domains/github.js'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'
 import { DSModal, DSBtn, DSAlert }      from '../../components/admin/ui/DS'
 import toast from 'react-hot-toast'
-import { authFetch, BASE_URL } from '../../services/domains/http.js'
+import { authFetch, BASE_URL, applyXhrAuthHeaders } from '../../services/domains/http.js'
 import { consumeSse } from '../../services/sseFetch.js'
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -132,6 +132,7 @@ function Passo1({ onConcluido }) {
         const xhr = new XMLHttpRequest()
         xhr.open('POST', `${import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:3001/api' : '/api')}${endpoint}`)
         xhr.withCredentials = true
+        applyXhrAuthHeaders(xhr, 'POST')
         xhr.upload.addEventListener('progress', e => {
           if (e.lengthComputable) setProg(Math.round(e.loaded / e.total * 85))
         })

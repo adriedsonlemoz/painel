@@ -6,7 +6,7 @@
  *
  * Todas as chamadas passam pelo proxy backend. Token NUNCA exposto no frontend.
  */
-import { api, BASE_URL, authFetch, withAuthHeaders } from './http.js'
+import { api, BASE_URL, authFetch, applyXhrAuthHeaders } from './http.js'
 import { Capacitor, registerPlugin } from '@capacitor/core'
 
 
@@ -276,8 +276,7 @@ export const githubService = {
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BASE_URL}/github/repos/${owner}/${repo}/publicar-pacote`)
       xhr.withCredentials = true
-      const headers = withAuthHeaders()
-      headers.forEach((value, key) => xhr.setRequestHeader(key, value))
+      applyXhrAuthHeaders(xhr, 'POST')
       xhr.upload.onprogress = ev => {
         if (!ev.lengthComputable || typeof onProgress !== 'function') return
         onProgress({ loaded: ev.loaded, total: ev.total, percent: Math.min(100, Math.round((ev.loaded / ev.total) * 100)) })
