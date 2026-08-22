@@ -1,3 +1,9 @@
+## Infraestrutura unificada — 1.0.155+
+
+O menu administrativo expõe uma única **Infraestrutura**. A URL antiga `/admin/ambientes` redireciona para `/admin/sistema?tab=ambiente`, portanto favoritos antigos continuam válidos. As consultas de saúde usam `/api/infraestrutura/sistema/metricas` e `/api/infraestrutura/plataformas/compatibilidade`; perfis operacionais podem acessá-las com `sistema.gerenciar`, enquanto as rotas que alteram configurações continuam exigindo `configuracoes.gerenciar`.
+
+A limpeza global de cache permanece uma ação administrativa explícita dentro de **Infraestrutura → Manutenção**. Não exponha essa ação como efeito automático de refresh/diagnóstico.
+
 ## Identidade do APK — 1.0.154+
 
 O build Android deve executar `frontend/scripts/configure-android-branding.mjs` após `npx cap sync android`. O script copia os assets por densidade derivados do PNG aprovado e configura `ic_launcher`, `roundIcon`, Adaptive Icon e splash nativa. Não aplique `stretch`, crop ou recomposição ao arquivo de origem. Para clientes web/PWA, o cache `alsistemas-v5` força a troca dos ícones antigos após o deploy.

@@ -1,5 +1,11 @@
 # ⚙️ AL Sistemas — Painel de Gerenciamento
 
+## 🧭 Infraestrutura unificada e legibilidade — 1.0.155
+
+**Ambientes** e **Infraestrutura** agora formam uma única Central de Infraestrutura com quatro áreas: **Visão geral**, **Servidor**, **Ambiente** e **Manutenção**. O resumo cruza o estado real da API com o diagnóstico de compatibilidade para MongoDB, GitHub, Vercel, Render, R2, CORS e IA; a tela não infere mais configuração a partir de campos que o endpoint de métricas não fornece. As métricas essenciais permanecem visíveis e os dados de depuração de baixo nível ficam em **Detalhes avançados**.
+
+A interface administrativa também recebeu uma revisão de legibilidade para celular. A escala de tipografia foi elevada, o texto secundário do tema claro ganhou mais contraste e tamanhos hardcoded abaixo do mínimo legível foram normalizados. Projetos/Deploys traduzem os estados de provedores para português, e Cloudflare/R2 elimina métricas duplicadas no cabeçalho, apresenta o estado do R2 e amplia áreas de toque. Nenhuma imagem, ícone ou splash foi alterado nesta versão.
+
 ## 🎨 Ícone AL e splash — 1.0.154
 
 A identidade do aplicativo usa o novo monograma **AL** aprovado. O arquivo original é mantido como fonte em `frontend/public/icons/al-sistemas-source.png`; todos os tamanhos de launcher, PWA e splash são derivados desse mesmo PNG apenas por redimensionamento proporcional. O Android recebe `ic_launcher`, `roundIcon` e Adaptive Icon por densidade, enquanto a splash mantém a imagem centralizada e inteira, sem esticar ou recortar a marca. O Service Worker `alsistemas-v5` invalida os ícones anteriores após o deploy.

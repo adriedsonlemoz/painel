@@ -237,7 +237,7 @@ export default function AdminErros() {
       .error-delete:hover{color:var(--adm-danger,#c62828);background:rgba(220,38,38,.05)}
       .error-details{border-top:1px solid var(--adm-border);padding:14px;display:grid;gap:14px;background:color-mix(in srgb,var(--adm-surface) 93%,var(--adm-bg))}
       .error-detail-block{display:grid;gap:6px;min-width:0}
-      .error-detail-label{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:850;color:var(--adm-muted)}
+      .error-detail-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:850;color:var(--adm-muted)}
       .error-message{font-size:13.5px;line-height:1.55;color:var(--adm-text);overflow-wrap:anywhere}
       .error-mono,.error-details pre{margin:0;border-radius:9px;background:var(--adm-bg);border:1px solid var(--adm-border);padding:10px;font-size:11.5px;line-height:1.5;color:var(--adm-text);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-height:260px;overflow:auto}
       .error-delete-expanded{justify-self:start;border:0;background:rgba(220,38,38,.09);color:var(--adm-danger,#c62828);border-radius:9px;padding:9px 11px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}
@@ -246,7 +246,7 @@ export default function AdminErros() {
       .errors-empty small{font-size:12px}
       .errors-empty-icon{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:rgba(34,197,94,.1);color:#24a35a;font-size:19px;font-weight:900;margin-bottom:4px}
       @media(max-width:560px){
-        .errors-page-head{align-items:center}.errors-head-actions{gap:6px}.errors-export-all,.errors-clear-all{padding:8px 9px;font-size:11.5px}.error-item-toggle{padding:13px 5px 13px 12px;gap:9px}.error-item-head{grid-template-columns:minmax(0,1fr) 58px 40px}.error-copy{font-size:10.5px;padding:0 5px}.error-item-main strong{font-size:13.5px}.error-details{padding:12px}
+        .errors-page-head{align-items:center}.errors-head-actions{gap:6px}.errors-export-all,.errors-clear-all{padding:8px 9px;font-size:11.5px}.error-item-toggle{padding:13px 5px 13px 12px;gap:9px}.error-item-head{grid-template-columns:minmax(0,1fr) 58px 40px}.error-copy{font-size:12px;padding:0 5px}.error-item-main strong{font-size:13.5px}.error-details{padding:12px}
       }
     `}</style>
   </>

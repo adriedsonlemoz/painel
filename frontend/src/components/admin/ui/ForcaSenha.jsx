@@ -47,7 +47,7 @@ export default function ForcaSenha({ senha }) {
           />
         ))}
       </div>
-      <span style={{ fontSize: 10, color: cor, fontWeight: 600 }}>{texto}</span>
+      <span style={{ fontSize: 12, color: cor, fontWeight: 600 }}>{texto}</span>
     </div>
   )
 }

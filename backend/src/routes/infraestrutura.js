@@ -39,7 +39,23 @@ try { BACKEND_VERSION=JSON.parse(fsSync.readFileSync(new URL('../../package.json
 
 const router = Router()
 router.use(autenticar)
-router.use(verificarPermissao('configuracoes.gerenciar'))
+
+// Métricas, compatibilidade de ambiente e manutenção de cache pertencem ao
+// módulo Sistema. O restante desta rota continua protegido pela permissão de
+// Configurações, pois inclui credenciais e operações de infraestrutura.
+const permitirConfiguracoes = verificarPermissao('configuracoes.gerenciar')
+const permitirSistema = verificarPermissao('sistema.gerenciar')
+router.use((req, res, next) => {
+  const sistemaPath =
+    (req.method === 'GET' && (req.path === '/sistema/metricas' || req.path === '/plataformas/compatibilidade')) ||
+    (req.method === 'POST' && req.path === '/sistema/limpar-cache')
+  if (!sistemaPath) return permitirConfiguracoes(req, res, next)
+
+  const u = req.usuario
+  const perms = u?.perfil_id?.permissoes || []
+  if (u?.role === 'superadmin' || perms.includes('*') || perms.includes('configuracoes.gerenciar')) return next()
+  return permitirSistema(req, res, next)
+})
 
 // ─── helper: converte bytes para formato legível ───────────────
 function fmtBytes(b) {
@@ -1338,9 +1354,9 @@ router.get('/plataformas/compatibilidade', async (req,res,next)=>{
       {id:'database',label:'MongoDB',ok:mongoose.connection.readyState===1,detail:mongoose.connection.readyState===1?`Conectado em ${mongoose.connection.name||'banco atual'}`:'Banco ainda não conectado'},
       {id:'cors',label:'Origem do frontend',ok:originNormalized?Boolean(corsAllowed):true,detail:originNormalized?(corsAllowed?'Autorizada pelo backend':`Não autorizada: ${originNormalized}`):'Sem Origin nesta requisição'},
       {id:'auth',label:'Sessão administrativa',ok:true,detail:bearerUsed?'Bearer de compatibilidade cloud ativo':'Cookie HttpOnly ativo'},
-      {id:'github',label:'GitHub',ok:Boolean(github.value),detail:github.value?'Credencial disponível':'Não configurado'},
-      {id:'vercel',label:'Vercel',ok:Boolean(vercel.value),detail:vercel.value?'Credencial disponível':'Não configurado'},
-      {id:'render',label:'Render',ok:Boolean(render.value),detail:render.value?'Credencial disponível':'Não configurado'},
+      {id:'github',label:'GitHub',ok:Boolean(github.value),detail:github.value?'Credencial disponível':github.locked?'Configurado, mas protegido por outra instalação':'Não configurado'},
+      {id:'vercel',label:'Vercel',ok:Boolean(vercel.value),detail:vercel.value?'Credencial disponível':vercel.locked?'Configurada, mas protegida por outra instalação':'Não configurada'},
+      {id:'render',label:'Render',ok:Boolean(render.value),detail:render.value?'Credencial disponível':render.locked?'Configurada, mas protegida por outra instalação':'Não configurada'},
       {id:'r2',label:'R2 Storage',ok:r2Configured,detail:r2Configured?'Credenciais S3 disponíveis':'Não configurado'},
     ]
 
@@ -1359,9 +1375,9 @@ router.get('/plataformas/compatibilidade', async (req,res,next)=>{
       },
       cors:{allowed:corsAllowed,origin:originNormalized||'',origins:platformOrigins()},
       integrations:{
-        github:{configured:Boolean(github.value),source:github.source||null,locked:Boolean(github.locked)},
-        vercel:{configured:Boolean(vercel.value),source:vercel.source||null,locked:Boolean(vercel.locked)},
-        render:{configured:Boolean(render.value),source:render.source||null,locked:Boolean(render.locked)},
+        github:{configured:Boolean(github.value)||Boolean(github.locked),usable:Boolean(github.value),source:github.source||null,locked:Boolean(github.locked)},
+        vercel:{configured:Boolean(vercel.value)||Boolean(vercel.locked),usable:Boolean(vercel.value),source:vercel.source||null,locked:Boolean(vercel.locked)},
+        render:{configured:Boolean(render.value)||Boolean(render.locked),usable:Boolean(render.value),source:render.source||null,locked:Boolean(render.locked)},
         r2:{configured:r2Configured},
       },
       compatibility:{

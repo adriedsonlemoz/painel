@@ -67,7 +67,6 @@ const NAV = [
       { to: '/admin/mongo',         label: 'MongoDB',            icon: IconMongo,    perm: 'mongodb.gerenciar' },
       { to: '/admin/backup',        label: 'Backup',             icon: IconBackup,   perm: 'backup.gerenciar' },
       { to: '/admin/sistema',       label: 'Infraestrutura',     icon: IconCpu,      perm: 'sistema.gerenciar' },
-      { to: '/admin/ambientes',     label: 'Ambientes',          icon: IconPlatform, perm: 'configuracoes.gerenciar' },
       { to: '/admin/ai-assistant',  label: 'Assistente de IA',   icon: IconIA,       perm: 'ia.usar' },
     ],
   },
@@ -438,7 +437,7 @@ export default function AdminLayout() {
                 <span>{item.label}</span>
                 {item.to === '/admin/erros' && naoLidos > 0 && (
                   <span style={{ position:'absolute', top:2, right:2, background:C.red, color:'#fff',
-                    borderRadius:RADIUS.lg, fontSize:9, fontWeight:800, padding:'1px 4px',
+                    borderRadius:RADIUS.lg, fontSize:12, fontWeight:800, padding:'1px 4px',
                     lineHeight:1.4, minWidth:14, textAlign:'center' }}>
                     {naoLidos > 99 ? '99+' : naoLidos}
                   </span>

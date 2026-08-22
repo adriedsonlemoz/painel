@@ -1,3 +1,13 @@
+## 1.0.155 — Infraestrutura e leitura no celular
+
+- `Ambientes` foi incorporado à Central de `Infraestrutura`; a URL antiga redireciona para a aba correspondente.
+- Estados de MongoDB/GitHub/Vercel/Render/R2/CORS usam o diagnóstico real e não campos legados ausentes.
+- Métricas avançadas ficam recolhidas e a limpeza de cache foi movida para Manutenção.
+- A escala tipográfica administrativa foi ampliada e tamanhos hardcoded abaixo de 11/12 px foram normalizados.
+- Tema claro ganhou maior contraste no texto secundário.
+- Cloudflare/R2 e Projetos/Deploys receberam ajustes específicos de legibilidade, idioma e ações touch.
+- Nenhuma imagem foi alterada.
+
 ## 1.0.154 — Ícone AL e splash
 
 - Novo ícone AL aprovado integrado como fonte única da identidade.

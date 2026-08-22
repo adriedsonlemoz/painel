@@ -140,7 +140,7 @@ export default function MarkdownEditor({ value = '', onChange, error }) {
         .news-editor-input::placeholder{color:var(--adm-muted)}
         .news-editor-preview{min-height:340px;max-height:70vh;overflow:auto;padding:18px;background:var(--adm-surface);color:var(--adm-text)}
         .news-editor-preview>p{margin:0;color:var(--adm-muted);font-size:13px}
-        .news-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border-top:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-muted);font:500 10px var(--adm-font)}
+        .news-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border-top:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-muted);font:500 12px var(--adm-font)}
         @media(max-width:700px){
           .news-editor-topbar{align-items:stretch;flex-direction:column;padding:6px}
           .news-editor-tabs{align-self:flex-end}

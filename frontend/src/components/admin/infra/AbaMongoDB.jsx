@@ -121,7 +121,7 @@ export default function AbaMongoDB() {
               { label: 'Storage',  valor: status.tamanho_armazenamento },
             ].map(({ label, valor, cor }) => (
               <div key={label} style={{ background: C.surf2, borderRadius: 8, padding: '10px 12px' }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '.05em', margin: '0 0 4px' }}>{label}</p>
+                <p style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '.05em', margin: '0 0 4px' }}>{label}</p>
                 <p style={{ fontSize: 13, fontWeight: 700, color: cor || C.text, margin: 0, wordBreak: 'break-all' }}>{valor || '—'}</p>
               </div>
             ))}

@@ -594,7 +594,7 @@ export function DSActionCard({ icon, title, desc, meta, badge, onClick, href, ch
 
 /**
  * DSServiceChip — indicador de status de serviço (online / offline / loading).
- * Substitui ServiceChip (AdminDashboard) e padrões similares em AdminInfraestrutura.
+ * Substitui ServiceChip (AdminDashboard) e padrões similares em Infraestrutura.
  *
  * @example
  * <DSServiceChip label="MongoDB" ok={mongo.ok} loading={mongo.loading} detalhe={mongo.latency} />

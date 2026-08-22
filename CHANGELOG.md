@@ -1,3 +1,17 @@
+# 1.0.155 — Infraestrutura unificada e legibilidade mobile
+
+- Une **Ambientes** e **Infraestrutura** em uma única Central de Infraestrutura com Visão geral, Servidor, Ambiente e Manutenção.
+- Remove as páginas legadas duplicadas e mantém redirecionamento de compatibilidade para URLs antigas.
+- Simplifica a Central Sistema ocultando Monitor, Arquivos legado e Configuração inicial da navegação cotidiana; rotas antigas permanecem acessíveis.
+- Corrige os estados de serviços usando o diagnóstico real de compatibilidade em vez de campos ausentes da rota de métricas.
+- Corrige a permissão das rotas de diagnóstico do sistema para `sistema.gerenciar`, preservando `configuracoes.gerenciar` nas operações sensíveis.
+- Simplifica o servidor para CPU, RAM, heap, uptime e alertas; informações de processo/V8/rede ficam recolhidas em detalhes avançados.
+- Move a limpeza global de cache para Manutenção com confirmação explícita.
+- Amplia a tipografia do painel e o contraste do texto secundário no tema claro; microfontes de 7–10 px foram normalizadas.
+- Melhora Projetos/Deploys com tradução de status e pluralização natural.
+- Cloudflare/R2 remove métricas duplicadas, melhora o nome da conta, mostra o estado operacional do R2 e aumenta alvos de toque.
+- Nenhum asset de imagem, ícone ou splash foi modificado.
+
 # 1.0.154 — Novo ícone AL integrado ao APK e splash
 
 - Substitui a identidade anterior pelo novo ícone AL aprovado, sem gerar outra arte.

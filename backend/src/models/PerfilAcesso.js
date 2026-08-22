@@ -28,6 +28,7 @@ export const PERMISSOES = {
   ERROS_VER:       'erros.ver',
   ERROS_GERENCIAR: 'erros.gerenciar',
   SEGURANCA_GERENCIAR: 'seguranca.gerenciar',
+  SISTEMA_GERENCIAR: 'sistema.gerenciar',
   // Acesso total
   SUPERADMIN: '*',
 }

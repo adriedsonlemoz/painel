@@ -1,5 +1,5 @@
 /**
- * InfraBase.jsx — Primitivos compartilhados pelas abas do AdminInfraestrutura.
+ * InfraBase.jsx — Primitivos compartilhados pelas abas do Infraestrutura.
  *
  * MIGRADO: DS Sprint (Fase 4)
  *   - PageCard    → DSCard (re-export para compatibilidade)

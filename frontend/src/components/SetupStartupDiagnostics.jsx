@@ -103,7 +103,7 @@ export default function SetupStartupDiagnostics({
         </div>
 
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.1em', color: '#6b7d72', marginBottom: 5 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.1em', color: '#6b7d72', marginBottom: 5 }}>
             {status.eyebrow}
           </div>
           <h1 style={{ fontSize: compact ? 18 : 21, lineHeight: 1.2, margin: 0, color: '#17211b', letterSpacing: '-.02em' }}>
@@ -212,7 +212,7 @@ export default function SetupStartupDiagnostics({
         <div style={{ marginTop: 13 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', marginBottom: 11 }}>
             <strong style={{ fontSize: 11.5, color: '#47574d' }}>{title}</strong>
-            <span style={{ fontSize: 10.5, color: '#8a978f' }}>{fmt(total)}</span>
+            <span style={{ fontSize: 12, color: '#8a978f' }}>{fmt(total)}</span>
           </div>
           <div style={{ display: 'grid', gap: 9 }}>
             {normalized.map((stage, index) => {
@@ -226,9 +226,9 @@ export default function SetupStartupDiagnostics({
                   <span style={{ color, fontWeight: 900, textAlign: 'center', fontSize: 11 }}>{icon}</span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: running ? 800 : 650, color: error ? '#991b1b' : '#475569' }}>{stage.label}</div>
-                    {stage.detail && <div style={{ fontSize: 10, color: '#7b8792', marginTop: 2, overflowWrap: 'anywhere' }}>{stage.detail}</div>}
+                    {stage.detail && <div style={{ fontSize: 12, color: '#7b8792', marginTop: 2, overflowWrap: 'anywhere' }}>{stage.detail}</div>}
                   </div>
-                  <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', color }}>{fmt(stage.elapsed)}</span>
+                  <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color }}>{fmt(stage.elapsed)}</span>
                 </div>
               )
             })}

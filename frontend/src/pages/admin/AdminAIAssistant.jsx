@@ -9,7 +9,7 @@
  *  - Comparação local ↔ GitHub
  *  - Chat com IA (Claude) — APENAS sugestões, sem execução automática
  *
- * UX: segue padrão AdminGitHub.jsx / AdminProjetos.jsx / AdminInfraestrutura.jsx
+ * UX: segue padrão AdminGitHub.jsx / AdminProjetos.jsx / Infraestrutura.jsx
  */
 import { useState, useRef, useEffect } from 'react'
 import { T as C, SPACE, RADIUS, FONT } from '../../themes/tokens'

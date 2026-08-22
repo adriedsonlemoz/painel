@@ -15,7 +15,7 @@ const lightTheme = {
     '--adm-border2':   '#d4cec6',
     '--adm-text':      '#1c1c1e',
     '--adm-subtle':   '#94a3b8',
-    '--adm-muted':     '#78716c',
+    '--adm-muted':     '#625d58',
     '--adm-accent':    '#6b7c4e',
     '--adm-accent-d':  '#4a5c34',
     '--adm-accent-rgb':'107,124,78',

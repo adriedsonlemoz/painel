@@ -1,6 +1,6 @@
 // AL Sistemas — Service Worker
 // HTML e chunks do Vite nunca são servidos de um cache antigo após deploy.
-const CACHE_NAME = 'alsistemas-v5'
+const CACHE_NAME = 'alsistemas-v6'
 const API_CACHE_NAME = 'alsistemas-api-v2'
 const PRECACHE_URLS = ['/manifest.json']
 

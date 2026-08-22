@@ -1,3 +1,31 @@
+# Relatório de implementação — 1.0.155
+
+## Infraestrutura e ambiente
+
+- `AdminSistema` passa a ser a central única, com abas Visão geral, Servidor, Ambiente e Manutenção.
+- `AdminAmbientes.jsx` e o `AdminInfraestrutura.jsx` legado foram removidos; `/admin/ambientes` e `/admin/infraestrutura` preservam compatibilidade via redirecionamento.
+- A Central Sistema passa a espelhar o menu principal e não promove Monitor, Arquivos legado ou Setup como módulos cotidianos; as rotas são preservadas para compatibilidade/recuperação.
+- O resumo de saúde usa `plataformasCompatibilidade()` em conjunto com métricas do sistema, corrigindo os falsos “não configurado” causados por campos antigos que já não eram devolvidos pelo backend.
+- Rotas de `/sistema/metricas`, `/plataformas/compatibilidade` e `/sistema/limpar-cache` aceitam `sistema.gerenciar`; as demais rotas de infraestrutura continuam protegidas por `configuracoes.gerenciar`.
+- `AbaSistema` foi reduzida às métricas operacionais e mantém PID, caminhos, V8 e rede em detalhes avançados recolhidos.
+- Limpeza de cache foi centralizada na aba Manutenção e exige confirmação.
+
+## Legibilidade e módulos cloud
+
+- Tokens tipográficos administrativos foram ampliados e `--adm-muted` do tema claro ganhou contraste.
+- Tamanhos hardcoded entre 7 e 10 px nas páginas/componentes administrativos foram normalizados para a escala mínima legível.
+- Projetos/Deploys traduzem estados públicos dos provedores e usam pluralização natural.
+- Cloudflare/R2 mostra armazenamento/objetos/buckets somente no Explorer, troca o resumo duplicado por estado do R2, melhora a identificação da conta e amplia alvos de toque.
+- Nenhum asset de imagem, ícone ou splash foi criado, editado ou substituído.
+- Validação final: 163 fontes/configurações frontend passaram no parser TypeScript, 438 imports relativos foram resolvidos sem falta, 124 arquivos backend passaram em `node --check`, checks de efeitos/temas passaram e o self-test do atualizador fechou 8/8. A varredura de tipografia administrativa não encontrou tamanhos restantes abaixo do mínimo definido, e os 25 assets visuais foram comparados com a 1.0.154 sem qualquer alteração de bytes.
+- O pacote recebido não inclui `node_modules`; uma tentativa de instalar dependências no ambiente de trabalho excedeu o tempo disponível, portanto o build Vite completo permanece sob o workflow/CI do projeto.
+
+## Versão
+
+Frontend, backend, manifesto e exemplo de ambiente sincronizados em **1.0.155**.
+
+---
+
 # Relatório de implementação — 1.0.154
 
 ## Identidade visual

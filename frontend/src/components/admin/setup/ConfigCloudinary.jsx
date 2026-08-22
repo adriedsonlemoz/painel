@@ -99,7 +99,7 @@ export default function ConfigCloudinary({ initialValues = {} }) {
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {configurado && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: C.greenAcc, background: C.greenAcc + '22', padding: '2px 8px', borderRadius: 20 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.greenAcc, background: C.greenAcc + '22', padding: '2px 8px', borderRadius: 20 }}>
               ✓ Configurado
             </span>
           )}

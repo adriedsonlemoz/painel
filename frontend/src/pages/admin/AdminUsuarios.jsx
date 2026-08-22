@@ -692,10 +692,10 @@ export default function AdminUsuarios() {
                           <div style={{ fontWeight: 700, fontSize: FONT.md, color: C.text,
                             display: 'flex', alignItems: 'center', gap: SPACE.sm, flexWrap: 'wrap' }}>
                             {u.nome}
-                            <DSBadge variant={u.ativo !== false ? 'green' : 'red'} style={{ fontSize: 9 }}>
+                            <DSBadge variant={u.ativo !== false ? 'green' : 'red'} style={{ fontSize: 12 }}>
                               {u.ativo !== false ? 'Ativo' : 'Inativo'}
                             </DSBadge>
-                            {isBloqueado && <DSBadge variant="orange" style={{ fontSize: 9 }}>🔒 Bloqueado</DSBadge>}
+                            {isBloqueado && <DSBadge variant="orange" style={{ fontSize: 12 }}>🔒 Bloqueado</DSBadge>}
                             {u.tentativas_login > 0 && (
                               <span style={{ fontSize: FONT.xs, color: C.amber }}>
                                 ⚠ {u.tentativas_login} falha{u.tentativas_login !== 1 ? 's' : ''}

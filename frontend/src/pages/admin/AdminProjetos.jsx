@@ -202,7 +202,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
               <svg width={11} height={11} viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
               </svg>
-              <span style={{ fontSize: 10, fontWeight: 600 }}>GitHub ↗</span>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>GitHub ↗</span>
             </a>
           )}
 
@@ -211,7 +211,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
             <svg width={11} height={11} viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
             </svg>
-            <span style={{ fontSize: 10, fontWeight: 600 }}>GitHub</span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>GitHub</span>
           </DSBtn>
 
           {/* ✅ DSBtn substitui <button style={{ background:'none', border:'none', ... }}> */}
@@ -227,14 +227,14 @@ function ProjetoCard({ projeto, onOpenSync }) {
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
           {projeto.tecnologias?.length > 0
             ? projeto.tecnologias.map(t => <TechChip key={t} tech={t} />)
-            : <span style={{ fontSize: 10, color: C.muted, fontStyle: 'italic' }}>stack não detectada</span>
+            : <span style={{ fontSize: 12, color: C.muted, fontStyle: 'italic' }}>stack não detectada</span>
           }
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md }}>
           {projeto.package?.versao && (
-            <span style={{ fontSize: 10, color: C.muted }}>v{projeto.package.versao}</span>
+            <span style={{ fontSize: 12, color: C.muted }}>v{projeto.package.versao}</span>
           )}
-          <span style={{ fontSize: 10, color: C.muted }}>{relTime(projeto.ultimaAlteracao)}</span>
+          <span style={{ fontSize: 12, color: C.muted }}>{relTime(projeto.ultimaAlteracao)}</span>
         </div>
       </div>
 
@@ -268,17 +268,17 @@ function ProjetoCard({ projeto, onOpenSync }) {
                 <line x1="3" y1="12" x2="9" y2="12"/>
                 <line x1="15" y1="12" x2="21" y2="12"/>
               </svg>
-              <span style={{ fontSize: 10, color: C.muted, flexShrink: 0 }}>Último commit</span>
+              <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>Último commit</span>
               {shaCurto && (
                 <code style={{
-                  fontSize: 10, fontFamily: 'monospace',
+                  fontSize: 12, fontFamily: 'monospace',
                   background: `${C.blue}18`, color: C.blue,
                   padding: '1px 5px', borderRadius: 3, flexShrink: 0,
                 }}>{shaCurto}</code>
               )}
               {msg && (
                 <span style={{
-                  fontSize: 10, color: C.text, fontStyle: 'italic',
+                  fontSize: 12, color: C.text, fontStyle: 'italic',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   flex: 1, minWidth: 0,
                 }}>
@@ -286,7 +286,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
                 </span>
               )}
               {data && (
-                <span style={{ fontSize: 10, color: C.muted, flexShrink: 0, opacity: .7 }}>
+                <span style={{ fontSize: 12, color: C.muted, flexShrink: 0, opacity: .7 }}>
                   · {relTime(data)}
                 </span>
               )}
@@ -301,7 +301,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
                 title={`Abrir ${branch} no GitHub`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
-                  fontSize: 10, fontWeight: 600, color: C.muted,
+                  fontSize: 12, fontWeight: 600, color: C.muted,
                   textDecoration: 'none', flexShrink: 0,
                   padding: '2px 6px', borderRadius: 4,
                   border: `1px solid ${C.border}`,
@@ -326,14 +326,14 @@ function ProjetoCard({ projeto, onOpenSync }) {
           <div style={{ fontSize: FONT.sm, color: C.muted }}>
             <span style={{ color: C.subtle }}>Caminho:</span>{' '}
             {/* ✅ C.surf2 → C.surface2 */}
-            <code style={{ fontSize: 10, background: C.surface2, padding: '1px 5px', borderRadius: 3, color: C.text }}>
+            <code style={{ fontSize: 12, background: C.surface2, padding: '1px 5px', borderRadius: 3, color: C.text }}>
               {projeto.caminho}
             </code>
           </div>
 
           {projeto.package?.scripts?.length > 0 && (
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ fontSize: 10, color: C.muted }}>Scripts:</span>
+              <span style={{ fontSize: 12, color: C.muted }}>Scripts:</span>
               {projeto.package.scripts.map(s => (
                 <code key={s} style={{ fontSize: FONT.xs, background: C.surface2, padding: '1px 5px', borderRadius: RADIUS.xs, color: C.blue }}>
                   {s}
@@ -348,7 +348,7 @@ function ProjetoCard({ projeto, onOpenSync }) {
               border: `1px solid ${C.border}`, padding: '8px 10px',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.md,
             }}>
-              <div style={{ fontSize: 10, color: C.muted }}>
+              <div style={{ fontSize: 12, color: C.muted }}>
                 <svg width={10} height={10} viewBox="0 0 24 24" fill={C.muted} style={{ verticalAlign: 'middle', marginRight: 4 }}>
                   <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
                 </svg>
@@ -688,7 +688,7 @@ function UploadGridFSModal({ onClose, onSuccess, onCommit, nomeProjeto: nomeInic
                       )}
                     </div>
                     {isAtual && (
-                      <span style={{ fontSize:10, color:info.cor, fontWeight:700, flexShrink:0 }}>
+                      <span style={{ fontSize:12, color:info.cor, fontWeight:700, flexShrink:0 }}>
                         {pct}%
                       </span>
                     )}
@@ -836,7 +836,7 @@ function ArvorePasta({ no, nivel = 0, onSelect, arquivoAtivo }) {
             cursor: 'pointer', fontSize: FONT.sm, color: C.muted, userSelect: 'none',
           }}
         >
-          <span style={{ fontSize: 10 }}>{aberta ? '▾' : '▸'}</span>
+          <span style={{ fontSize: 12 }}>{aberta ? '▾' : '▸'}</span>
           <span>📁</span>
           <span style={{ fontWeight: 600 }}>{no.nome}</span>
         </div>
@@ -861,7 +861,7 @@ function ArvorePasta({ no, nivel = 0, onSelect, arquivoAtivo }) {
             >
               <span>{iconeArq(a.nome)}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</span>
-              <span style={{ fontSize: 9, color: C.muted, flexShrink: 0 }}>{fmtBytes(a.tamanho)}</span>
+              <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>{fmtBytes(a.tamanho)}</span>
             </div>
           ))}
         </div>
@@ -997,7 +997,7 @@ function CardGridFS({ projeto, onAbrir, onDeletar, onCommit, onUpload, onDownloa
             <svg width={11} height={11} viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
             </svg>
-            <span style={{ fontSize: 10, fontWeight: 600 }}>Commit</span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>Commit</span>
           </DSBtn>
           <DSBtn size="icon" variant="ghost" onClick={() => setExpandido(v => !v)}
             title={expandido ? 'Recolher' : 'Ver detalhes'}>
@@ -1010,7 +1010,7 @@ function CardGridFS({ projeto, onAbrir, onDeletar, onCommit, onUpload, onDownloa
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: SPACE.sm }}>
         <GitHubBadge nome={projeto.nome} uploadedAt={projeto.ultimoUpload} />
         {projeto.metadados?.ultimoCommitSha && (
-          <code style={{ fontSize: 10, color: C.blue, background: `${C.blue}12`,
+          <code style={{ fontSize: 12, color: C.blue, background: `${C.blue}12`,
             padding: '1px 5px', borderRadius: 3, fontFamily: 'monospace' }}>
             {projeto.metadados.ultimoCommitSha.slice(0, 7)}
           </code>
@@ -1022,7 +1022,7 @@ function CardGridFS({ projeto, onAbrir, onDeletar, onCommit, onUpload, onDownloa
         <DSModal open={expandido} onClose={()=>setExpandido(false)} title={`GridFS — ${projeto.nome}`} size="md"><div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
           <div style={{ fontSize: FONT.sm, color: C.muted }}>
             <span style={{ color: C.subtle }}>Armazenamento:</span>{' '}
-            <code style={{ fontSize: 10, background: C.surface2, padding: '1px 5px', borderRadius: 3, color: C.text }}>
+            <code style={{ fontSize: 12, background: C.surface2, padding: '1px 5px', borderRadius: 3, color: C.text }}>
               gridfs:{projeto.nome}
             </code>
           </div>
@@ -1194,7 +1194,7 @@ function GHRepoLink({ repoUrl, branch, nomeCompleto, compact = false, style = {}
       title={`Abrir ${nomeCompleto || ''} no GitHub`}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
-        fontSize: 10, fontWeight: 600, color: C.muted,
+        fontSize: 12, fontWeight: 600, color: C.muted,
         textDecoration: 'none',
         padding: '2px 7px', borderRadius: 4,
         border: `1px solid ${C.border}`,
@@ -1230,7 +1230,7 @@ function GitHubBadge({ nome, uploadedAt }) {
 
   if (!uploadedAt) return null
   if (!status) return (
-    <span style={{ fontSize: 10, color: 'var(--adm-subtle)', display: 'flex', alignItems: 'center', gap: 3 }}>
+    <span style={{ fontSize: 12, color: 'var(--adm-subtle)', display: 'flex', alignItems: 'center', gap: 3 }}>
       <AdminIcon name="spinSm" size={10} /> GitHub
     </span>
   )
@@ -1256,7 +1256,7 @@ function GitHubBadge({ nome, uploadedAt }) {
       >
         <span style={{ fontSize: 11 }}>{info.emoji}</span>
         <span style={{ fontSize: FONT.xs, color: info.cor, fontWeight: 600 }}>{info.label}</span>
-        {sub && <span style={{ fontSize: 10, color: C.muted }}>{sub}</span>}
+        {sub && <span style={{ fontSize: 12, color: C.muted }}>{sub}</span>}
       </button>
 
       {/* Tooltip com detalhes do último commit */}
@@ -1271,7 +1271,7 @@ function GitHubBadge({ nome, uploadedAt }) {
             Último commit no GitHub
           </div>
           <div style={{ fontSize: FONT.xs, color: C.muted, marginBottom: 2 }}>
-            <code style={{ fontSize: 10, background: C.surface2, padding: '1px 4px', borderRadius: 3 }}>
+            <code style={{ fontSize: 12, background: C.surface2, padding: '1px 4px', borderRadius: 3 }}>
               {detalhe.latestCommit.sha}
             </code>
             {' '}{detalhe.latestCommit.author}
@@ -1279,12 +1279,12 @@ function GitHubBadge({ nome, uploadedAt }) {
           <div style={{ fontSize: FONT.xs, color: C.text, marginBottom: 4 }}>
             "{detalhe.latestCommit.message}"
           </div>
-          <div style={{ fontSize: 10, color: C.muted }}>
+          <div style={{ fontSize: 12, color: C.muted }}>
             {new Date(detalhe.latestCommit.date).toLocaleString('pt-BR')}
           </div>
           {detalhe.repoUrl && (
             <a href={detalhe.repoUrl} target="_blank" rel="noreferrer"
-              style={{ fontSize: 10, color: '#3b82f6', display: 'block', marginTop: 4 }}>
+              style={{ fontSize: 12, color: '#3b82f6', display: 'block', marginTop: 4 }}>
               Ver no GitHub ↗
             </a>
           )}
@@ -1523,7 +1523,7 @@ function UploadR2Modal({ nomeProjeto, onClose, onSuccess }) {
                       )}
                     </div>
                     {isAtual && (
-                      <span style={{ fontSize:10, color:info.cor, fontWeight:700, flexShrink:0 }}>
+                      <span style={{ fontSize:12, color:info.cor, fontWeight:700, flexShrink:0 }}>
                         {pct}%
                       </span>
                     )}
@@ -1696,7 +1696,7 @@ function CardR2({ projeto, onCommit, onExplorar, onDeletar }) {
           </div>
         </div>
         {projeto.metadados?.ultimoCommitSha && (
-          <code style={{ fontSize: 10, color: CF_ORANGE, background: `${CF_ORANGE}12`,
+          <code style={{ fontSize: 12, color: CF_ORANGE, background: `${CF_ORANGE}12`,
             padding: '1px 6px', borderRadius: 3, fontFamily: 'monospace', flexShrink: 0 }}>
             {projeto.metadados.ultimoCommitSha.slice(0, 7)}
           </code>
@@ -1863,7 +1863,7 @@ function TestarR2() {
                 </span>
                 <div style={{ minWidth:0 }}>
                   <div style={{ fontSize:FONT.sm, fontWeight:600, color:C.text }}>{c.label}</div>
-                  {c.sub && <div style={{ fontSize:10, color:C.muted, marginTop:1, wordBreak:'break-all' }}>{c.sub}</div>}
+                  {c.sub && <div style={{ fontSize:12, color:C.muted, marginTop:1, wordBreak:'break-all' }}>{c.sub}</div>}
                 </div>
               </div>
             ))}
@@ -1875,13 +1875,13 @@ function TestarR2() {
               borderTop:`1px solid ${C.border}`,
               padding:`${SPACE.md}px ${SPACE.lg}px`,
             }}>
-              <div style={{ fontSize:10, fontWeight:700, color:C.muted, textTransform:'uppercase', marginBottom:SPACE.sm }}>
+              <div style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', marginBottom:SPACE.sm }}>
                 Pastas no bucket
               </div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:SPACE.sm }}>
                 {dados.prefixos.map(p => (
                   <div key={p.nome} style={{
-                    fontSize:10, padding:'3px 8px', borderRadius:RADIUS.sm,
+                    fontSize:12, padding:'3px 8px', borderRadius:RADIUS.sm,
                     background:`${CF_ORANGE}15`, border:`1px solid ${CF_ORANGE}30`,
                     color:C.text, display:'flex', alignItems:'center', gap:4,
                   }}>
@@ -1906,7 +1906,7 @@ function TestarR2() {
               </div>
               {dados.detalhe && (
                 <code style={{
-                  fontSize:10, color:'var(--adm-red)', opacity:0.75,
+                  fontSize:12, color:'var(--adm-red)', opacity:0.75,
                   background:'color-mix(in srgb,var(--adm-red) 6%,transparent)', padding:'4px 6px', borderRadius:4,
                   display:'block', wordBreak:'break-all',
                 }}>
@@ -1914,14 +1914,14 @@ function TestarR2() {
                 </code>
               )}
               {dados.etapa === 'token' && (
-                <div style={{ fontSize:10, color:C.muted, lineHeight:1.5, marginTop:2 }}>
+                <div style={{ fontSize:12, color:C.muted, lineHeight:1.5, marginTop:2 }}>
                   💡 Verifique no <strong>Render → seu serviço → Environment</strong> se{' '}
                   <code style={{ background:C.surface2, padding:'1px 4px', borderRadius:3 }}>CF_API_TOKEN</code>{' '}
                   está salvo e se o serviço foi <strong>redeploy</strong> após salvar as variáveis.
                 </div>
               )}
               {dados.etapa === 'env' && (
-                <div style={{ fontSize:10, color:C.muted, lineHeight:1.5, marginTop:2 }}>
+                <div style={{ fontSize:12, color:C.muted, lineHeight:1.5, marginTop:2 }}>
                   💡 Adicione no <strong>Render → Environment</strong>:{' '}
                   {(dados.faltando || []).map(v => (
                     <code key={v} style={{ background:C.surface2, padding:'1px 4px', borderRadius:3, marginRight:4 }}>{v}</code>
@@ -1937,10 +1937,10 @@ function TestarR2() {
             padding:`${SPACE.sm}px ${SPACE.lg}px`,
             display:'flex', justifyContent:'space-between', alignItems:'center',
           }}>
-            <span style={{ fontSize:10, color:C.muted }}>
+            <span style={{ fontSize:12, color:C.muted }}>
               {dados.checadoEm && `Verificado às ${new Date(dados.checadoEm).toLocaleTimeString('pt-BR')}`}
             </span>
-            <DSBtn variant="ghost" style={{ fontSize:10, padding:'2px 8px' }} onClick={checar} disabled={loading}>
+            <DSBtn variant="ghost" style={{ fontSize:12, padding:'2px 8px' }} onClick={checar} disabled={loading}>
               {loading ? <AdminIcon name="spinSm" size={10} /> : '↻'} Re-testar
             </DSBtn>
           </div>
@@ -2607,7 +2607,7 @@ export default function AdminProjetos() {
           </span>
           {diretorio && (
             <code style={{
-              fontSize: 10, background: C.surface2, padding: '2px 6px',
+              fontSize: 12, background: C.surface2, padding: '2px 6px',
               borderRadius: 4, color: C.muted, fontFamily: 'monospace',
               maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis',
               whiteSpace: 'nowrap', display: 'inline-block',
@@ -2718,7 +2718,7 @@ export default function AdminProjetos() {
                 }}
               >
                 {label}
-                <span style={{ fontSize: 10, opacity: ativo ? 1 : 0.4 }}>
+                <span style={{ fontSize: 12, opacity: ativo ? 1 : 0.4 }}>
                   {ativo ? (ordemAsc ? '↑' : '↓') : '↕'}
                 </span>
               </DSBtn>
@@ -2749,11 +2749,11 @@ export default function AdminProjetos() {
           title="Nenhum projeto encontrado"
           desc={<>
             Crie subdiretórios em{' '}
-            <code style={{ fontSize: 10, background: C.surface2, padding: '1px 5px', borderRadius: 3 }}>
+            <code style={{ fontSize: 12, background: C.surface2, padding: '1px 5px', borderRadius: 3 }}>
               {diretorio || '/projetos'}
             </code>{' '}
             ou configure{' '}
-            <code style={{ fontSize: 10, background: C.surface2, padding: '1px 5px', borderRadius: 3 }}>
+            <code style={{ fontSize: 12, background: C.surface2, padding: '1px 5px', borderRadius: 3 }}>
               PROJETOS_PATH
             </code>{' '}
             no .env.

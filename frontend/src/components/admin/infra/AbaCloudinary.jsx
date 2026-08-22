@@ -91,7 +91,7 @@ export default function AbaCloudinary() {
             { label: 'Transformações',   valor: String(status.transformacoes) },
           ].map(({ label, valor, sub, barra, cor }) => (
             <div key={label} style={{ background: C.surf2, borderRadius: 10, padding: '12px 14px' }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '.05em', margin: '0 0 4px' }}>{label}</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '.05em', margin: '0 0 4px' }}>{label}</p>
               <p style={{ fontSize: 15, fontWeight: 700, color: cor || C.text, margin: '0 0 2px' }}>{valor}</p>
               {sub   && <p style={{ fontSize: 11, color: C.muted, margin: '0 0 6px' }}>{sub}</p>}
               {barra !== undefined && <BarraProgresso pct={barra} color={cor} />}
@@ -141,7 +141,7 @@ export default function AbaCloudinary() {
                     <p style={{ fontSize: 11, color: C.subtle, margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.public_id}>
                       {r.public_id.split('/').pop()}
                     </p>
-                    <p style={{ fontSize: 10, color: C.muted, margin: '0 0 6px' }}>
+                    <p style={{ fontSize: 12, color: C.muted, margin: '0 0 6px' }}>
                       {r.bytes_fmt} {r.largura ? `· ${r.largura}×${r.altura}` : ''}
                     </p>
                     <div style={{ display: 'flex', gap: 4 }}>

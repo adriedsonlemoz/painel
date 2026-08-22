@@ -692,7 +692,7 @@ export default function AdminNoticias() {
           .not-card-head { display:flex; align-items:flex-start; gap:8px; }
           .not-card-title { flex:1; min-width:0; font-size:14px; line-height:1.38; font-weight:700; color:var(--adm-text); }
           .not-card-meta { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-top:8px; font-size:11px; color:var(--adm-muted); }
-          .not-card-meta .adm-badge { font-size:10px; padding:2px 7px; }
+          .not-card-meta .adm-badge { font-size:12px; padding:2px 7px; }
           .not-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }
           .not-card-actions .adm-btn { justify-content:center; min-height:36px; }
 

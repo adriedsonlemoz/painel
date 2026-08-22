@@ -1073,7 +1073,7 @@ export default function ProjetoSyncModal({ projeto, onClose, onSynced, fonte = '
                           <button key={b} onClick={() => setCommitBranch(b)}
                             style={{
                               padding:'3px 8px', borderRadius:4, cursor:'pointer',
-                              fontSize:10, fontFamily:'monospace', fontWeight: commitBranch === b ? 700 : 400,
+                              fontSize:12, fontFamily:'monospace', fontWeight: commitBranch === b ? 700 : 400,
                               background: commitBranch === b ? `#3b82f618` : C.surface2,
                               border:`1px solid ${commitBranch === b ? '#3b82f6' : C.border}`,
                               color: commitBranch === b ? '#3b82f6' : C.muted,

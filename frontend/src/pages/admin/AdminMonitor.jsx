@@ -92,7 +92,7 @@ function GraficoArea({ dados = [], cor = 'var(--adm-success)', label = '', unida
         {/* Labels da grade */}
         <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingBottom: 2 }}>
           {grades.reverse().map(({ label: gl }, i) => (
-            <span key={i} style={{ fontSize: 9, color: C.muted, lineHeight: 1 }}>{gl}</span>
+            <span key={i} style={{ fontSize: 12, color: C.muted, lineHeight: 1 }}>{gl}</span>
           ))}
         </div>
       </div>

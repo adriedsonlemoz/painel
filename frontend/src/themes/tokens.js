@@ -162,20 +162,20 @@ export const RADIUS = {
 // ESCALA TIPOGRÁFICA (px)
 // ─────────────────────────────────────────────────────────────────
 export const FONT = {
-  /** 10px — micro labels, footnotes */
-  xs:    10,
-  /** 11px — labels uppercase, badges, helpers */
-  sm:    11,
-  /** 12px — texto auxiliar, hints, timestamps */
-  base:  12,
-  /** 13px — texto de interface, conteúdo de tabela */
-  md:    13,
-  /** 14px — headings de seção */
-  lg:    14,
-  /** 16px — títulos de card */
-  xl:    16,
-  /** 18px — títulos de página */
-  page:  18,
+  /** 11px — micro labels, footnotes */
+  xs:    11,
+  /** 12px — labels uppercase, badges, helpers */
+  sm:    12,
+  /** 13px — texto auxiliar, hints, timestamps */
+  base:  13,
+  /** 14px — texto de interface, conteúdo de tabela */
+  md:    14,
+  /** 15px — headings de seção */
+  lg:    15,
+  /** 17px — títulos de card */
+  xl:    17,
+  /** 20px — títulos de página */
+  page:  20,
   /** 24px — valores de stat-card */
   stat:  24,
 }
