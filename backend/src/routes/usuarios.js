@@ -5,9 +5,11 @@
 import { Router } from 'express'
 import Usuario from '../models/Usuario.js'
 import PerfilAcesso from '../models/PerfilAcesso.js'
-import { autenticar } from '../middleware/auth.js'
+import { autenticar, exigirStepUpSePolitica } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { auditLog } from '../middleware/auditLog.js'
+import SecuritySession from '../models/SecuritySession.js'
+import { recordSecurityEvent } from '../services/securityService.js'
 
 const router = Router()
 router.use(autenticar)
@@ -58,7 +60,7 @@ router.get('/', podeGerenciar, async (_req, res, next) => {
 })
 
 // ── POST /api/admin/usuarios — cria novo usuário
-router.post('/', podeGerenciar, auditLog('usuarios'), async (req, res, next) => {
+router.post('/', podeGerenciar, exigirStepUpSePolitica, auditLog('usuarios'), async (req, res, next) => {
   try {
     const { nome, email, senha, perfil_id, role } = req.body
     if (!nome?.trim() || !email?.trim() || !senha?.trim()) {
@@ -102,11 +104,13 @@ router.get('/:id', podeGerenciar, async (req, res, next) => {
 })
 
 // ── PUT /api/admin/usuarios/:id — atualiza usuário
-router.put('/:id', podeGerenciar, auditLog('usuarios'), async (req, res, next) => {
+router.put('/:id', podeGerenciar, exigirStepUpSePolitica, auditLog('usuarios'), async (req, res, next) => {
   try {
     const { nome, email, senha, perfil_id, role, ativo } = req.body
     const usuario = await Usuario.findById(req.params.id)
     if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' })
+    const ativoAntes = usuario.ativo
+    const senhaAlterada = Boolean(senha)
 
     // Não permite desativar o próprio usuário
     if (req.usuario._id.toString() === req.params.id && ativo === false) {
@@ -153,6 +157,11 @@ router.put('/:id', podeGerenciar, auditLog('usuarios'), async (req, res, next) =
     }
 
     await usuario.save()
+    if (senhaAlterada || ativoAntes !== usuario.ativo) {
+      await SecuritySession.updateMany({ usuario_id:usuario._id, revogada_em:null }, { revogada_em:new Date(), revogada_por:req.usuario._id, motivo_revogacao:senhaAlterada?'senha_alterada_por_admin':(usuario.ativo?'conta_reativada':'conta_desativada') }).catch(()=>{})
+    }
+    if (senhaAlterada) await recordSecurityEvent({ tipo:'senha_alterada_por_admin', severidade:'alta', mensagem:'Senha de uma conta foi alterada por um administrador.', usuario_id:usuario._id, usuario_email:usuario.email, ip:req.ip, request_id:req.requestId, allow_auto_block:false }).catch(()=>{})
+    if (ativoAntes !== usuario.ativo) await recordSecurityEvent({ tipo:usuario.ativo?'conta_reativada':'conta_desativada', severidade:usuario.ativo?'media':'alta', mensagem:usuario.ativo?'Conta reativada por administrador.':'Conta desativada por administrador.', usuario_id:usuario._id, usuario_email:usuario.email, ip:req.ip, request_id:req.requestId, allow_auto_block:false }).catch(()=>{})
     const pop = await usuario.populate('perfil_id', 'nome cor permissoes')
     res.json({ usuario: pop })
   } catch (err) { next(err) }
@@ -166,13 +175,14 @@ router.post('/:id/desbloquear', podeGerenciar, auditLog('usuarios'), async (req,
     usuario.tentativas_login = 0
     usuario.bloqueado_ate = null
     await usuario.save()
+    await recordSecurityEvent({ tipo:'conta_desbloqueada', severidade:'media', mensagem:'Bloqueio de login removido por administrador.', usuario_id:usuario._id, usuario_email:usuario.email, ip:req.ip, request_id:req.requestId, allow_auto_block:false }).catch(()=>{})
     const pop = await usuario.populate('perfil_id', 'nome cor permissoes')
     res.json({ usuario: pop, mensagem: 'Usuário desbloqueado.' })
   } catch (err) { next(err) }
 })
 
 // ── POST /api/admin/usuarios/:id/revogar-sessoes — encerra tokens atuais
-router.post('/:id/revogar-sessoes', podeGerenciar, auditLog('usuarios'), async (req, res, next) => {
+router.post('/:id/revogar-sessoes', podeGerenciar, exigirStepUpSePolitica, auditLog('usuarios'), async (req, res, next) => {
   try {
     const usuario = await Usuario.findById(req.params.id)
     if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' })
@@ -181,12 +191,14 @@ router.post('/:id/revogar-sessoes', podeGerenciar, auditLog('usuarios'), async (
     }
     usuario.sessao_versao = (usuario.sessao_versao || 0) + 1
     await usuario.save()
+    await SecuritySession.updateMany({ usuario_id:usuario._id, revogada_em:null }, { revogada_em:new Date(), revogada_por:req.usuario._id, motivo_revogacao:'revogada_por_admin' }).catch(()=>{})
+    await recordSecurityEvent({ tipo:'sessoes_revogadas_por_admin', severidade:'alta', mensagem:'Todas as sessões de uma conta foram revogadas por administrador.', usuario_id:usuario._id, usuario_email:usuario.email, ip:req.ip, request_id:req.requestId, allow_auto_block:false }).catch(()=>{})
     res.json({ mensagem: 'Sessões revogadas. O usuário precisará entrar novamente.' })
   } catch (err) { next(err) }
 })
 
 // ── DELETE /api/admin/usuarios/:id — exclui usuário
-router.delete('/:id', podeGerenciar, auditLog('usuarios'), async (req, res, next) => {
+router.delete('/:id', podeGerenciar, exigirStepUpSePolitica, auditLog('usuarios'), async (req, res, next) => {
   try {
     if (req.usuario._id.toString() === req.params.id) {
       return res.status(400).json({ erro: 'Você não pode excluir sua própria conta.' })
@@ -212,7 +224,7 @@ router.get('/perfis/todos', podeGerenciar, async (_req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/perfis/novo', podeGerenciar, auditLog('perfis_acesso'), async (req, res, next) => {
+router.post('/perfis/novo', podeGerenciar, exigirStepUpSePolitica, auditLog('perfis_acesso'), async (req, res, next) => {
   try {
     const { nome, descricao, permissoes, cor } = req.body
     if (!nome?.trim()) return res.status(400).json({ erro: 'Nome do perfil é obrigatório.' })
@@ -231,7 +243,7 @@ router.post('/perfis/novo', podeGerenciar, auditLog('perfis_acesso'), async (req
   } catch (err) { next(err) }
 })
 
-router.put('/perfis/:id', podeGerenciar, auditLog('perfis_acesso'), async (req, res, next) => {
+router.put('/perfis/:id', podeGerenciar, exigirStepUpSePolitica, auditLog('perfis_acesso'), async (req, res, next) => {
   try {
     const perfil = await PerfilAcesso.findById(req.params.id)
     if (!perfil) return res.status(404).json({ erro: 'Perfil não encontrado.' })
@@ -250,7 +262,7 @@ router.put('/perfis/:id', podeGerenciar, auditLog('perfis_acesso'), async (req, 
   } catch (err) { next(err) }
 })
 
-router.delete('/perfis/:id', podeGerenciar, auditLog('perfis_acesso'), async (req, res, next) => {
+router.delete('/perfis/:id', podeGerenciar, exigirStepUpSePolitica, auditLog('perfis_acesso'), async (req, res, next) => {
   try {
     const perfil = await PerfilAcesso.findById(req.params.id)
     if (!perfil) return res.status(404).json({ erro: 'Perfil não encontrado.' })

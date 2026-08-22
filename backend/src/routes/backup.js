@@ -20,9 +20,10 @@ import fs                   from 'fs/promises'
 import { createReadStream } from 'fs'
 import path                 from 'path'
 import multer               from 'multer'
-import { autenticar }       from '../middleware/auth.js'
+import { autenticar, exigirStepUpSePolitica } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { logger }           from '../utils/logger.js'
+import { recordSecurityEvent, detectSensitiveActionBurst } from '../services/securityService.js'
 
 const router = Router()
 router.use(autenticar)
@@ -157,7 +158,7 @@ router.get('/~stats', async (_req, res, next) => {
 })
 
 // ── POST /import — importa backup via arquivo JSON ─────────────
-router.post('/import', uploadBackup.single('arquivo'), async (req, res, next) => {
+router.post('/import', exigirStepUpSePolitica, uploadBackup.single('arquivo'), async (req, res, next) => {
   try {
     if (!req.file) {
       return res.status(400).json({ erro: 'Nenhum arquivo enviado. Use o campo "arquivo".' })
@@ -241,7 +242,7 @@ router.get('/:id', async (req, res, next) => {
 })
 
 // ── GET /:id/download — baixa o arquivo de backup ─────────────
-router.get('/:id/download', async (req, res, next) => {
+router.get('/:id/download', exigirStepUpSePolitica, async (req, res, next) => {
   try {
     const { id } = req.params
     if (!/^backup_\d+$/.test(id)) return res.status(400).json({ erro: 'ID inválido' })
@@ -253,6 +254,8 @@ router.get('/:id/download', async (req, res, next) => {
       return res.status(404).json({ erro: 'Backup não encontrado' })
     }
 
+    await recordSecurityEvent({ tipo:'backup_download', severidade:'media', mensagem:'Backup completo baixado por usuário administrativo.', ip:req.ip, usuario_id:req.usuario?._id, usuario_email:req.usuario?.email, request_id:req.requestId, allow_auto_block:false, dados:{backupId:id} }).catch(()=>{})
+    await detectSensitiveActionBurst({tipo:'backup_download',usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,ip:req.ip,threshold:3,windowMinutes:30,alertType:'downloads_backup_em_massa',message:'Vários backups completos foram baixados em um curto intervalo.'}).catch(()=>{})
     res.setHeader('Content-Type', 'application/json')
     res.setHeader('Content-Disposition', `attachment; filename="${id}.json"`)
     createReadStream(dataFile).pipe(res)
@@ -260,7 +263,7 @@ router.get('/:id/download', async (req, res, next) => {
 })
 
 // ── POST /:id/restore — restaura um backup ────────────────────
-router.post('/:id/restore', async (req, res, next) => {
+router.post('/:id/restore', exigirStepUpSePolitica, async (req, res, next) => {
   try {
     const { id } = req.params
     if (!/^backup_\d+$/.test(id)) return res.status(400).json({ erro: 'ID inválido' })
@@ -301,6 +304,7 @@ router.post('/:id/restore', async (req, res, next) => {
     }
 
     logger.info({ id, resultados }, 'Restore concluído')
+    await recordSecurityEvent({ tipo:'backup_restaurado', severidade:'alta', mensagem:'Um backup completo foi restaurado no banco de dados.', ip:req.ip, usuario_id:req.usuario?._id, usuario_email:req.usuario?.email, request_id:req.requestId, allow_auto_block:false, dados:{backupId:id,colecoes:collections.length} }).catch(()=>{})
     res.json({
       mensagem: 'Restore concluído com sucesso.',
       resultados,
@@ -310,7 +314,7 @@ router.post('/:id/restore', async (req, res, next) => {
 })
 
 // ── DELETE /:id — exclui um backup ────────────────────────────
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', exigirStepUpSePolitica, async (req, res, next) => {
   try {
     const { id } = req.params
     if (!/^backup_\d+$/.test(id)) return res.status(400).json({ erro: 'ID inválido' })

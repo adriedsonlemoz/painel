@@ -4,12 +4,13 @@ import fs from 'node:fs'
 import mongoose from 'mongoose'
 import { v2 as cloudinary } from 'cloudinary'
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3'
-import { autenticar } from '../middleware/auth.js'
+import { autenticar, exigirStepUpSePolitica } from '../middleware/auth.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 import { getCredential, setCredential, deleteCredential } from '../utils/credentialStore.js'
 import { readBootstrap, writeBootstrap, deleteBootstrapKeys, vaultPaths, getRuntimeBootstrapSecrets } from '../utils/localVault.js'
 import { conectarMongo, configurarCloudinary } from '../config/index.js'
 import AuditLog from '../models/AuditLog.js'
+import { recordSecurityEvent, detectSensitiveActionBurst } from '../services/securityService.js'
 import { diagnosticarIA, testarProvedorIA, listarModelosIA, resetAiRuntime } from '../utils/aiClient.js'
 import { getAiUsageSummary } from '../services/aiTelemetry.js'
 
@@ -132,7 +133,7 @@ function systemSecretState(name){
   const critical=['JWT_SECRET','CREDENTIALS_MASTER_KEY','SETUP_TOKEN','ADMIN_SENHA'].includes(name)
   return {name,configured:Boolean(value),masked:value?MASK:'',source,revealable:Boolean(value),critical}
 }
-async function audit(req, acao, detalhes={}) { try { await AuditLog.create({ usuario_id:req.usuario?.id, acao, entidade:'integracoes', detalhes, ip:req.ip }) } catch {} }
+async function audit(req, acao, detalhes={}) { try { if(!req.usuario)return; await AuditLog.create({ admin_id:req.usuario._id, admin_email:req.usuario.email, acao, recurso:'integracoes', payload:detalhes, ip:req.ip, request_id:req.requestId||null }) } catch {} }
 
 router.get('/status', async (_req,res,next)=>{ try {
   const b=readBootstrap(); const integrations={}
@@ -441,7 +442,7 @@ router.post('/:id/models', async(req,res)=>{ const {id}=req.params; try{
   res.json({ok:true,models:models.slice(0,300),count:models.length})
 }catch(e){res.status(400).json({ok:false,erro:e.message})} })
 
-router.put('/:id', async(req,res,next)=>{ try {
+router.put('/:id', exigirStepUpSePolitica, async(req,res,next)=>{ try {
   const {id}=req.params
   if(!defs[id])return res.status(404).json({erro:'Integração inválida.'})
   const {secret,metadata={},secrets={}}=req.body
@@ -490,9 +491,10 @@ router.put('/:id', async(req,res,next)=>{ try {
   if(id==='cloudinary') await configurarCloudinary()
   const identity=await refreshStoredIdentity(id)
   await audit(req,`${id}.atualizar`,{campos:Object.keys(metadata),identity:identity?.label||null})
+  await recordSecurityEvent({tipo:'credencial_alterada',severidade:'media',mensagem:`Credencial da integração ${id} foi alterada.`,ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{integracao:id}}).catch(()=>{})
   res.json({ok:true,status:integrationSafe(id,await getCredential(id,defs[id])),identity})
 } catch(e){next(e)} })
-router.delete('/:id', async(req,res,next)=>{ try { await deleteCredential(req.params.id); await audit(req,`${req.params.id}.remover`); res.json({ok:true}) } catch(e){next(e)} })
+router.delete('/:id', exigirStepUpSePolitica, async(req,res,next)=>{ try { await deleteCredential(req.params.id); await audit(req,`${req.params.id}.remover`); await recordSecurityEvent({tipo:'credencial_removida',severidade:'alta',mensagem:`Credencial da integração ${req.params.id} foi removida.`,ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{integracao:req.params.id}}).catch(()=>{}); res.json({ok:true}) } catch(e){next(e)} })
 router.post('/:id/test', async(req,res)=>{ const {id}=req.params; try {
   const stored=await getCredential(id,defs[id])
   const typed=String(req.body?.secret||'').trim()
@@ -684,15 +686,17 @@ async function buildIntegrationExport({includeSecrets=false}={}) {
 
 
 // Revelação sob demanda: nunca faz parte do /status e nunca é registrada em logs.
-router.post('/mongodb/reveal', async(req,res)=>{ try {
+router.post('/mongodb/reveal', exigirStepUpSePolitica, async(req,res)=>{ try {
   const b=readBootstrap(); const value=b.MONGO_URI||process.env.MONGO_URI||''
   if(!value)return res.status(404).json({erro:'MongoDB não configurado.'})
   await audit(req,'mongodb.revelar',{campo:'MONGO_URI',origem:b.MONGO_URI?'local-vault':'environment'})
+  await recordSecurityEvent({tipo:'credencial_revelada',severidade:'media',mensagem:'Uma credencial sensível foi revelada no painel.',ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{campo:'MONGO_URI'}}).catch(()=>{})
+  await detectSensitiveActionBurst({tipo:'credencial_revelada',usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,ip:req.ip,threshold:5,windowMinutes:10,alertType:'revelacao_massiva_credenciais',message:'Muitas credenciais foram reveladas em um curto intervalo.'}).catch(()=>{})
   res.set('Cache-Control','no-store, private'); res.set('Pragma','no-cache')
   res.json({ok:true,value,label:'MONGO_URI',source:b.MONGO_URI?'local-vault':'environment'})
 } catch(e){res.status(400).json({erro:'Não foi possível recuperar a URI do MongoDB.'})} })
 
-router.post('/system-secret/reveal', async(req,res)=>{ try{
+router.post('/system-secret/reveal', exigirStepUpSePolitica, async(req,res)=>{ try{
   const name=String(req.body?.name||'').trim().toUpperCase()
   if(!systemSecretDefs.includes(name))return res.status(404).json({erro:'Segredo de sistema inválido.'})
   const state=systemSecretState(name)
@@ -702,10 +706,12 @@ router.post('/system-secret/reveal', async(req,res)=>{ try{
   const value=runtime?.[name]||bootstrap?.[name]||process.env[name]||''
   if(!value)return res.status(404).json({erro:'Segredo não configurado neste ambiente.'})
   await audit(req,'system-secret.revelar',{campo:name,origem:state.source})
+  await recordSecurityEvent({tipo:'credencial_revelada',severidade:'media',mensagem:'Um segredo de sistema foi revelado no painel.',ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{campo:name}}).catch(()=>{})
+  await detectSensitiveActionBurst({tipo:'credencial_revelada',usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,ip:req.ip,threshold:5,windowMinutes:10,alertType:'revelacao_massiva_credenciais',message:'Muitos segredos foram revelados em um curto intervalo.'}).catch(()=>{})
   res.set('Cache-Control','no-store, private');res.set('Pragma','no-cache');res.json({ok:true,name,value,source:state.source})
  }catch{res.status(400).json({erro:'Não foi possível recuperar o segredo solicitado.'})} })
 
-router.post('/:id/reveal', async(req,res,next)=>{ try {
+router.post('/:id/reveal', exigirStepUpSePolitica, async(req,res,next)=>{ try {
   const {id}=req.params
   if(!defs[id])return res.status(404).json({erro:'Integração inválida.'})
   const field=String(req.body?.field||'secret')
@@ -726,6 +732,8 @@ router.post('/:id/reveal', async(req,res,next)=>{ try {
   if(!value)return res.status(404).json({erro:'Este valor não está disponível para recuperação nesta instalação.'})
   const source=storedValue?(c.source||'vault'):bootstrapStoredValue?'local-vault':'environment'
   await audit(req,`${id}.revelar`,{campo:state.label,origem:source})
+  await recordSecurityEvent({tipo:'credencial_revelada',severidade:'media',mensagem:`Credencial da integração ${id} foi revelada.`,ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{integracao:id,campo:state.label}}).catch(()=>{})
+  await detectSensitiveActionBurst({tipo:'credencial_revelada',usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,ip:req.ip,threshold:5,windowMinutes:10,alertType:'revelacao_massiva_credenciais',message:'Muitas credenciais foram reveladas em um curto intervalo.'}).catch(()=>{})
   res.set('Cache-Control','no-store, private')
   res.set('Pragma','no-cache')
   res.json({ok:true,value,label:state.label,source,updatedAt:source==='vault'?(c.updatedAt||null):null})
@@ -741,17 +749,18 @@ router.post('/identities/refresh', async(req,res)=>{ try {
   res.json({ok:true,identities})
 } catch(e){res.status(400).json({ok:false,erro:e.message})} })
 
-router.post('/export', async(req,res,next)=>{ try {
+router.post('/export', exigirStepUpSePolitica, async(req,res,next)=>{ try {
   const includeSecrets=Boolean(req.body?.includeSecrets)
   const format=String(req.body?.format||'env').toLowerCase()
   const rows=await buildIntegrationExport({includeSecrets})
   await audit(req,'integracoes.exportar',{includeSecrets,format,count:rows.length})
+  await recordSecurityEvent({tipo:includeSecrets?'exportacao_credenciais_com_segredos':'exportacao_configuracao',severidade:includeSecrets?'alta':'baixa',mensagem:includeSecrets?'Configurações foram exportadas incluindo segredos recuperáveis.':'Configurações foram exportadas com valores mascarados.',ip:req.ip,usuario_id:req.usuario?._id,usuario_email:req.usuario?.email,request_id:req.requestId,allow_auto_block:false,dados:{formato:format,itens:rows.length,segredos:includeSecrets}}).catch(()=>{})
   res.setHeader('Cache-Control','no-store')
   res.setHeader('Pragma','no-cache')
   if(format==='json'){
     const identityStatus={}
     for(const id of Object.keys(defs)){const c=await getCredential(id,defs[id]);if(c.metadata?.identity)identityStatus[id]=c.metadata.identity}
-    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.155',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
+    const body={product:'AL Sistemas',backupVersion:2,sourceVersion:'1.0.156',migrationCompatible:true,portableSecrets:includeSecrets,exportedAt:new Date().toISOString(),encoding:'UTF-8',includesSecrets:includeSecrets,accounts:identityStatus,variables:Object.fromEntries(rows.map(r=>[r.name,r.value]))}
     res.attachment(`al-sistemas-integracoes-${new Date().toISOString().slice(0,10)}.json`)
     return res.type('application/json').send(JSON.stringify(body,null,2))
   }

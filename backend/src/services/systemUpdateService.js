@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import unzipper from 'unzipper'
 import mongoose from 'mongoose'
 import { IS_VERCEL, IS_RENDER, IS_TERMUX, IS_MANAGED_PLATFORM } from '../utils/runtimeEnvironment.js'
+import { scanSecrets } from './securityScanner.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT_DIR = path.resolve(__dirname, '../../..')
@@ -300,6 +301,8 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
       if(!backendPkg||!frontendPkg||backendPkg.name!=='al-sistemas-backend'||frontendPkg.name!=='al-sistemas'||backendPkg.version!==updateManifest.version||frontendPkg.version!==updateManifest.version) throw new Error('O incremental precisa incluir package.json sincronizados do backend e frontend.')
       const removedFiles=validateRemovedPaths(updateManifest.removed||[])
       await verifyIncrementalManifestFiles(packageRoot,updateManifest)
+      const securityScan=await scanSecrets(packageRoot)
+      if(securityScan.blocked) throw new Error(`Publicação bloqueada: ${securityScan.critical} possível(is) segredo(s) crítico(s) detectado(s) no pacote. Revise a Central de Segurança antes de publicar.`)
       const target=persist?path.join(STAGING_DIR,id):packageRoot
       if(persist) await fs.cp(packageRoot,target,{recursive:true,force:true})
       const deps=await dependencyPlan(target,{checkInstalled:persist})
@@ -311,7 +314,7 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
       const nextFrontendPkg=await fileFingerprint(path.join(target,'frontend/package.json'))
       const meta={
         id,version:updateManifest.version,baseVersion:updateManifest.baseVersion,packageType:'incremental',filename:originalName,createdAt:new Date().toISOString(),
-        changelog,dependencies:deps,...(await detectMigrations(target)),removedFiles,
+        changelog,dependencies:deps,securityScan:{...securityScan,findings:securityScan.findings.slice(0,30)},...(await detectMigrations(target)),removedFiles,
         frontendCacheResetRequired:Boolean(deps.frontend?.installRequired||(nextViteConfig&&currentViteConfig!==nextViteConfig)||(nextFrontendPkg&&currentFrontendPkg!==nextFrontendPkg)),
         sha256:await hashFile(zipPath),integrity,status:'ready',ephemeral:!persist,
       }
@@ -341,6 +344,9 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
     }
     if (compareVersions(backendPkg.version, current.version) < 0) throw new Error(`A versão ${backendPkg.version} é anterior à instalada (${current.version}). Downgrade continua bloqueado.`)
 
+    const securityScan = await scanSecrets(packageRoot)
+    if (securityScan.blocked) throw new Error(`Publicação bloqueada: ${securityScan.critical} possível(is) segredo(s) crítico(s) detectado(s) no pacote. Revise a Central de Segurança antes de publicar.`)
+
     const target = persist ? path.join(STAGING_DIR, id) : packageRoot
     if (persist) await fs.cp(packageRoot, target, { recursive: true, force: true })
     const changelog = await readChangelog(target, backendPkg.version, manifest)
@@ -352,7 +358,7 @@ export async function validateAndStage(zipPath, originalName, { persist = !IS_VE
     const integrity=await buildStageManifest(target)
     const meta = {
       id, version: backendPkg.version, baseVersion:null, packageType:'full', filename: originalName, createdAt: new Date().toISOString(),
-      changelog, dependencies: deps, ...(await detectMigrations(target)), removedFiles:[],
+      changelog, dependencies: deps, securityScan:{...securityScan,findings:securityScan.findings.slice(0,30)}, ...(await detectMigrations(target)), removedFiles:[],
       frontendCacheResetRequired: Boolean(deps.frontend?.installRequired || currentViteConfig !== nextViteConfig || currentFrontendPkg !== nextFrontendPkg),
       sha256: await hashFile(zipPath), integrity, status: 'ready', ephemeral: !persist,
       sameVersion: compareVersions(backendPkg.version,current.version)===0,

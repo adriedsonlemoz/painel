@@ -1,3 +1,32 @@
+# 1.0.156 — Central de Segurança completa
+
+- Reconstrói Segurança em cinco áreas: **Visão geral, Incidentes, Sessões, Auditoria e Políticas**.
+- Substitui o score simples por um score explicável de 0–100 dividido em Identidade, Credenciais, Aplicação, Monitoramento e Dados.
+- Adiciona **2FA TOTP** compatível com autenticadores comuns, QR/chave manual e códigos de recuperação de uso único.
+- Adiciona sessões individuais com `jti`, identificação de dispositivo/IP, sessão atual, expiração e revogação seletiva.
+- Registra eventos de login, bloqueios, MFA, senha, novos dispositivos/IPs, revogação de sessão, backup e ações sensíveis.
+- Correlaciona tentativas de login em várias contas pelo mesmo IP e ataques distribuídos contra uma mesma conta.
+- Move os contadores de detecção para Redis quando disponível, mantendo fallback local seguro.
+- Agrupa eventos repetidos por fingerprint e adiciona fluxo **Novo → Investigando → Resolvido → Ignorado**, responsável, observação e ação tomada.
+- Adiciona relatório forense em JSON com evento, janela temporal, auditoria e sessões relacionadas.
+- Adiciona modos **Observar, Alertar e Proteger**; bloqueio automático de IP ocorre somente para padrões explicitamente classificados como bloqueáveis.
+- Adiciona alertas externos por **Webhook, Telegram e SMTP/e-mail**, com cooldown e severidade mínima; credenciais ficam no cofre criptografado.
+- Adiciona varredura de segredos ao módulo e ao pipeline de atualização; segredo crítico bloqueia a publicação antes de R2/GitHub.
+- Adiciona auditoria de dependências no painel e workflow GitHub Actions `Security Scan` para push, PR e execução manual.
+- Protege operações autenticadas por cookie com CSRF ligado ao JWT, mantendo compatibilidade com sessões anteriores.
+- Protege Swagger em produção com autenticação e `seguranca.gerenciar`.
+- Adiciona **step-up authentication** de 10 minutos para ações críticas: credenciais, backups, usuários/perfis, sessões e variáveis de produção.
+- Detecta rajadas de revelação de credenciais e downloads de backup, e registra exportações que incluem segredos.
+- Retenção de eventos e auditoria passa a ser configurável e suportada por TTL no MongoDB.
+- Corrige o AuditLog para aceitar ações administrativas específicas além de criar/editar/excluir e corrige o helper legado de Integrações.
+- Login e serviços frontend passam a suportar desafio 2FA, token CSRF e repetição segura de ações após confirmação step-up.
+- A confirmação step-up usa modal próprio do AL Sistemas, sem `window.prompt`/`window.confirm`, com campos de senha e código 2FA adequados ao Android.
+- Contas obrigadas a usar MFA conseguem acessar a área de Segurança em modo de autoatendimento mesmo sem permissão administrativa do módulo, evitando bloqueio circular.
+- Códigos de recuperação aceitam variações de maiúsculas/minúsculas, espaço ou hífen sem reduzir a entropia do código armazenado.
+- Webhooks de alerta exigem HTTPS e rejeitam destinos locais/privados literais; alteração da própria senha também entra no step-up quando a política estiver ativa.
+- A política de Swagger permite mantê-lo autenticado em produção ou desativá-lo completamente.
+- Nenhuma imagem, ícone ou splash foi alterado nesta versão.
+
 # 1.0.155 — Infraestrutura unificada e legibilidade mobile
 
 - Une **Ambientes** e **Infraestrutura** em uma única Central de Infraestrutura com Visão geral, Servidor, Ambiente e Manutenção.

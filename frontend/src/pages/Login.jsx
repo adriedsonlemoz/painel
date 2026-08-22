@@ -72,7 +72,7 @@ const VITE_VARS = [
 
 // ─────────────────────────────────────────────────────────────
 export default function Login() {
-  const { user, login, ensureSession } = useAuth()
+  const { user, login, login2fa, ensureSession } = useAuth()
   const { siteName, panelSubtitle, productName } = useBranding()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -91,6 +91,8 @@ export default function Login() {
   const [mostrarSenha, setMostrar] = useState(false)
   const [loading, setLoading]      = useState(false)
   const [manterConectado, setManterConectado] = useState(true)
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState('')
+  const [codigo2fa, setCodigo2fa] = useState('')
 
   const [logEntries, setLogEntries]   = useState([])
   const [diagRunning, setDiagRunning] = useState(false)
@@ -451,12 +453,29 @@ export default function Login() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (twoFactorChallenge) {
+      if (!codigo2fa.trim()) { toast.error('Informe o código do autenticador'); return }
+      try {
+        setLoading(true)
+        await login2fa(twoFactorChallenge, codigo2fa.trim(), manterConectado)
+        navigate('/admin')
+      } catch (err) {
+        toast.error(err.message || 'Código 2FA inválido')
+      } finally { setLoading(false) }
+      return
+    }
     if (!email || !senha) { toast.error('Preencha email e senha'); return }
     try {
       setLoading(true)
       const ready = await startBackendWake({ maxWaitMs: 90_000 })
       if (!ready) throw new Error('O servidor ainda não respondeu. Tente novamente em alguns instantes.')
-      await login(email, senha, manterConectado)
+      const result = await login(email, senha, manterConectado)
+      if (result?.requires2fa) {
+        setTwoFactorChallenge(result.challengeId)
+        setCodigo2fa('')
+        toast.success('Senha confirmada. Informe o código 2FA.')
+        return
+      }
       navigate('/admin')
     } catch (err) {
       toast.error(err.message || 'Falha ao entrar')
@@ -504,6 +523,24 @@ export default function Login() {
               />
             </div>
 
+            {twoFactorChallenge ? (
+              <div className="auth-field">
+                <label htmlFor="codigo2fa">Código de autenticação</label>
+                <input
+                  id="codigo2fa"
+                  inputMode="text"
+                  autoCapitalize="characters"
+                  autoComplete="one-time-code"
+                  className="auth-input"
+                  placeholder="000000 ou código de recuperação"
+                  value={codigo2fa}
+                  onChange={e => setCodigo2fa(e.target.value)}
+                  readOnly={loading}
+                  autoFocus
+                />
+                <small style={{display:'block',marginTop:7,color:'var(--adm-muted)',lineHeight:1.45}}>Use o código de 6 dígitos do autenticador. Um código de recuperação também é aceito.</small>
+              </div>
+            ) : (<>
             <div className="auth-field">
               <label htmlFor="senha">Senha</label>
               <div className="auth-input-wrap">
@@ -528,6 +565,8 @@ export default function Login() {
               </div>
             </div>
 
+            </>) }
+
             <label className="auth-remember">
               <input
                 type="checkbox"
@@ -539,8 +578,11 @@ export default function Login() {
             </label>
 
             <button type="submit" disabled={loading} className="auth-submit">
-              {loading ? <><span className="auth-spinner" /> Entrando...</> : <><LogIn size={16} /> Entrar</>}
+              {loading
+                ? <><span className="auth-spinner" /> {twoFactorChallenge ? 'Verificando...' : 'Entrando...'}</>
+                : <><LogIn size={16} /> {twoFactorChallenge ? 'Confirmar código' : 'Entrar'}</>}
             </button>
+            {twoFactorChallenge && <button type="button" className="auth-secondary" onClick={()=>{setTwoFactorChallenge('');setCodigo2fa('')}} disabled={loading}>Voltar e usar outra conta</button>}
 
             <div className="auth-forgot">
               <Link to="/esqueci-senha">Esqueceu sua senha?</Link>

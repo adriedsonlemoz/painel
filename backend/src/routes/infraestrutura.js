@@ -30,7 +30,7 @@ import { getCredential, setCredential, deleteCredential } from '../utils/credent
 import { getCloudflareConfig } from '../utils/cloudflareConfig.js'
 import { v2 as cloudinary } from 'cloudinary'
 import { configurarCloudinary as configurarCloudinaryCentral } from '../config/index.js'
-import { autenticar }        from '../middleware/auth.js'
+import { autenticar, exigirStepUpSePolitica } from '../middleware/auth.js'
 import { runtimeLabel, IS_RENDER, IS_VERCEL, IS_TERMUX, IS_MANAGED_PLATFORM } from '../utils/runtimeEnvironment.js'
 import { verificarPermissao } from '../middleware/verificarPermissao.js'
 
@@ -1581,7 +1581,7 @@ router.get('/plataformas/render/servicos/:serviceId/env', async (req,res,next)=>
   } catch(err){next(err)}
 })
 
-router.post('/plataformas/render/servicos/:serviceId/env/:key/reveal', async(req,res,next)=>{
+router.post('/plataformas/render/servicos/:serviceId/env/:key/reveal', exigirStepUpSePolitica, async(req,res,next)=>{
   try{
     const cred=await getCredential('render','RENDER_API_KEY'); if(!cred.value)return res.status(409).json({erro:'Render não conectada.'})
     const key=String(req.params.key||'').trim()
@@ -1594,7 +1594,7 @@ router.post('/plataformas/render/servicos/:serviceId/env/:key/reveal', async(req
   }catch(err){next(err)}
 })
 
-router.put('/plataformas/render/servicos/:serviceId/env/:key', async (req,res,next)=>{
+router.put('/plataformas/render/servicos/:serviceId/env/:key', exigirStepUpSePolitica, async (req,res,next)=>{
   try {
     const cred=await getCredential('render','RENDER_API_KEY')
     if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
@@ -1620,7 +1620,7 @@ router.put('/plataformas/render/servicos/:serviceId/env/:key', async (req,res,ne
   } catch(err){next(err)}
 })
 
-router.delete('/plataformas/render/servicos/:serviceId/env/:key', async (req,res,next)=>{
+router.delete('/plataformas/render/servicos/:serviceId/env/:key', exigirStepUpSePolitica, async (req,res,next)=>{
   try {
     const cred=await getCredential('render','RENDER_API_KEY')
     if(!cred.value)return res.status(409).json({erro:'Render não conectada em Integrações e APIs.'})
@@ -1719,7 +1719,7 @@ router.get('/plataformas/vercel/projetos/:projectId/env', async (req,res,next)=>
   } catch(err){next(err)}
 })
 
-router.post('/plataformas/vercel/projetos/:projectId/env/:key/reveal', async(req,res,next)=>{
+router.post('/plataformas/vercel/projetos/:projectId/env/:key/reveal', exigirStepUpSePolitica, async(req,res,next)=>{
   try{
     const cred=await getCredential('vercel','VERCEL_TOKEN'); if(!cred.value)return res.status(409).json({erro:'Vercel não conectada.'})
     const projectId=String(req.params.projectId||'').trim(), key=String(req.params.key||'').trim(), envId=String(req.body?.envId||'').trim(), teamId=cred.metadata?.teamId||''
@@ -1735,7 +1735,7 @@ router.post('/plataformas/vercel/projetos/:projectId/env/:key/reveal', async(req
   }catch(err){next(err)}
 })
 
-router.put('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res,next)=>{
+router.put('/plataformas/vercel/projetos/:projectId/env/:key', exigirStepUpSePolitica, async (req,res,next)=>{
   try {
     const cred=await getCredential('vercel','VERCEL_TOKEN')
     if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
@@ -1773,7 +1773,7 @@ router.put('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res,ne
   } catch(err){next(err)}
 })
 
-router.delete('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res,next)=>{
+router.delete('/plataformas/vercel/projetos/:projectId/env/:key', exigirStepUpSePolitica, async (req,res,next)=>{
   try {
     const cred=await getCredential('vercel','VERCEL_TOKEN')
     if(!cred.value)return res.status(409).json({erro:'Vercel não conectada em Integrações e APIs.'})
@@ -1787,7 +1787,7 @@ router.delete('/plataformas/vercel/projetos/:projectId/env/:key', async (req,res
   } catch(err){next(err)}
 })
 
-router.put('/plataformas/producao/env/:provider/:key', async (req,res,next)=>{
+router.put('/plataformas/producao/env/:provider/:key', exigirStepUpSePolitica, async (req,res,next)=>{
   try {
     const provider=String(req.params.provider||'').toLowerCase()
     const key=String(req.params.key||'').trim()

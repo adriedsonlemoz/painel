@@ -926,6 +926,9 @@ select.adm-input { max-width: 100%; }
 .auth-submit { width:100%; min-height:44px; border:1px solid var(--adm-accent); background:var(--adm-accent); color:#fff; border-radius:10px; font:750 14px/1 var(--adm-font); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
 .auth-submit:hover { background:var(--adm-accent-d); border-color:var(--adm-accent-d); }
 .auth-submit:disabled { opacity:.65; cursor:wait; }
+.auth-secondary { width:100%; min-height:42px; margin-top:8px; border:1px solid var(--adm-border); background:var(--adm-surface2); color:var(--adm-text); border-radius:10px; font:750 13px/1 var(--adm-font); cursor:pointer; }
+.auth-secondary:hover { border-color:var(--adm-border2); background:var(--adm-surface); }
+.auth-secondary:disabled { opacity:.65; cursor:wait; }
 .auth-forgot { margin-top:13px; text-align:center; }
 .auth-forgot a { color:var(--adm-muted); font-size:12px; text-decoration:none; }
 .auth-forgot a:hover { color:var(--adm-accent); }

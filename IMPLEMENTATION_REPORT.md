@@ -1,3 +1,30 @@
+# Relatório de implementação — 1.0.156
+
+## Segurança, identidade e resposta a incidentes
+
+- Nova Central de Segurança com score por categoria, recomendações e cinco áreas operacionais.
+- `SecurityEvent`, `SecuritySession` e `SecurityPolicy` passam a persistir incidentes, sessões e políticas no MongoDB.
+- Sessões autenticadas recebem `jti` e CSRF próprio; cada sessão pode ser revogada sem invalidar todas as demais.
+- 2FA TOTP usa segredo protegido no cofre, confirmação por código e códigos de recuperação armazenados apenas como hash.
+- Step-up gera token temporário de 10 minutos vinculado à conta/sessão para confirmar operações críticas.
+- Monitor de ataques usa Redis para janelas distribuídas quando disponível e fallback em memória quando não houver Redis.
+- Incidentes repetidos são agregados por fingerprint; login também correlaciona vários alvos por IP e vários IPs por conta.
+- Resposta automática foi separada em observar/alertar/proteger para evitar bloqueios acidentais. Apenas eventos marcados explicitamente podem bloquear IP.
+- Webhook, Telegram e SMTP usam credenciais criptografadas e cooldown configurável.
+- Varredura de segredos cobre código/pacotes e bloqueia atualização com segredo crítico antes da persistência/publicação.
+- Auditoria de dependências usa `npm audit` quando o lockfile estiver disponível; o workflow GitHub instala e audita backend/frontend em CI.
+- AuditLog foi ajustado para suportar ações administrativas específicas e retenção configurável.
+- Swagger de produção fica protegido por autenticação e permissão administrativa.
+- Frontend suporta desafio 2FA no login, gerenciamento do autenticador, sessões/dispositivos, workflow de incidentes, relatório forense, políticas, canais de alerta e confirmação reforçada.
+- Ações críticas em Integrações, backups, usuários/perfis e variáveis Vercel/Render passam pela política de step-up.
+- Nenhum asset de imagem foi criado ou modificado.
+
+## Versão
+
+Frontend, backend, manifesto e exemplo de ambiente sincronizados em **1.0.156**.
+
+---
+
 # Relatório de implementação — 1.0.155
 
 ## Infraestrutura e ambiente

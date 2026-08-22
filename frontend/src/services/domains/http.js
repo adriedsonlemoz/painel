@@ -4,6 +4,7 @@
  * diferentes, redirecionamento 401, timeout e parse de erros.
  */
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import { stepUpAction } from '../../utils/stepUpAction.js'
 
 const NativeSecureSession = registerPlugin('ALSecureSession')
 
@@ -14,6 +15,7 @@ export const apiBase = BASE_URL.replace(/\/api$/, '')
 
 const SESSION_TOKEN_KEY = 'alsistemas_session_token'
 const SESSION_MODE_KEY  = 'alsistemas_auth_mode'
+const CSRF_TOKEN_KEY    = 'alsistemas_csrf_token'
 const SESSION_DB_NAME   = 'alsistemas-auth'
 const SESSION_DB_STORE  = 'session'
 const SESSION_DB_KEY    = 'persistent-token'
@@ -68,6 +70,18 @@ export function setSessionToken(token = '', mode = '') {
 
 export function clearSessionToken() {
   setSessionToken('', '')
+  setCsrfToken('')
+}
+
+export function getCsrfToken() {
+  try { return sessionStorage.getItem(CSRF_TOKEN_KEY) || '' } catch { return '' }
+}
+
+export function setCsrfToken(token = '') {
+  try {
+    if (token) sessionStorage.setItem(CSRF_TOKEN_KEY, token)
+    else sessionStorage.removeItem(CSRF_TOKEN_KEY)
+  } catch { /* storage pode estar indisponível */ }
 }
 
 export async function persistSessionToken(token = '') {
@@ -110,20 +124,35 @@ export function authMode() {
   try { return sessionStorage.getItem(SESSION_MODE_KEY) || (getSessionToken() ? 'bearer-fallback' : 'cookie') } catch { return 'cookie' }
 }
 
-export function withAuthHeaders(headers = {}) {
+export function withAuthHeaders(headers = {}, method = 'GET') {
   const result = new Headers(headers || {})
   const token = getSessionToken()
   if (token && !result.has('Authorization')) result.set('Authorization', `Bearer ${token}`)
+  const mutating = !['GET','HEAD','OPTIONS'].includes(String(method || 'GET').toUpperCase())
+  const csrf = getCsrfToken()
+  if (mutating && csrf && !result.has('X-CSRF-Token')) result.set('X-CSRF-Token', csrf)
   return result
 }
 
 /** Fetch autenticado para uploads/downloads multipart e respostas não JSON. */
 export async function authFetch(input, options = {}) {
-  return fetch(input, {
+  const headers = withAuthHeaders(options.headers || {}, options.method || 'GET')
+  const res = await fetch(input, {
     ...options,
     credentials: options.credentials || 'include',
-    headers: withAuthHeaders(options.headers || {}),
+    headers,
   })
+  if (res.status === 428 && !headers.has('X-Step-Up-Token')) {
+    const data = await res.clone().json().catch(() => ({}))
+    if (data?.codigo === 'STEP_UP_REQUIRED') {
+      const credenciais = await stepUpAction()
+      if (!credenciais) return res
+      const step = await api('/auth/step-up', { method:'POST', body:JSON.stringify(credenciais), _stepRetry:1 })
+      if (!step?.step_up_token) return res
+      return authFetch(input, { ...options, headers:{ ...(options.headers || {}), 'X-Step-Up-Token':step.step_up_token } })
+    }
+  }
+  return res
 }
 
 /** Teste deliberadamente sem Authorization para saber se o cookie cross-site foi aceito. */
@@ -144,14 +173,14 @@ export async function api(path, options = {}) {
   const timeoutMs = Number(options.timeoutMs || 10000)
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
-  const { timeoutMs: _timeoutMs, _dbRetry = 0, ...fetchOptions } = options
+  const { timeoutMs: _timeoutMs, _dbRetry = 0, _stepRetry = 0, ...fetchOptions } = options
   const customHeaders = options.headers || {}
   const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null
   const isForm = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData
   const headers = withAuthHeaders({
     ...(hasBody && !isForm ? { 'Content-Type': 'application/json' } : {}),
     ...customHeaders,
-  })
+  }, fetchOptions.method || 'GET')
 
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -169,6 +198,20 @@ export async function api(path, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}))
+
+    if (res.status === 428 && data?.codigo === 'STEP_UP_REQUIRED' && _stepRetry < 1 && !['/auth/login','/auth/login/2fa','/auth/step-up'].includes(path)) {
+      const credenciais = await stepUpAction()
+      if (!credenciais) throw new Error('Confirmação de identidade cancelada.')
+      const step = await api('/auth/step-up', { method:'POST', body:JSON.stringify(credenciais), _stepRetry:1 })
+      if (!step?.step_up_token) throw new Error('Não foi possível confirmar sua identidade.')
+      const retryHeaders = { ...(options.headers || {}), 'X-Step-Up-Token': step.step_up_token }
+      return api(path, { ...options, headers:retryHeaders, _stepRetry:1 })
+    }
+
+    if (res.status === 403 && data?.codigo === 'MFA_SETUP_REQUIRED' && window.location.pathname !== '/admin/seguranca') {
+      window.location.href = data?.acao || '/admin/seguranca'
+      throw new Error(data.erro || 'Ative a autenticação em dois fatores para continuar.')
+    }
 
     // Durante o primeiro boot/reconexão do Atlas, o backend responde 503
     // imediatamente em vez de deixar a consulta pendurada por 10 s. GETs

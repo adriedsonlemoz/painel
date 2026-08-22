@@ -1,62 +1,176 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { securityService } from '../../services/api'
+import { AlertTriangle, Bell, CheckCircle2, Download, Eye, KeyRound, LockKeyhole, RefreshCw, ScanSearch, ShieldCheck, Smartphone, X } from 'lucide-react'
+import { authService, securityService } from '../../services/api'
+import { useAuth } from '../../context/AuthContext'
 
-const box = { background:'var(--adm-surface)', border:'1px solid var(--adm-border)', borderRadius:14, padding:18 }
+const btn={minHeight:42,padding:'0 14px',borderRadius:10,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',color:'var(--adm-text)',fontWeight:800,fontSize:13,cursor:'pointer'}
+const primary={...btn,background:'var(--adm-accent)',borderColor:'var(--adm-accent)',color:'#fff'}
+const tabs=['Visão geral','Incidentes','Sessões','Auditoria','Políticas']
+const severityColor={baixa:'var(--adm-success)',media:'var(--adm-blue)',alta:'var(--adm-amber)',critica:'var(--adm-red)'}
 
-function tempo(data) {
-  if (!data) return '—'
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle:'short', timeStyle:'medium' }).format(new Date(data))
+function time(v){if(!v)return '—';try{return new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v))}catch{return '—'}}
+function labelState(v){return({novo:'Novo',investigando:'Investigando',resolvido:'Resolvido',ignorado:'Ignorado'})[v]||v}
+function shortJti(v=''){return v?`${v.slice(0,8)}…${v.slice(-5)}`:'—'}
+
+function Modal({title,children,onClose}){
+ return <div className="sec-overlay" role="dialog" aria-modal="true"><div className="sec-modal"><div className="sec-modal-head"><div><small>SEGURANÇA</small><h2>{title}</h2></div><button aria-label="Fechar" onClick={onClose}><X size={19}/></button></div>{children}</div></div>
 }
 
-export default function AdminSeguranca() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function AdminSeguranca(){
+ const { temPermissao } = useAuth()
+ const canManage = temPermissao('seguranca.gerenciar')
+ const [tab,setTab]=useState('Visão geral')
+ const [summary,setSummary]=useState(null),[events,setEvents]=useState([]),[sessions,setSessions]=useState([]),[audit,setAudit]=useState([])
+ const [policy,setPolicy]=useState(null),[channels,setChannels]=useState({}),[loading,setLoading]=useState(true)
+ const [dep,setDep]=useState(null),[scan,setScan]=useState(null),[busy,setBusy]=useState('')
+ const [eventFilters,setEventFilters]=useState({q:'',severidade:'',estado:''})
+ const [incident,setIncident]=useState(null),[incidentNote,setIncidentNote]=useState(''),[incidentAction,setIncidentAction]=useState('')
+ const [mfa,setMfa]=useState(null),[mfaSetup,setMfaSetup]=useState(null),[mfaCode,setMfaCode]=useState(''),[recovery,setRecovery]=useState([])
+ const [mfaDisable,setMfaDisable]=useState(null)
+ const [step,setStep]=useState(null),[stepPassword,setStepPassword]=useState(''),[stepCode,setStepCode]=useState('')
+ const stepResolver=useRef(null)
+ const [policyDraft,setPolicyDraft]=useState(null)
+ const [alertsForm,setAlertsForm]=useState({webhookUrl:'',telegramToken:'',telegramChat:'',smtpHost:'',smtpPort:'587',smtpUser:'',smtpPassword:'',smtpFrom:'',emailDestino:''})
 
-  async function carregar() {
-    setLoading(true)
-    try { setData(await securityService.resumo()) }
-    catch (e) { toast.error(e.message) }
-    finally { setLoading(false) }
-  }
-  useEffect(() => { carregar() }, [])
+ async function loadCore(){
+  setLoading(true)
+  try{
+   const m=await authService.twoFactorStatus()
+   setMfa(m)
+   if(canManage){
+    const [s,p]=await Promise.all([securityService.resumo(),securityService.politica()])
+    setSummary(s);setPolicy(p.policy);setPolicyDraft(p.policy);setChannels(p.channels||{})
+   }
+  }catch(e){toast.error(e.message)}finally{setLoading(false)}
+ }
+ async function loadTab(name=tab){
+  try{
+   if(name==='Incidentes') setEvents((await securityService.eventos({limit:100})).eventos||[])
+   if(name==='Sessões') setSessions((await securityService.sessoes()).sessions||[])
+   if(name==='Auditoria') setAudit((await securityService.auditoria(100)).logs||[])
+  }catch(e){toast.error(e.message)}
+ }
+ useEffect(()=>{loadCore()},[canManage])
+ useEffect(()=>{if(canManage)loadTab(tab)},[tab,canManage])
 
-  async function resolver(id) {
-    try { await securityService.resolver(id, true); toast.success('Evento marcado como resolvido'); carregar() }
-    catch (e) { toast.error(e.message) }
-  }
+ function requestStepUp(reason='Confirme sua identidade'){
+  return new Promise((resolve,reject)=>{stepResolver.current={resolve,reject};setStep(reason);setStepPassword('');setStepCode('')})
+ }
+ function closeStep(){stepResolver.current?.reject?.(new Error('Confirmação cancelada'));stepResolver.current=null;setStep(null)}
+ async function confirmStep(){
+  if(!stepPassword){toast.error('Informe sua senha atual');return}
+  try{setBusy('step');const r=await authService.stepUp(stepPassword,stepCode);stepResolver.current?.resolve?.(r.step_up_token);stepResolver.current=null;setStep(null);setStepPassword('');setStepCode('')}
+  catch(e){toast.error(e.message)}finally{setBusy('')}
+ }
 
-  if (loading && !data) return <div className="adm-page" style={{color:'var(--adm-muted)'}}>Analisando segurança…</div>
-  const checks = data?.checks || {}
-  return (
-    <div className="adm-page" style={{display:'grid',gap:18,color:'var(--adm-text)'}}>
-      <div style={{...box,background:'linear-gradient(135deg,var(--adm-surface),var(--adm-surface2))'}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center',flexWrap:'wrap'}}>
-          <div><div style={{fontSize:12,fontWeight:800,letterSpacing:1,color:'var(--adm-accent)'}}>CENTRO DE SEGURANÇA</div><h1 style={{margin:'6px 0',fontSize:28}}>Proteção e detecção de riscos</h1><p style={{margin:0,color:'var(--adm-muted)'}}>Monitora padrões suspeitos sem registrar senhas, tokens ou conteúdo secreto.</p></div>
-          <div style={{fontSize:28,fontWeight:900}}>{data?.score ?? 0}<span style={{fontSize:15,color:'var(--adm-muted)'}}>/100</span></div>
-        </div>
-      </div>
+ async function changeIncident(state){
+  if(!incident)return
+  try{setBusy('incident');const r=await securityService.atualizarEvento(incident._id||incident.id,{estado:state,observacao:incidentNote,acao_tomada:incidentAction});setIncident(r.evento);toast.success(`Incidente: ${labelState(state)}`);await loadTab('Incidentes');await loadCore()}
+  catch(e){toast.error(e.message)}finally{setBusy('')}
+ }
+ async function downloadForensic(e){
+  try{const data=await securityService.forense(e._id||e.id);const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`al-sistemas-incidente-${e._id||e.id}.json`;a.click();URL.revokeObjectURL(a.href)}catch(err){toast.error(err.message)}
+ }
+ async function revokeSession(s){
+  try{const token=await requestStepUp('Encerrar sessão');await securityService.revogarSessao(s.jti,token);toast.success('Sessão encerrada');await loadTab('Sessões');await loadCore()}catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}
+ }
+ async function revokeUserSessions(s){
+  try{const token=await requestStepUp('Encerrar todas as sessões desta conta');await securityService.revogarUsuario(s.usuario_id,token);toast.success('Todas as sessões da conta foram encerradas');await loadTab('Sessões');await loadCore()}catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}
+ }
+ async function runScan(){try{setBusy('scan');const r=await securityService.scanSegredos();setScan(r);toast.success(r.blocked?'Scan concluído com itens críticos':'Nenhum segredo crítico detectado');await loadCore()}catch(e){toast.error(e.message)}finally{setBusy('')}}
+ async function runDeps(){try{setBusy('deps');const r=await securityService.dependencias();setDep(r);toast.success('Dependências analisadas')}catch(e){toast.error(e.message)}finally{setBusy('')}}
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12}}>
-        {[['Alertas abertos',data?.abertos],['Alta prioridade',data?.criticos],['Últimas 24h',data?.ultimas24h],['Alterações auditadas',data?.mutacoes24h]].map(([l,v])=><div key={l} style={box}><div style={{fontSize:12,color:'var(--adm-muted)'}}>{l}</div><div style={{fontSize:22,fontWeight:850,marginTop:5}}>{v ?? 0}</div></div>)}
-      </div>
+ async function startMfa(){try{const token=await requestStepUp('Ativar autenticação em dois fatores');setBusy('mfa');const setup=await authService.twoFactorSetup(token);setMfaSetup({...setup,stepToken:token});setMfaCode('')}catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}finally{setBusy('')}}
+ async function confirmMfa(){try{setBusy('mfa');const r=await authService.twoFactorConfirm(mfaCode,mfaSetup?.stepToken||'');setRecovery(r.recovery_codes||[]);setMfa({enabled:true,confirmedAt:new Date().toISOString()});setMfaSetup(null);toast.success('2FA ativado') ;await loadCore()}catch(e){toast.error(e.message)}finally{setBusy('')}}
+ function disableMfa(){ setMfaDisable({senha:'',codigo:''}) }
+ async function confirmDisableMfa(){
+  if(!mfaDisable?.senha||!mfaDisable?.codigo){toast.error('Informe senha e código 2FA');return}
+  try{
+   setBusy('mfa-disable')
+   const r=await authService.twoFactorDisable(mfaDisable.senha,mfaDisable.codigo)
+   setMfaDisable(null);setMfa({enabled:false,confirmedAt:null});toast.success('2FA desativado. Faça login novamente para continuar.')
+   if(r?.requer_novo_login) setTimeout(()=>{window.location.href='/login?motivo=sessao'},700)
+  }catch(e){toast.error(e.message)}finally{setBusy('')}
+ }
 
-      <div style={box}>
-        <h2 style={{marginTop:0,fontSize:18}}>Configuração preventiva</h2>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:10}}>
-          {Object.entries({masterKeyDedicada:'Chave mestra dedicada',setupDesativado:'Setup desativado',ambienteProducao:'Modo de produção',metricsProtegidas:'Métricas protegidas',redisConfigurado:'Redis configurado'}).map(([k,l])=><div key={k} style={{padding:12,borderRadius:10,background:'var(--adm-surface2)',display:'flex',justifyContent:'space-between',gap:10}}><span>{l}</span><strong>{checks[k]?'Protegido':'Revisar'}</strong></div>)}
-        </div>
-      </div>
+ async function savePolicy(){
+  try{const token=await requestStepUp('Alterar políticas de segurança');setBusy('policy');const r=await securityService.salvarPolitica(policyDraft,token);setPolicy(r.policy);setPolicyDraft(r.policy);toast.success('Políticas atualizadas');await loadCore()}
+  catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}finally{setBusy('')}
+ }
+ async function saveAlerts(){
+  try{
+   const token=await requestStepUp('Alterar canais de alerta');setBusy('alerts')
+   const payload={}
+   if(alertsForm.webhookUrl.trim())payload.webhookUrl=alertsForm.webhookUrl.trim()
+   if(alertsForm.telegramToken.trim()&&alertsForm.telegramChat.trim())payload.telegram={botToken:alertsForm.telegramToken.trim(),chatId:alertsForm.telegramChat.trim()}
+   if(alertsForm.smtpHost.trim()&&(alertsForm.smtpUser.trim()||alertsForm.smtpFrom.trim()))payload.email={host:alertsForm.smtpHost.trim(),port:Number(alertsForm.smtpPort||587),user:alertsForm.smtpUser.trim(),password:alertsForm.smtpPassword,from:alertsForm.smtpFrom.trim()||alertsForm.smtpUser.trim(),destination:alertsForm.emailDestino.trim()}
+   if(!Object.keys(payload).length){toast.error('Preencha ao menos um canal novo');return}
+   await securityService.salvarAlertas(payload,token);setAlertsForm({webhookUrl:'',telegramToken:'',telegramChat:'',smtpHost:'',smtpPort:'587',smtpUser:'',smtpPassword:'',smtpFrom:'',emailDestino:''});toast.success('Canal salvo no cofre criptografado');await loadCore()
+  }catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}finally{setBusy('')}
+ }
+ async function testAlerts(){try{const token=await requestStepUp('Testar alertas externos');await securityService.testarAlertas(token);toast.success('Evento de teste criado; canais habilitados serão acionados')}catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}}
+ async function removeAlertChannel(channel){
+  try{
+   const token=await requestStepUp(`Remover canal ${channel}`)
+   const payload=channel==='webhook'?{webhookUrl:''}:channel==='telegram'?{telegram:{remove:true}}:{email:{remove:true}}
+   await securityService.salvarAlertas(payload,token);toast.success('Canal removido');await loadCore()
+  }catch(e){if(e.message!=='Confirmação cancelada')toast.error(e.message)}
+ }
 
-      <div style={box}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><h2 style={{margin:0,fontSize:18}}>Eventos recentes</h2><button onClick={carregar} style={{padding:'8px 12px',borderRadius:9,border:'1px solid var(--adm-border)',background:'var(--adm-surface2)',color:'var(--adm-text)',cursor:'pointer'}}>Atualizar</button></div>
-        <div style={{display:'grid',gap:9,marginTop:14}}>
-          {!data?.eventos?.length && <div style={{color:'var(--adm-muted)'}}>Nenhum evento suspeito registrado.</div>}
-          {data?.eventos?.map(e=><div key={e._id || e.id} style={{padding:13,border:'1px solid var(--adm-border)',borderRadius:10,display:'flex',justifyContent:'space-between',gap:14,alignItems:'center',flexWrap:'wrap',opacity:e.resolvido?.7:1}}><div><strong>{e.mensagem}</strong><div style={{fontSize:12,color:'var(--adm-muted)',marginTop:4}}>{e.severidade} · {e.metodo} {e.rota} · {tempo(e.criado_em)}</div></div>{!e.resolvido&&<button onClick={()=>resolver(e._id || e.id)} style={{padding:'7px 10px',borderRadius:8,border:'none',background:'var(--adm-accent)',color:'#fff',cursor:'pointer'}}>Resolver</button>}</div>)}
-        </div>
-      </div>
+ const filteredEvents=useMemo(()=>events.filter(e=>{
+  const q=eventFilters.q.trim().toLowerCase(); const state=e.estado||(!e.resolvido?'novo':'resolvido')
+  if(eventFilters.severidade&&e.severidade!==eventFilters.severidade)return false
+  if(eventFilters.estado&&state!==eventFilters.estado)return false
+  if(!q)return true
+  return [e.mensagem,e.usuario_email,e.ip,e.rota,e.tipo].some(v=>String(v||'').toLowerCase().includes(q))
+ }),[events,eventFilters])
+ if(loading&&!mfa)return <div className="adm-page" style={{color:'var(--adm-muted)',fontSize:14}}>Analisando segurança…</div>
+ if(!canManage)return <div className="adm-page sec-page">
+  <style>{`.sec-page{display:grid;gap:16px;color:var(--adm-text);font-size:14px}.sec-hero,.sec-card{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:16px;padding:18px}.sec-kicker{font-size:12px;font-weight:900;letter-spacing:.12em;color:var(--adm-accent)}.sec-hero h1{font-size:24px;margin:6px 0}.sec-hero p,.sec-card p{color:var(--adm-muted);font-size:14px;line-height:1.5}.sec-badge{display:inline-flex;min-height:26px;align-items:center;padding:0 8px;border-radius:999px;border:1px solid var(--adm-border);font-size:12px;font-weight:850}.sec-field{display:grid;gap:6px}.sec-field label{font-size:13px;font-weight:800}.sec-field input{width:100%;box-sizing:border-box;min-height:42px;border:1px solid var(--adm-border);border-radius:9px;padding:9px 10px;background:var(--adm-bg);color:var(--adm-text);font-size:14px}.sec-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.58);display:grid;place-items:center;padding:18px}.sec-modal{width:min(560px,100%);max-height:86vh;overflow:auto;background:var(--adm-surface);border-radius:18px;border:1px solid var(--adm-border);padding:18px}.sec-modal-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:15px}.sec-modal-head small{font-size:11px;font-weight:900;color:var(--adm-accent)}.sec-modal-head h2{margin:4px 0 0;font-size:21px}.sec-modal-head button{width:44px;height:44px;border-radius:12px;border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text)}.sec-code{font-family:ui-monospace,monospace;font-size:12px;overflow-wrap:anywhere;padding:10px;border-radius:9px;background:var(--adm-surface2)}.sec-reco{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.sec-reco code{padding:8px;border:1px solid var(--adm-border);border-radius:8px;font-size:12px}`}</style>
+  <div className="sec-hero"><div className="sec-kicker">SEGURANÇA DA CONTA</div><h1>Autenticação em dois fatores</h1><p>{mfa?.required?'A política do sistema exige 2FA para sua conta. Conclua a configuração para continuar usando as demais áreas.':'Proteja sua conta com um segundo fator de autenticação.'}</p></div>
+  <div className="sec-card"><span className="sec-badge" style={{color:mfa?.enabled?'var(--adm-success)':'var(--adm-amber)'}}>{mfa?.enabled?'2FA ativa':mfa?.required?'Configuração obrigatória':'2FA desativada'}</span><p>{mfa?.enabled?`Ativa desde ${time(mfa.confirmedAt)}.`:'Use Google Authenticator, Microsoft Authenticator, Aegis ou outro app compatível com TOTP.'}</p>{mfa?.enabled?(mfa?.required?<button style={btn} disabled>Obrigatória por política</button>:<button style={btn} onClick={disableMfa}>Opções de 2FA</button>):<button style={primary} onClick={startMfa} disabled={busy==='mfa'}><KeyRound size={16}/> Ativar 2FA</button>}</div>
+  {step&&<Modal title={step} onClose={closeStep}><p style={{color:'var(--adm-muted)',fontSize:13,lineHeight:1.5}}>Confirme sua senha para proteger esta alteração.</p><div className="sec-field"><label>Senha atual</label><input type="password" value={stepPassword} onChange={e=>setStepPassword(e.target.value)} autoFocus/></div><button style={{...primary,width:'100%',marginTop:14}} onClick={confirmStep} disabled={busy==='step'}>Confirmar identidade</button></Modal>}
+  {mfaSetup&&<Modal title="Ativar autenticação em dois fatores" onClose={()=>setMfaSetup(null)}><p>Escaneie o QR no autenticador ou use a chave manual. Depois confirme com o código de 6 dígitos.</p>{mfaSetup.qr&&<div style={{display:'grid',placeItems:'center',padding:10}}><img src={mfaSetup.qr} alt="QR Code do autenticador" style={{width:220,maxWidth:'100%',borderRadius:12}}/></div>}<div className="sec-field"><label>Chave manual</label><div className="sec-code">{mfaSetup.secret}</div></div><div className="sec-field" style={{marginTop:10}}><label>Código do autenticador</label><input inputMode="numeric" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} placeholder="000000"/></div><button style={{...primary,width:'100%',marginTop:14}} onClick={confirmMfa}>Confirmar e ativar</button></Modal>}
+  {mfaDisable&&<Modal title="Desativar autenticação em dois fatores" onClose={()=>setMfaDisable(null)}><p>{mfa?.required?'A política atual exige 2FA; a desativação será recusada enquanto essa regra estiver ativa.':'Confirme sua senha e um código válido do autenticador.'}</p><div className="sec-field"><label>Senha atual</label><input type="password" value={mfaDisable.senha} onChange={e=>setMfaDisable({...mfaDisable,senha:e.target.value})}/></div><div className="sec-field" style={{marginTop:10}}><label>Código 2FA</label><input inputMode="numeric" value={mfaDisable.codigo} onChange={e=>setMfaDisable({...mfaDisable,codigo:e.target.value})}/></div><button style={{...primary,width:'100%',marginTop:14}} onClick={confirmDisableMfa}>Desativar 2FA</button></Modal>}
+  {!!recovery.length&&<Modal title="Códigos de recuperação" onClose={()=>setRecovery([])}><p>Salve estes códigos agora. Cada um funciona uma única vez.</p><div className="sec-reco">{recovery.map(c=><code key={c}>{c}</code>)}</div><button style={{...primary,width:'100%',marginTop:14}} onClick={()=>setRecovery([])}>Já salvei</button></Modal>}
+ </div>
+ if(loading&&!summary)return <div className="adm-page" style={{color:'var(--adm-muted)',fontSize:14}}>Analisando segurança…</div>
+ return <div className="adm-page sec-page">
+  <style>{`
+   .sec-page{display:grid;gap:16px;color:var(--adm-text);font-size:14px}.sec-hero{${''}background:linear-gradient(135deg,var(--adm-surface),var(--adm-surface2));border:1px solid var(--adm-border);border-radius:18px;padding:20px;display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}.sec-kicker{font-size:12px;font-weight:900;letter-spacing:.12em;color:var(--adm-accent)}.sec-hero h1{font-size:25px;margin:6px 0}.sec-hero p{margin:0;color:var(--adm-muted);font-size:14px;line-height:1.5}.sec-score{min-width:126px;text-align:right}.sec-score strong{font-size:34px}.sec-score span{font-size:15px;color:var(--adm-muted)}.sec-tabs{display:flex;gap:7px;overflow:auto;padding-bottom:2px}.sec-tabs button{${''}min-height:42px;padding:0 14px;border:1px solid var(--adm-border);border-radius:999px;background:var(--adm-surface);color:var(--adm-muted);font-size:13px;font-weight:850;white-space:nowrap}.sec-tabs button.active{background:var(--adm-accent);border-color:var(--adm-accent);color:white}.sec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:11px}.sec-stat{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:14px;padding:15px}.sec-stat small{font-size:12px;color:var(--adm-muted)}.sec-stat b{display:block;font-size:23px;margin-top:6px}.sec-card{background:var(--adm-surface);border:1px solid var(--adm-border);border-radius:16px;padding:18px}.sec-card h2{font-size:18px;margin:0 0 12px}.sec-list{display:grid;gap:8px}.sec-row{border:1px solid var(--adm-border);border-radius:12px;padding:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.sec-row p{margin:4px 0 0;color:var(--adm-muted);font-size:13px;line-height:1.45}.sec-badge{display:inline-flex;align-items:center;min-height:26px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:850;border:1px solid var(--adm-border)}.sec-actions{display:flex;gap:7px;flex-wrap:wrap}.sec-actions button{min-height:38px;padding:0 11px;border-radius:9px;border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);font-size:12.5px;font-weight:800}.sec-field{display:grid;gap:6px}.sec-field label{font-size:13px;font-weight:800}.sec-field input,.sec-field select,.sec-field textarea{width:100%;box-sizing:border-box;min-height:42px;border:1px solid var(--adm-border);border-radius:9px;padding:9px 10px;background:var(--adm-bg);color:var(--adm-text);font-size:14px}.sec-field textarea{min-height:90px;resize:vertical}.sec-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:11px}.sec-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.58);display:grid;place-items:center;padding:18px}.sec-modal{width:min(560px,100%);max-height:86vh;overflow:auto;background:var(--adm-surface);border-radius:18px;border:1px solid var(--adm-border);padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.28)}.sec-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:15px}.sec-modal-head small{font-size:11px;font-weight:900;letter-spacing:.12em;color:var(--adm-accent)}.sec-modal-head h2{margin:4px 0 0;font-size:21px}.sec-modal-head button{width:44px;height:44px;border-radius:12px;border:1px solid var(--adm-border);background:var(--adm-surface2);color:var(--adm-text);display:grid;place-items:center}.sec-code{font-family:ui-monospace,monospace;font-size:12px;overflow-wrap:anywhere;padding:10px;border-radius:9px;background:var(--adm-surface2)}.sec-reco{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.sec-reco code{padding:8px;border:1px solid var(--adm-border);border-radius:8px;font-size:12px}.sec-category{display:grid;grid-template-columns:120px 1fr 46px;gap:10px;align-items:center;font-size:13px}.sec-bar{height:8px;border-radius:999px;background:var(--adm-surface2);overflow:hidden}.sec-bar i{display:block;height:100%;background:var(--adm-accent)}@media(max-width:560px){.sec-hero{padding:16px}.sec-score{text-align:left}.sec-category{grid-template-columns:92px 1fr 38px}.sec-card{padding:14px}.sec-reco{grid-template-columns:1fr}}
+  `}</style>
 
-      <div style={box}><h2 style={{marginTop:0,fontSize:18}}>Próxima evolução recomendada</h2><p style={{color:'var(--adm-muted)',lineHeight:1.6,marginBottom:0}}>Adicionar inventário de dados sensíveis, varredura de segredos em commits e uploads, alertas por e-mail/Telegram, sessões e dispositivos ativos, autenticação em dois fatores, regras de retenção, exportação forense e bloqueio automático configurável. O bloqueio deve permanecer opcional para evitar falsos positivos.</p></div>
-    </div>
-  )
+  <div className="sec-hero"><div><div className="sec-kicker">CENTRAL DE SEGURANÇA</div><h1>Proteção, acessos e incidentes</h1><p>Identidade, sessões, auditoria, detecção de ataques e proteção de publicações em um só lugar.</p></div><div className="sec-score"><strong>{summary?.score??0}</strong><span>/100</span><div style={{fontSize:13,fontWeight:850,color:'var(--adm-accent)'}}>{summary?.scoreLabel}</div></div></div>
+  <div className="sec-tabs">{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</div>
+
+  {tab==='Visão geral'&&<>
+   <div className="sec-grid">{[['Incidentes abertos',summary?.abertos],['Alta prioridade',summary?.criticos],['Sessões ativas',summary?.sessoesAtivas],['Contas com 2FA',`${summary?.users?.mfaAtivos??0}/${summary?.users?.ativos??0}`]].map(([l,v])=><div className="sec-stat" key={l}><small>{l}</small><b>{v??0}</b></div>)}</div>
+   <div className="sec-card"><h2>Composição da proteção</h2><div className="sec-list">{Object.entries(summary?.categories||{}).map(([k,v])=>{const max={identidade:25,credenciais:20,aplicacao:20,monitoramento:20,dados:15}[k]||20;return <div className="sec-category" key={k}><b style={{textTransform:'capitalize'}}>{k}</b><div className="sec-bar"><i style={{width:`${Math.round(v/max*100)}%`}}/></div><strong>{v}/{max}</strong></div>})}</div></div>
+   {!!summary?.recommendations?.length&&<div className="sec-card"><h2>O que merece atenção</h2><div className="sec-list">{summary.recommendations.map((r,i)=><div className="sec-row" key={i}><div><strong>{r.area}</strong><p>{r.texto}</p></div><span className="sec-badge">-{r.pontos} pts</span></div>)}</div></div>}
+   <div className="sec-card"><div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap'}}><h2 style={{margin:0}}>Autenticação em dois fatores</h2><span className="sec-badge" style={{color:mfa?.enabled?'var(--adm-success)':'var(--adm-amber)'}}>{mfa?.enabled?'Ativa':'Recomendada'}</span></div><p style={{color:'var(--adm-muted)',fontSize:13,lineHeight:1.5}}>TOTP compatível com Google Authenticator, Microsoft Authenticator, Aegis e outros aplicativos.</p>{mfa?.enabled?<div className="sec-actions"><button disabled>✓ 2FA ativa desde {time(mfa.confirmedAt)}</button>{mfa?.required?<button disabled>Obrigatória por política</button>:<button onClick={disableMfa}>Opções de 2FA</button>}</div>:<button style={primary} onClick={startMfa} disabled={busy==='mfa'}><KeyRound size={16}/> Ativar 2FA</button>}</div>
+   <div className="sec-card"><h2>Varreduras preventivas</h2><div className="sec-actions"><button style={btn} onClick={runScan} disabled={busy==='scan'}><ScanSearch size={16}/> {busy==='scan'?'Analisando…':'Procurar segredos'}</button><button style={btn} onClick={runDeps} disabled={busy==='deps'}><ShieldCheck size={16}/> {busy==='deps'?'Auditando…':'Auditar dependências'}</button><button style={btn} onClick={loadCore}><RefreshCw size={16}/> Atualizar</button></div>{scan&&<div style={{marginTop:12}} className="sec-row"><div><strong>{scan.scannedFiles} arquivos verificados</strong><p>{scan.critical} crítico(s) · {scan.high} alto(s). Publicações com segredo crítico são bloqueadas antes do GitHub.</p></div><span className="sec-badge" style={{color:scan.blocked?'var(--adm-red)':'var(--adm-success)'}}>{scan.blocked?'Revisar':'Limpo'}</span></div>}{dep&&<div style={{marginTop:10}} className="sec-row"><div><strong>Dependências</strong><p>{dep.counts?.critical||0} críticas · {dep.counts?.high||0} altas · {dep.counts?.moderate||0} moderadas. {!dep.backend?.available||!dep.frontend?.available?'Um lockfile não está disponível; o CI faz a auditoria completa.':''}</p></div></div>}</div>
+  </>}
+
+  {tab==='Incidentes'&&<div className="sec-card"><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}><h2 style={{margin:0}}>Incidentes e eventos</h2><button style={btn} onClick={()=>loadTab('Incidentes')}><RefreshCw size={15}/> Atualizar</button></div><div className="sec-form-grid" style={{marginTop:13}}><div className="sec-field"><label>Buscar</label><input value={eventFilters.q} onChange={e=>setEventFilters({...eventFilters,q:e.target.value})} placeholder="Conta, IP, rota ou mensagem"/></div><div className="sec-field"><label>Severidade</label><select value={eventFilters.severidade} onChange={e=>setEventFilters({...eventFilters,severidade:e.target.value})}><option value="">Todas</option><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></div><div className="sec-field"><label>Estado</label><select value={eventFilters.estado} onChange={e=>setEventFilters({...eventFilters,estado:e.target.value})}><option value="">Todos</option><option value="novo">Novo</option><option value="investigando">Investigando</option><option value="resolvido">Resolvido</option><option value="ignorado">Ignorado</option></select></div></div><div className="sec-list" style={{marginTop:13}}>{!filteredEvents.length&&<p style={{color:'var(--adm-muted)'}}>Nenhum evento corresponde aos filtros.</p>}{filteredEvents.map(e=><div className="sec-row" key={e._id||e.id} onClick={()=>{setIncident(e);setIncidentNote(e.observacao||'');setIncidentAction(e.acao_tomada||'')}} style={{cursor:'pointer',opacity:['resolvido','ignorado'].includes(e.estado)?.72:1}}><div style={{minWidth:0,flex:1}}><div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap'}}><span className="sec-badge" style={{color:severityColor[e.severidade]}}>{e.severidade}</span><span className="sec-badge">{labelState(e.estado||'novo')}</span><strong>{e.mensagem}</strong></div><p>{e.ocorrencias||1} ocorrência(s) · {e.usuario_email||e.ip||'origem não identificada'} · {time(e.ultima_ocorrencia_em||e.criado_em)}</p></div><Eye size={18}/></div>)}</div></div>}
+
+  {tab==='Sessões'&&<div className="sec-card"><div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}><h2 style={{margin:0}}>Sessões e dispositivos</h2><button style={btn} onClick={()=>loadTab('Sessões')}><RefreshCw size={15}/> Atualizar</button></div><div className="sec-list" style={{marginTop:13}}>{sessions.map(s=><div className="sec-row" key={s.jti}><div><div style={{display:'flex',gap:8,alignItems:'center'}}><Smartphone size={17}/><strong>{s.dispositivo||'Dispositivo'}</strong>{s.current&&<span className="sec-badge" style={{color:'var(--adm-success)'}}>Sessão atual</span>}{s.revogada_em&&<span className="sec-badge">Revogada</span>}</div><p>{s.usuario_email} · IP {s.ip||'—'} · última atividade {time(s.ultimo_acesso_em)} · ID {shortJti(s.jti)}</p></div>{!s.current&&!s.revogada_em&&<div className="sec-actions"><button style={btn} onClick={()=>revokeSession(s)}>Encerrar sessão</button>{s.usuario_id&&<button style={btn} onClick={()=>revokeUserSessions(s)}>Encerrar conta</button>}</div>}</div>)}{!sessions.length&&<p style={{color:'var(--adm-muted)'}}>Nenhuma sessão ativa encontrada.</p>}</div></div>}
+
+  {tab==='Auditoria'&&<div className="sec-card"><div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}><h2 style={{margin:0}}>Auditoria administrativa</h2><button style={btn} onClick={()=>loadTab('Auditoria')}><RefreshCw size={15}/> Atualizar</button></div><div className="sec-list" style={{marginTop:13}}>{audit.map(a=><div className="sec-row" key={a._id||a.id}><div><strong>{a.admin_email}</strong><p>{a.acao} · {a.recurso}{a.recurso_id?` · ${a.recurso_id}`:''} · {time(a.criado_em)}</p></div><span className="sec-badge">{a.ip||'IP —'}</span></div>)}{!audit.length&&<p style={{color:'var(--adm-muted)'}}>Nenhuma alteração administrativa registrada.</p>}</div></div>}
+
+  {tab==='Políticas'&&policyDraft&&<>
+   <div className="sec-card"><h2>Políticas de proteção</h2><div className="sec-form-grid"><div className="sec-field"><label>Resposta automática</label><select value={policyDraft.resposta_automatica||'observar'} onChange={e=>setPolicyDraft({...policyDraft,resposta_automatica:e.target.value})}><option value="observar">Somente observar</option><option value="alertar">Alertar</option><option value="proteger">Alertar e proteger</option></select></div><div className="sec-field"><label>Bloqueio automático de IP</label><input type="number" min="5" max="1440" value={policyDraft.bloqueio_ip_minutos||30} onChange={e=>setPolicyDraft({...policyDraft,bloqueio_ip_minutos:Number(e.target.value)})}/></div><div className="sec-field"><label>Retenção de eventos (dias)</label><input type="number" min="30" value={policyDraft.retencao_eventos_dias||180} onChange={e=>setPolicyDraft({...policyDraft,retencao_eventos_dias:Number(e.target.value)})}/></div><div className="sec-field"><label>Retenção de auditoria (dias)</label><input type="number" min="30" value={policyDraft.retencao_auditoria_dias||365} onChange={e=>setPolicyDraft({...policyDraft,retencao_auditoria_dias:Number(e.target.value)})}/></div></div><div className="sec-list" style={{marginTop:12}}>{[['mfa_admin_obrigatorio','Exigir 2FA para administradores'],['mfa_todos_obrigatorio','Exigir 2FA para todas as contas'],['step_up_critico','Confirmação reforçada em ações críticas']].map(([k,l])=><label className="sec-row" key={k} style={{cursor:'pointer'}}><span><strong>{l}</strong></span><input type="checkbox" checked={Boolean(policyDraft[k])} onChange={e=>setPolicyDraft({...policyDraft,[k]:e.target.checked})}/></label>)}<label className="sec-row" style={{cursor:'pointer'}}><span><strong>Swagger protegido em produção</strong><p>Ligado: somente administradores autorizados. Desligado: documentação da API fica indisponível em produção.</p></span><input type="checkbox" checked={policyDraft.swagger_protegido!==false} onChange={e=>setPolicyDraft({...policyDraft,swagger_protegido:e.target.checked})}/></label></div><div className="sec-form-grid" style={{marginTop:12}}><div className="sec-field"><label>Severidade mínima para alerta</label><select value={policyDraft.alertas?.severidade_minima||'alta'} onChange={e=>setPolicyDraft({...policyDraft,alertas:{...(policyDraft.alertas||{}),severidade_minima:e.target.value}})}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="critica">Crítica</option></select></div><div className="sec-field"><label>Cooldown de alertas (minutos)</label><input type="number" min="1" max="1440" value={policyDraft.alertas?.cooldown_minutos||15} onChange={e=>setPolicyDraft({...policyDraft,alertas:{...(policyDraft.alertas||{}),cooldown_minutos:Number(e.target.value)}})}/></div></div><div className="sec-list" style={{marginTop:12}}>{[['webhook_ativo','Webhook habilitado'],['telegram_ativo','Telegram habilitado'],['email_ativo','E-mail habilitado']].map(([k,l])=><label className="sec-row" key={k} style={{cursor:'pointer'}}><span><strong>{l}</strong></span><input type="checkbox" checked={Boolean(policyDraft.alertas?.[k]&&channels[k.replace('_ativo','')])} disabled={!channels[k.replace('_ativo','')]} onChange={e=>setPolicyDraft({...policyDraft,alertas:{...(policyDraft.alertas||{}),[k]:e.target.checked}})}/></label>)}</div><button style={{...primary,marginTop:13}} onClick={savePolicy} disabled={busy==='policy'}><LockKeyhole size={16}/> Salvar políticas</button></div>
+   <div className="sec-card"><h2>Alertas externos</h2><p style={{color:'var(--adm-muted)',fontSize:13,lineHeight:1.5}}>Segredos de Webhook, Telegram e SMTP ficam no cofre criptografado e nunca voltam para o navegador.</p><div className="sec-grid" style={{marginBottom:12}}>{[['Webhook',channels.webhook],['Telegram',channels.telegram],['E-mail',channels.email]].map(([l,v])=><div className="sec-stat" key={l}><small>{l}</small><b style={{fontSize:16,color:v?'var(--adm-success)':'var(--adm-muted)'}}>{v?'Configurado':'Não configurado'}</b></div>)}</div><div className="sec-form-grid"><div className="sec-field"><label>Webhook HTTPS</label><input placeholder="https://…" value={alertsForm.webhookUrl} onChange={e=>setAlertsForm({...alertsForm,webhookUrl:e.target.value})}/></div><div className="sec-field"><label>Telegram · Bot token</label><input type="password" placeholder="Novo token" value={alertsForm.telegramToken} onChange={e=>setAlertsForm({...alertsForm,telegramToken:e.target.value})}/></div><div className="sec-field"><label>Telegram · Chat ID</label><input placeholder="Chat ID" value={alertsForm.telegramChat} onChange={e=>setAlertsForm({...alertsForm,telegramChat:e.target.value})}/></div><div className="sec-field"><label>SMTP · Host</label><input placeholder="smtp.exemplo.com" value={alertsForm.smtpHost} onChange={e=>setAlertsForm({...alertsForm,smtpHost:e.target.value})}/></div><div className="sec-field"><label>SMTP · Usuário</label><input value={alertsForm.smtpUser} onChange={e=>setAlertsForm({...alertsForm,smtpUser:e.target.value})}/></div><div className="sec-field"><label>SMTP · Senha</label><input type="password" value={alertsForm.smtpPassword} onChange={e=>setAlertsForm({...alertsForm,smtpPassword:e.target.value})}/></div><div className="sec-field"><label>SMTP · Remetente</label><input value={alertsForm.smtpFrom} onChange={e=>setAlertsForm({...alertsForm,smtpFrom:e.target.value})}/></div><div className="sec-field"><label>E-mail que receberá os alertas</label><input type="email" placeholder="admin@exemplo.com" value={alertsForm.emailDestino} onChange={e=>setAlertsForm({...alertsForm,emailDestino:e.target.value})}/></div></div><div className="sec-actions" style={{marginTop:13}}><button style={primary} onClick={saveAlerts} disabled={busy==='alerts'}><Bell size={16}/> Salvar canal</button><button style={btn} onClick={testAlerts}>Enviar teste</button>{channels.webhook&&<button style={btn} onClick={()=>removeAlertChannel('webhook')}>Remover Webhook</button>}{channels.telegram&&<button style={btn} onClick={()=>removeAlertChannel('telegram')}>Remover Telegram</button>}{channels.email&&<button style={btn} onClick={()=>removeAlertChannel('email')}>Remover e-mail</button>}</div></div>
+  </>}
+
+  {incident&&<Modal title="Detalhes do incidente" onClose={()=>setIncident(null)}><div className="sec-list"><div className="sec-row"><div><span className="sec-badge" style={{color:severityColor[incident.severidade]}}>{incident.severidade}</span><h3 style={{margin:'9px 0 3px'}}>{incident.mensagem}</h3><p>{incident.ocorrencias||1} ocorrência(s) · primeira {time(incident.primeira_ocorrencia_em||incident.criado_em)} · última {time(incident.ultima_ocorrencia_em||incident.criado_em)}</p></div></div><div className="sec-form-grid"><div className="sec-field"><label>IP</label><div className="sec-code">{incident.ip||'—'}</div></div><div className="sec-field"><label>Usuário</label><div className="sec-code">{incident.usuario_email||'—'}</div></div><div className="sec-field"><label>Rota</label><div className="sec-code">{incident.rota||'—'}</div></div><div className="sec-field"><label>Request ID</label><div className="sec-code">{incident.request_id||'—'}</div></div></div><div className="sec-field"><label>Observação</label><textarea value={incidentNote} onChange={e=>setIncidentNote(e.target.value)} placeholder="O que foi investigado?"/></div><div className="sec-field"><label>Ação tomada</label><input value={incidentAction} onChange={e=>setIncidentAction(e.target.value)} placeholder="Ex.: sessão revogada, IP analisado…"/></div><div className="sec-actions"><button onClick={()=>changeIncident('investigando')}>Investigar</button><button onClick={()=>changeIncident('resolvido')} style={primary}>Resolver</button><button onClick={()=>changeIncident('ignorado')}>Ignorar</button><button onClick={()=>downloadForensic(incident)}><Download size={15}/> Relatório forense</button></div></div></Modal>}
+
+  {step&&<Modal title={step} onClose={closeStep}><p style={{color:'var(--adm-muted)',fontSize:13,lineHeight:1.5}}>Ações sensíveis exigem confirmação recente da sua identidade. A confirmação vale somente por alguns minutos.</p><div className="sec-field"><label>Senha atual</label><input type="password" value={stepPassword} onChange={e=>setStepPassword(e.target.value)} autoFocus/></div><div className="sec-field" style={{marginTop:10}}><label>Código 2FA {mfa?.enabled?'':'(se estiver ativo)'}</label><input inputMode="numeric" value={stepCode} onChange={e=>setStepCode(e.target.value)} placeholder="000000"/></div><button style={{...primary,width:'100%',marginTop:14}} onClick={confirmStep} disabled={busy==='step'}>{busy==='step'?'Confirmando…':'Confirmar identidade'}</button></Modal>}
+
+  {mfaSetup&&<Modal title="Ativar autenticação em dois fatores" onClose={()=>setMfaSetup(null)}><p style={{fontSize:13,color:'var(--adm-muted)',lineHeight:1.5}}>Escaneie o QR no seu autenticador ou informe a chave manualmente. Depois confirme com o código de 6 dígitos.</p>{mfaSetup.qr&&<div style={{display:'grid',placeItems:'center',padding:10}}><img src={mfaSetup.qr} alt="QR Code do autenticador" style={{width:220,maxWidth:'100%',borderRadius:12}}/></div>}<div className="sec-field"><label>Chave manual</label><div className="sec-code">{mfaSetup.secret}</div></div><div className="sec-field" style={{marginTop:10}}><label>Código do autenticador</label><input inputMode="numeric" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} placeholder="000000"/></div><button style={{...primary,width:'100%',marginTop:14}} onClick={confirmMfa}>Confirmar e ativar</button></Modal>}
+
+  {mfaDisable&&<Modal title="Desativar autenticação em dois fatores" onClose={()=>setMfaDisable(null)}><p style={{fontSize:13,color:'var(--adm-muted)',lineHeight:1.5}}>Esta ação revoga as sessões atuais. Confirme sua senha e um código válido do autenticador.</p><div className="sec-field"><label>Senha atual</label><input type="password" value={mfaDisable.senha} onChange={e=>setMfaDisable({...mfaDisable,senha:e.target.value})}/></div><div className="sec-field" style={{marginTop:10}}><label>Código 2FA</label><input inputMode="numeric" value={mfaDisable.codigo} onChange={e=>setMfaDisable({...mfaDisable,codigo:e.target.value})} placeholder="000000"/></div><button style={{...primary,width:'100%',marginTop:14,background:'var(--adm-red)',borderColor:'var(--adm-red)'}} onClick={confirmDisableMfa} disabled={busy==='mfa-disable'}>{busy==='mfa-disable'?'Desativando…':'Desativar 2FA'}</button></Modal>}
+
+  {!!recovery.length&&<Modal title="Códigos de recuperação" onClose={()=>setRecovery([])}><div style={{padding:11,borderRadius:10,background:'color-mix(in srgb,var(--adm-amber) 10%,transparent)',fontSize:13,lineHeight:1.5}}><AlertTriangle size={16}/> Salve estes códigos agora. Cada código funciona uma única vez e não será exibido novamente.</div><div className="sec-reco" style={{marginTop:12}}>{recovery.map(c=><code key={c}>{c}</code>)}</div><button style={{...primary,width:'100%',marginTop:14}} onClick={()=>setRecovery([])}><CheckCircle2 size={16}/> Já salvei</button></Modal>}
+ </div>
 }

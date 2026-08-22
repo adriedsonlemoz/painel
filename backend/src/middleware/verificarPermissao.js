@@ -1,29 +1,41 @@
 /**
- * Middleware centralizado de verificação de permissões.
- *
- * Ordem de verificação:
- *   1. role === 'superadmin'  → passa sempre (legado para o 1º admin criado no setup)
- *   2. perfil_id com '*'      → passa sempre (Superadmin via perfil)
- *   3. perfil_id com a permissão específica → passa
- *   4. Qualquer outro         → 403
- *
- * NOTA: o bypass de role === 'admin' foi REMOVIDO intencionalmente.
- * Todos os usuários devem ter um perfil_id atribuído com permissões explícitas.
- * O role 'superadmin' é mantido apenas para o primeiro usuário criado pelo setup.
+ * Verificação centralizada de permissões + política MFA administrativa.
+ * A Central de Segurança fica acessível mesmo quando o MFA obrigatório foi
+ * habilitado, para que o próprio administrador consiga concluir o cadastro.
  */
+import SecurityPolicy from '../models/SecurityPolicy.js'
+
+let policyCache = { at: 0, value: null }
+async function currentPolicy() {
+  if (Date.now() - policyCache.at < 30_000 && policyCache.value) return policyCache.value
+  const value = await SecurityPolicy.findOne({ chave:'default' }).select('mfa_admin_obrigatorio mfa_todos_obrigatorio').lean().catch(() => null)
+  policyCache = { at:Date.now(), value:value || {} }
+  return policyCache.value
+}
+
 export function verificarPermissao(permissao) {
-  return (req, res, next) => {
-    const u = req.usuario
+  return async (req, res, next) => {
+    try {
+      const u = req.usuario
+      if (!u) return res.status(401).json({ erro: 'Não autenticado.' })
 
-    if (!u) return res.status(401).json({ erro: 'Não autenticado.' })
+      // Quando a política exige MFA, somente a própria Central de Segurança
+      // permanece acessível para permitir o cadastro do autenticador.
+      if (permissao !== 'seguranca.gerenciar' && !u.two_factor_enabled) {
+        const policy = await currentPolicy()
+        if (policy?.mfa_admin_obrigatorio || policy?.mfa_todos_obrigatorio) {
+          return res.status(403).json({
+            erro:'A política de segurança exige autenticação em dois fatores para acessar esta área.',
+            codigo:'MFA_SETUP_REQUIRED',
+            acao:'/admin/seguranca',
+          })
+        }
+      }
 
-    // Superadmin via role legado (1º usuário criado pelo setup)
-    if (u.role === 'superadmin') return next()
-
-    // Sistema de perfis
-    const perms = u.perfil_id?.permissoes || []
-    if (perms.includes('*') || perms.includes(permissao)) return next()
-
-    return res.status(403).json({ erro: 'Permissão insuficiente.' })
+      if (u.role === 'superadmin') return next()
+      const perms = u.perfil_id?.permissoes || []
+      if (perms.includes('*') || perms.includes(permissao)) return next()
+      return res.status(403).json({ erro: 'Permissão insuficiente.' })
+    } catch (error) { next(error) }
   }
 }

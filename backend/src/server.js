@@ -35,6 +35,10 @@ import { swaggerSpec }     from './config/swagger.js'
 import { logger }          from './utils/logger.js'
 import { requestIdMiddleware } from './middleware/requestId.js'
 import { securityMonitor } from './middleware/securityMonitor.js'
+import { csrfProtection } from './middleware/csrf.js'
+import { getSecurityPolicy } from './services/securityService.js'
+import { autenticar } from './middleware/auth.js'
+import { verificarPermissao } from './middleware/verificarPermissao.js'
 import { metricasMiddleware }  from './middleware/metricas.js'
 // FIX: scheduler unificado — usa rssJob.js (node-cron) em vez de rssScheduler.js
 // Isso evita dois schedulers paralelos e garante que o painel admin reflita o estado real.
@@ -191,6 +195,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
+app.use(csrfProtection)
 
 // ─── Modo manutenção do atualizador ───────────────────────────
 app.get('/api/maintenance/status', async (_req, res) => {
@@ -226,7 +231,7 @@ app.get('/api/maintenance/status', async (_req, res) => {
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next()
   const livres = [
-    '/api/health', '/api/setup', '/api/docs', '/api/maintenance/status',
+    '/api/health', '/api/setup', '/api/maintenance/status',
   ]
   if (livres.some(prefix => req.path.startsWith(prefix))) return next()
   if (mongoose.connection.readyState !== 1) {
@@ -313,12 +318,21 @@ app.use('/api/health', healthRoutes)
 app.use('/metrics', metricsRoutes)
 
 // ─── #13 — Swagger UI ────────────────────────────────────────
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+// Em produção a documentação da superfície da API é administrativa; em
+// desenvolvimento continua aberta para facilitar integração local.
+const swaggerGuard = async (req, res, next) => {
+  if (process.env.NODE_ENV !== 'production') return next()
+  try {
+    const policy = await getSecurityPolicy()
+    if (policy.swagger_protegido === false) return res.status(404).json({ erro: 'Documentação da API desativada em produção.' })
+    return autenticar(req, res, () => verificarPermissao('seguranca.gerenciar')(req, res, next))
+  } catch (error) { return next(error) }
+}
+app.use('/api/docs', swaggerGuard, swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'AL Sistemas API Docs',
-  swaggerOptions: { persistAuthorization: true },
+  swaggerOptions: { persistAuthorization: false },
 }))
-// Endpoint que retorna o spec em JSON (útil para geração de clientes)
-app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec))
+app.get('/api/docs.json', swaggerGuard, (_req, res) => res.json(swaggerSpec))
 
 // ─── Erro centralizado ────────────────────────────────────────
 app.use(tratarErros)

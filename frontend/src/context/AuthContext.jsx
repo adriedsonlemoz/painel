@@ -53,6 +53,18 @@ export function AuthProvider({ children }) {
   async function login(email, senha, manterConectado = false) {
     const { data, error } = await authService.login(email, senha, manterConectado)
     if (error) throw error
+    if (data?.requires2fa) return data
+    checked.current = true
+    setSessionChecked(true)
+    setSessionError(null)
+    setUser(data.user)
+    setAuthTransport(data?.auth?.transport || 'cookie')
+    return data
+  }
+
+  async function login2fa(challengeId, codigo, manterConectado = false) {
+    const { data, error } = await authService.login2fa(challengeId, codigo, manterConectado)
+    if (error) throw error
     checked.current = true
     setSessionChecked(true)
     setSessionError(null)
@@ -85,7 +97,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, sessionChecked, authTransport, sessionError, ensureSession, login, logout, temPermissao, podeAcessarAdmin }}>
+    <AuthContext.Provider value={{ user, loading, sessionChecked, authTransport, sessionError, ensureSession, login, login2fa, logout, temPermissao, podeAcessarAdmin }}>
       {children}
     </AuthContext.Provider>
   )

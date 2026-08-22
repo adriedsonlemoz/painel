@@ -1,3 +1,27 @@
+# Revisão de segurança — 1.0.156
+
+## Controles implementados
+
+- **Identidade:** 2FA TOTP, códigos de recuperação com hash, sessão por `jti`, novo dispositivo/IP e revogação individual/global.
+- **Sessão web:** JWT continua assinado pelo segredo persistente; requisições mutáveis autenticadas por cookie usam token CSRF vinculado ao JWT e validação Origin/Referer. Sessões anteriores à 1.0.156 permanecem compatíveis pela validação de origem até novo login.
+- **Ações críticas:** step-up com senha e 2FA quando ativo; token temporário de 10 minutos vinculado à sessão. Credenciais, backups, usuários/perfis, sessões, alteração da própria senha e variáveis de produção foram cobertos. O frontend usa modal próprio, sem diálogos nativos do navegador.
+- **Incidentes:** agregação por fingerprint, estados de investigação, responsável, observação, ação tomada e relatório forense.
+- **Detecção:** janelas HTTP em Redis/fallback local, enumeração de rotas sensíveis, credential stuffing, ataque distribuído a uma conta, novos dispositivos/IPs e rajadas de ações sensíveis.
+- **Resposta:** modos observar/alertar/proteger. Bloqueio automático não é disparado por qualquer evento alto; somente eventos marcados explicitamente como bloqueáveis podem bloquear IP.
+- **Alertas:** Webhook, Telegram e SMTP/e-mail com segredo no cofre, severidade mínima e cooldown. Webhooks exigem HTTPS e rejeitam hosts locais/privados literais.
+- **Supply chain:** scanner de segredos antes de publicação, auditoria de dependências e workflow GitHub Actions para push/PR.
+- **Exposição:** Swagger pode ficar protegido por autenticação/permissão ou totalmente desativado em produção; respostas de Segurança não devolvem segredos TOTP, SMTP, Telegram ou Webhook.
+- **Retenção:** `SecurityEvent`, `SecuritySession` e `AuditLog` possuem expiração/TTL; política define os prazos de eventos e auditoria.
+
+## Limites conhecidos
+
+- Redis é recomendado quando houver mais de uma instância. Sem Redis, janelas de detecção e bloqueios temporários vivem apenas no processo atual.
+- A auditoria de dependências no painel depende de `package-lock.json` disponível no runtime; o workflow de CI instala as dependências antes de rodar `npm audit` e cobre esse cenário.
+- Detecção de localização trabalha com IP/dispositivo observado pelo backend; não é feita geolocalização externa do usuário.
+- Passkeys/WebAuthn permanecem evolução futura; a 1.0.156 entrega TOTP + recuperação.
+
+---
+
 # Revisão geral de segurança — AL Sistemas
 
 ## Sessão e cold start — 1.0.150
@@ -37,18 +61,9 @@
 - Auditoria administrativa e IDs de requisição.
 - Uploads e operações administrativas separados em rotas próprias.
 
-## Prioridade alta para a próxima etapa
+## Pendências futuras depois da 1.0.156
 
-1. Implementar autenticação em dois fatores com códigos de recuperação.
-2. Criar tela de sessões/dispositivos e revogação individual.
-3. Rotacionar JWT por sessão e registrar `jti` para revogação imediata.
-4. Adicionar proteção CSRF explícita para cookies cross-site.
-5. Aplicar permissões específicas em todas as rotas GitHub, projetos e infraestrutura; autenticação isolada é insuficiente.
-6. Desativar Swagger em produção ou restringi-lo ao superadmin.
-7. Exigir `METRICS_TOKEN` em produção, sem modo opcional.
-8. Adicionar política CSP ajustada ao frontend e remover origens desnecessárias.
-9. Definir retenção automática para logs de erro, auditoria e segurança.
-10. Incluir varredura de dependências e segredos no GitHub Actions.
+As prioridades históricas de 2FA, sessões por `jti`, CSRF, Swagger protegido, retenção e varredura de supply chain foram absorvidas pela 1.0.156. As evoluções que continuam deliberadamente futuras são **Passkeys/WebAuthn**, geolocalização de IP opcional e correlação avançada entre múltiplas instâncias quando Redis não estiver disponível. A política CSP continua fornecida pelo Helmet e deve permanecer alinhada às origens realmente usadas em produção.
 
 ## Proposta do módulo antifurto de dados
 

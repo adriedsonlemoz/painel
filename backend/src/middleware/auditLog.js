@@ -5,6 +5,7 @@
  */
 import AuditLog from '../models/AuditLog.js'
 import { logger } from '../utils/logger.js'
+import SecurityPolicy from '../models/SecurityPolicy.js'
 
 /**
  * Retorna middleware de audit log para um recurso específico.
@@ -22,6 +23,8 @@ export function auditLog(recurso) {
         const recursoId = req.params?.id || body?.id || body?._id || null
 
         try {
+          const policy = await SecurityPolicy.findOne({ chave:'default' }).select('retencao_auditoria_dias').lean().catch(() => null)
+          const retentionDays = Math.max(30, Number(policy?.retencao_auditoria_dias || 365))
           await AuditLog.create({
             admin_id:    req.usuario._id,
             admin_email: req.usuario.email,
@@ -31,6 +34,7 @@ export function auditLog(recurso) {
             payload:     sanitizarPayload(req.body),
             ip:          req.ip,
             request_id:  req.requestId || null,
+            expira_em:    new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000),
           })
         } catch (err) {
           // Falha no audit log não deve derrubar a resposta principal

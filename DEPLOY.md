@@ -1,3 +1,15 @@
+## Segurança — 1.0.156+
+
+A Central de Segurança depende do MongoDB para eventos, sessões e políticas. **Redis continua opcional**, mas quando configurado passa a coordenar janelas de detecção, cooldown de alertas e bloqueios temporários de IP entre instâncias. Sem Redis, o backend usa fallback local por processo.
+
+Para alertas externos, configure Webhook, Telegram ou SMTP diretamente em **Admin → Segurança → Políticas**; os segredos são gravados no cofre do AL Sistemas, não em variáveis públicas do frontend. O SMTP requer a dependência `nodemailer`, instalada pelo `npm install` normal do backend.
+
+A documentação Swagger em produção não é pública: `/api/docs` e `/api/docs.json` exigem sessão administrativa e `seguranca.gerenciar`. Operações críticas podem responder `428 STEP_UP_REQUIRED`; o frontend oficial solicita senha e, quando habilitado, código 2FA, e repete a operação com um token de confirmação de curta duração.
+
+O workflow `.github/workflows/security-scan.yml` instala as dependências de backend/frontend, executa `npm audit --omit=dev --audit-level=high` e faz uma varredura de padrões de segredos de alta confiança. A varredura do atualizador também roda antes de R2/GitHub e interrompe o fluxo ao encontrar segredo crítico.
+
+O projeto adiciona `qrcode` e `nodemailer` ao backend. Após atualizar, execute o build/deploy normal para que o provedor instale as novas dependências.
+
 ## Infraestrutura unificada — 1.0.155+
 
 O menu administrativo expõe uma única **Infraestrutura**. A URL antiga `/admin/ambientes` redireciona para `/admin/sistema?tab=ambiente`, portanto favoritos antigos continuam válidos. As consultas de saúde usam `/api/infraestrutura/sistema/metricas` e `/api/infraestrutura/plataformas/compatibilidade`; perfis operacionais podem acessá-las com `sistema.gerenciar`, enquanto as rotas que alteram configurações continuam exigindo `configuracoes.gerenciar`.

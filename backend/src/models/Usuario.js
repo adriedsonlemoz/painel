@@ -16,6 +16,11 @@ const usuarioSchema = new mongoose.Schema({
   senha_alterada_em:{ type: Date,    default: null },
   sessao_versao:    { type: Number,  default: 0 },
 
+  // ── MFA/TOTP ─────────────────────────────────────────────────────────────
+  two_factor_enabled: { type: Boolean, default: false },
+  two_factor_confirmed_at: { type: Date, default: null },
+  two_factor_recovery_hashes: { type: [String], default: [], select: false },
+
   // ── Recuperação de senha ──────────────────────────────────────────────────
   token_reset_senha:  { type: String, default: null, select: false },
   token_reset_expira: { type: Date,   default: null, select: false },
@@ -51,6 +56,7 @@ usuarioSchema.set('toJSON', {
     delete ret.senha
     delete ret.token_reset_senha
     delete ret.token_reset_expira
+    delete ret.two_factor_recovery_hashes
     return ret
   },
 })

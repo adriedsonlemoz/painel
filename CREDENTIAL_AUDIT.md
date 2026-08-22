@@ -1,3 +1,9 @@
+## Segurança 1.0.156 — credenciais adicionais
+
+Os canais de alerta usam três IDs internos no mesmo cofre criptografado: `security-alert-webhook`, `security-alert-telegram` e `security-alert-email`. Segredos TOTP usam `security-totp-<usuarioId>`; o cadastro temporário usa `security-totp-pending-<usuarioId>`. Esses valores nunca fazem parte de `/status`, auditoria ou resposta de leitura da Central de Segurança.
+
+Revelação, remoção e exportação de credenciais podem exigir step-up conforme a política. Ações de revelação são auditadas sem persistir o valor revelado.
+
 # Auditoria de credenciais e segredos — 1.0.149
 
 ## Escopo

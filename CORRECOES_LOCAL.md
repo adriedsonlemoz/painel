@@ -1,3 +1,12 @@
+## 1.0.156 — Segurança
+
+- Central de Segurança refeita com score explicável, incidentes, sessões, auditoria e políticas.
+- 2FA TOTP, códigos de recuperação, sessões `jti`, CSRF e step-up implementados.
+- Contadores distribuídos, correlação de ataques, alertas externos e bloqueio controlado de IP implementados.
+- Scanner de segredos, bloqueio de atualização, auditoria de dependências e workflow de segurança adicionados.
+- Retenção e AuditLog corrigidos; ações críticas recebem confirmação reforçada.
+- Nenhuma imagem foi alterada.
+
 ## 1.0.155 — Infraestrutura e leitura no celular
 
 - `Ambientes` foi incorporado à Central de `Infraestrutura`; a URL antiga redireciona para a aba correspondente.

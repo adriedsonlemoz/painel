@@ -1,4 +1,4 @@
-import { api, setSessionToken, clearSessionToken, authMode, probeCookieSession, persistSessionToken, restorePersistentSession, clearPersistentSession } from './http.js'
+import { api, setSessionToken, clearSessionToken, authMode, probeCookieSession, persistSessionToken, restorePersistentSession, clearPersistentSession, setCsrfToken } from './http.js'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -26,17 +26,25 @@ async function fetchSessionResilient() {
 export const authService = {
   async login(email, senha, manterConectado = false) {
     const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, senha, manter_conectado: manterConectado === true }) })
-    // Em Vercel → Render, navegadores podem bloquear o cookie de terceiro.
-    // O backend fornece um token apenas para esse cenário; em Termux/VPS o
-    // cookie HttpOnly continua sendo o transporte principal e nada muda.
+    if (data?.requires_2fa) {
+      clearSessionToken()
+      return { data: { requires2fa: true, challengeId: data.challenge_id, message: data.mensagem }, error: null }
+    }
+    return this._finalizeLogin(data, manterConectado)
+  },
+  async login2fa(challengeId, codigo, manterConectado = false) {
+    const data = await api('/auth/login/2fa', { method:'POST', body: JSON.stringify({ challenge_id: challengeId, codigo }) })
+    return this._finalizeLogin(data, manterConectado)
+  },
+  async _finalizeLogin(data, manterConectado = false) {
+    if (data.csrf_token) setCsrfToken(data.csrf_token)
     if (data.access_token) {
-      // Mantém o Bearer apenas se o navegador realmente não aceitar o cookie
-      // cross-site. Assim browsers permissivos continuam no HttpOnly e evitam
-      // preflights extras; browsers restritivos ficam no fallback cloud.
       setSessionToken(data.access_token, 'bearer-fallback')
       const cookieOk = await probeCookieSession().catch(() => false)
       if (cookieOk) {
         clearSessionToken()
+        // clearSessionToken também limpa CSRF; restaura o token da sessão cookie.
+        if (data.csrf_token) setCsrfToken(data.csrf_token)
         await clearPersistentSession()
         data.auth = { ...(data.auth || {}), transport:'cookie-cross-origin', bearerFallback:false }
       } else {
@@ -44,13 +52,18 @@ export const authService = {
         if (manterConectado) {
           persistent = await persistSessionToken(data.access_token)
           setSessionToken(data.access_token, persistent ? 'bearer-persistent' : 'bearer-fallback')
+          if (data.csrf_token) setCsrfToken(data.csrf_token)
         } else {
           await clearPersistentSession()
         }
         data.auth = { ...(data.auth || {}), transport:persistent ? 'bearer-persistent' : 'bearer-fallback', bearerFallback:true, persistent }
       }
-    } else { clearSessionToken(); await clearPersistentSession() }
-    return { data: { user: data.usuario, auth: data.auth || { transport: authMode() } }, error: null }
+    } else {
+      clearSessionToken()
+      if (data.csrf_token) setCsrfToken(data.csrf_token)
+      await clearPersistentSession()
+    }
+    return { data: { user: data.usuario, auth: data.auth || { transport: authMode() }, csrfToken:data.csrf_token || '' }, error: null }
   },
   async logout() {
     await api('/auth/logout', { method: 'POST' }).catch(() => {})
@@ -62,6 +75,7 @@ export const authService = {
     if (restore) await restorePersistentSession()
     try {
       const data = await fetchSessionResilient()
+      if (data.csrf_token) setCsrfToken(data.csrf_token)
       return { data: { session: { user: data.usuario }, auth: data.auth || { transport: authMode() } }, error: null }
     } catch (error) {
       // Só apaga uma sessão persistente quando o backend confirmou que ela é
@@ -89,4 +103,9 @@ export const authService = {
   async redefinirSenha(token, senha) {
     return api('/auth/redefinir-senha', { method: 'POST', body: JSON.stringify({ token, senha }) })
   },
+  twoFactorStatus: () => api('/auth/2fa/status'),
+  twoFactorSetup: (stepToken='') => api('/auth/2fa/setup', { method:'POST', headers:stepToken?{'X-Step-Up-Token':stepToken}:{}}),
+  twoFactorConfirm: (codigo,stepToken='') => api('/auth/2fa/confirm', { method:'POST', headers:stepToken?{'X-Step-Up-Token':stepToken}:{}, body:JSON.stringify({codigo}) }),
+  twoFactorDisable: (senha,codigo) => api('/auth/2fa/disable', { method:'POST', body:JSON.stringify({senha,codigo}) }),
+  stepUp: (senha,codigo='') => api('/auth/step-up', { method:'POST', body:JSON.stringify({senha,codigo}) }),
 }

@@ -1,5 +1,18 @@
 # ⚙️ AL Sistemas — Painel de Gerenciamento
 
+## 🛡️ Central de Segurança — 1.0.156
+
+O módulo **Segurança** foi reconstruído como uma central operacional com **Visão geral, Incidentes, Sessões, Auditoria e Políticas**. O score de 0–100 agora é composto por Identidade, Credenciais, Aplicação, Monitoramento e Dados, com recomendações que explicam exatamente onde há perda de pontos.
+
+A autenticação ganhou **TOTP/2FA**, códigos de recuperação, sessões individuais por `jti`, detecção de novo dispositivo/IP, revogação seletiva e confirmação reforçada (*step-up*) para ações críticas. Operações por cookie usam proteção CSRF vinculada à sessão; Swagger em produção fica atrás de autenticação e permissão administrativa.
+O step-up usa um modal próprio do painel (sem prompts nativos), contas obrigadas a ativar MFA têm uma tela de autoatendimento acessível e o administrador pode optar por proteger ou desativar totalmente o Swagger em produção. Webhooks de segurança exigem HTTPS e passam por validação contra destinos locais/privados literais.
+
+O monitor de ataques utiliza Redis quando disponível e fallback local, agrupa incidentes por fingerprint, correlaciona tentativas distribuídas de login e *credential stuffing*, registra resolução/responsável/observação/ação tomada e permite exportar um relatório forense. O modo automático pode apenas observar, alertar ou proteger, com bloqueio temporário de IP somente para padrões explicitamente classificados como bloqueáveis.
+
+Alertas críticos podem sair por **Webhook, Telegram ou SMTP/e-mail**, com segredos armazenados no cofre. A Central também executa varredura de segredos e auditoria de dependências; pacotes de atualização com segredo crítico são bloqueados antes de R2/GitHub. Um workflow `Security Scan` executa verificações em push/PR. Retenção de incidentes e auditoria é configurável.
+
+Ações como revelar/remover credenciais, exportar configurações, restaurar/baixar backup, alterar usuários/perfis, revogar sessões e modificar variáveis Vercel/Render exigem confirmação recente quando a política de *step-up* está ativa.
+
 ## 🧭 Infraestrutura unificada e legibilidade — 1.0.155
 
 **Ambientes** e **Infraestrutura** agora formam uma única Central de Infraestrutura com quatro áreas: **Visão geral**, **Servidor**, **Ambiente** e **Manutenção**. O resumo cruza o estado real da API com o diagnóstico de compatibilidade para MongoDB, GitHub, Vercel, Render, R2, CORS e IA; a tela não infere mais configuração a partir de campos que o endpoint de métricas não fornece. As métricas essenciais permanecem visíveis e os dados de depuração de baixo nível ficam em **Detalhes avançados**.
